@@ -174,6 +174,14 @@ standalone timestamps remain readable; reservations and activity commit atomical
 Eviction can still need two writes, so the conservative 37-write bound and the
 87 µ$ base price are unchanged.
 
+Repeated refusals for an unchanged balance/day/month pause now write no additional
+job settings, runtime, log or alarm rows. Each pause transition commits its one log,
+settings and budget-reset wakeup atomically. Budget-reset alarms publish the resumed
+runtime and retain the reset deadline until publication and settings succeed, so
+redelivery can finish a failed reset. Configuration replay also skips unchanged
+settings while retaining the last completed outcome. These reduce repeated or
+administrative work; the conservative paid-run bound and 87 µ$ price are unchanged.
+
 ## Verified provider sources
 
 - [Workers](https://developers.cloudflare.com/workers/platform/pricing/)

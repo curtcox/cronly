@@ -101,4 +101,13 @@ assert.equal((await api('/api/account')).balance_microdollars, account.balance_m
 assert.equal((await api('/api/costs')).total_microdollars, spent);
 await api('/api/dev/deposit', 'POST', { amount_microdollars: 1 }, archiveId(0));
 assert.deepEqual((await api('/api/transactions')).items, archived);
-console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, one settled activation across three jobs sharing an action version, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
+await api('/api/jobs/no-budget', 'PUT', { action: 'http', cron: null, budget: { day: 0 } });
+for (let index = 0; index < 3; index++) assert.equal((await api('/api/jobs/no-budget/run', 'POST', {}, `refused-${index}`, 402)).code, 'budget_day');
+const pauses = (await api('/api/runs?job=no-budget')).items;
+assert.equal(pauses.length, 1); assert.equal(pauses[0].status, 'paused'); assert.equal(pauses[0].cost_microdollars, 0);
+assert.equal((await api('/api/account')).job_runtime['no-budget'].paused, 'budget_day');
+await api('/api/actions/http', 'PUT', { url: 'https://example.com/edited' });
+const synced = await api('/api/account');
+for (const name of ['http', 'js', 'gateway']) assert.equal(synced.job_runtime[name].last_outcome, 'success');
+assert.equal(synced.job_runtime.blocked.last_outcome, 'failure'); assert.equal(synced.held_microdollars, 0);
+console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, one settled activation across three jobs sharing an action version, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries, one log for repeated budget refusals and preserved outcomes after configuration sync. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');

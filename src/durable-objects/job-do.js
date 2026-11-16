@@ -106,13 +106,19 @@ export class JobDO {
       reservation = await rpc(this.env.ACCOUNTS, settings.account, 'prepare-run', { ...args, name: settings.name, account: settings.account, test_action: settings.job.test_action });
     } catch (error) {
       if (error.status === 402 && ['insufficient_balance', 'budget_day', 'budget_month'].includes(error.code)) {
+        const prior = JSON.stringify(settings);
         settings.paused = error.code;
+        delete settings.resume_at;
         if (error.code === 'budget_day') settings.resume_at = Date.parse(new Date(Date.now() + DAY).toISOString().slice(0, 10));
         if (error.code === 'budget_month') { const date = new Date(); settings.resume_at = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1); }
-        await this.storage.put('settings', settings); await this.publish(settings);
-        const pausedRun = { id: args.id, status: 'paused', reason: error.code, created_at: Date.now(), cost_microdollars: 0, job: settings.name };
-        await this.history(pausedRun);
+        // One durable log records each pause transition. Repeated unfunded
+        // attempts must not keep writing history for an account that cannot pay.
+        if (JSON.stringify(settings) !== prior) {
+          const pausedRun = { id: args.id, status: 'paused', reason: error.code, created_at: Date.now(), cost_microdollars: 0, job: settings.name };
+          await this.history(pausedRun, false, settings);
+        }
         await this.arm();
+        await this.publish(settings);
       }
       throw error;
     }
@@ -210,13 +216,14 @@ export class JobDO {
       summary.pending = { expires_at, reserved_microdollars, attempt, key_id, enqueued };
     }
     const wake = summary.pending && !summary.pending.enqueued;
-    if (finalized || wake) await this.storage.transaction(async tx => {
+    if (finalized || wake || settings) await this.storage.transaction(async tx => {
       await tx.put(`history:${id}`, summary);
       if (settings) await tx.put('settings', settings);
-      // A pending outbox must never commit without a wakeup. The enqueue can fail
-      // or this object can restart immediately after this transaction commits.
-      if (wake) {
-        const next = Date.now() + 1000; const alarm = await tx.getAlarm();
+      // Pending outboxes and budget pauses commit with their wakeups, so a failed
+      // enqueue or restart cannot strand dispatch or the next budget window.
+      const next = wake ? Date.now() + 1000 : settings?.resume_at;
+      if (next) {
+        const alarm = await tx.getAlarm();
         if (alarm === null || alarm > next) await tx.setAlarm(next);
       }
     });
@@ -242,7 +249,12 @@ export class JobDO {
       for (const summary of await this.summaries()) if (summary.retry?.dispatch) await this.dispatchRetry(summary.id);
       // Expiry reporting can update the outcome or pause a refused retry.
       settings = await this.storage.get('settings');
-      if (settings.resume_at && settings.resume_at <= Date.now()) { settings.paused = null; settings.resume_at = null; await this.storage.put('settings', settings); }
+      if (settings.resume_at && settings.resume_at <= Date.now()) {
+        // Publish first: a failed cross-object update must leave the deadline
+        // durable so alarm redelivery can retry the transition.
+        const resumed = { ...settings, paused: null, resume_at: null };
+        await this.publish(resumed); await this.storage.put('settings', resumed); settings = resumed;
+      }
       const due = settings.next_fire;
       if (!settings.paused && settings.job?.enabled && due && due <= Date.now()) {
         // Persist advancement after reserving/enqueuing; deterministic IDs survive alarm retries.

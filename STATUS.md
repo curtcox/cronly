@@ -74,7 +74,7 @@ disagrees with it, this file wins and the other document is stale.
 | S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ✅ | Atomic versioned keyring, legacy reads, held per-secret re-encryption, edit/delete conflict protection, audit, scoped CLI and CI wiring verified. Persisted local Worker migrated v1 → v2 and executed a redacted JS run with v1 retired. [Operator procedure](docs/ops/secret-rotation.md). §3.3. |
 | S2 | Charge measured JS CPU instead of the configured limit | code | ⬜ | §3.4; needs per-invocation CPU data. |
 | S3 | Recalibrate prices from a month of real Cloudflare and Anthropic bills | ops/code | ⬜ | `docs/business/pricing.md`. |
-| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budgets, active money summaries and ledger buffering reduce ordinary writes; unchanged alarms/runtime indexes and completion settings skip writes. Transactional reads/changes skip transient holds. Ledger pages retain legacy cursors and permanent receipts. Small durable reservations share the balance row; large/legacy snapshots stay standalone. Finalization reuses the durable staged log. Cooldowns now share the bounded recent-job index, saving a write when switching jobs; evicted cooldowns remain standalone. The 144-path audit includes ledger archival, compact/rollover/large-period summaries and unfunded-retry pauses: conservative 37 writes, 30 DO requests/five Worker invocations at 87 µ$/run after rounded floors. Further worst-case reductions remain. [Cost audit](docs/business/pricing.md). |
+| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budgets, active money summaries and ledger buffering reduce ordinary writes; unchanged alarms/runtime indexes and completion settings skip writes. Transactional reads/changes skip transient holds. Ledger pages retain legacy cursors and permanent receipts. Small durable reservations share the balance row; large/legacy snapshots stay standalone. Finalization reuses the durable staged log. Cooldowns now share the bounded recent-job index, saving a write when switching jobs; evicted cooldowns remain standalone. Repeated balance/budget refusals skip writes after one atomic pause/log/reset-wakeup transition; unchanged configuration replay skips settings writes. The 144-path audit includes ledger archival, compact/rollover/large-period summaries and unfunded-retry pauses: conservative 37 writes, 30 DO requests/five Worker invocations at 87 µ$/run after rounded floors. Further worst-case reductions remain. [Cost audit](docs/business/pricing.md). |
 
 ## Backlog
 
@@ -433,3 +433,19 @@ calendar days of billed counts rather than sampling retained logs.
   a failed runtime publication without losing the last outcome.
 - Lint and all 317 tests pass, including cold replay, failed configuration lookup and
   failed runtime publication. Live launch acceptance remains under L9–L14.
+
+## L5/S4 refusal pauses and budget resets — 2026-11-16
+
+- Each balance/day/month pause transition writes one log; repeated refusals with the
+  same reason/window write no settings, runtime, log or alarm rows, including after
+  a cold restart. Budget pauses commit their settings, log and reset wakeup together.
+- Budget-reset alarms publish the resumed runtime. Failed publication or settings
+  writes retain the reset deadline for alarm redelivery; repeated refusal also
+  repairs a failed initial pause publication. Changed reasons/windows get a new log.
+- Regression coverage includes rollback at each pause write, restart, changed pause
+  reasons, UTC resets and publication failures. Conservative run bounds and prices
+  remain unchanged; further S4 reductions and live/owner launch steps remain open.
+- Lint, all 327 unit/integration tests, all four browser flows and the production
+  dry-run build pass. Real local SQLite/Queue acceptance verifies one pause log for
+  repeated budget refusals and preserves completed outcomes after an action edit.
+  No production deployment or live acceptance was performed.
