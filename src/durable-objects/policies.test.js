@@ -152,6 +152,33 @@ it('rolls back the completed log and index together and retries settlement once'
   expect((await call('account')).balance_microdollars).toBe(before - PRICES.run);
 });
 
+it('preserves retry input privately across settlement and a failed completion commit', async () => {
+  const { env, job, messages, call } = await setup({ retries: 1 });
+  await call('mutate', { account: 'a', id: 'input-action', operations: [{ kind: 'actions', name: 'ping', value: { url: 'https://example.com', headers: { 'X-Event': '{{input.event}}' } } }] });
+  await rpc(env.JOBS, 'a:j', 'start', { id: 'r', input: { event: 'private-event' }, trigger: 'webhook' });
+  for (const options of [{}, { summary: true }]) expect(JSON.stringify(await rpc(env.JOBS, 'a:j', 'runs', options))).not.toContain('private-event');
+  expect(JSON.stringify(await rpc(env.JOBS, 'a:j', 'run', { id: 'r' }))).not.toContain('private-event');
+  const put = job.storage.put.bind(job.storage);
+  const failure = vi.spyOn(job.storage, 'put').mockImplementation(async (key, value) => {
+    if (key === 'history:r' && value.status === 'failure') throw new Error('completion failure');
+    return put(key, value);
+  });
+  const args = { id: 'r', result: { status: 'failure' } };
+  await expect(job.result(args)).rejects.toThrow('completion failure');
+  expect(await env.ACCOUNTS.get('a').storage.get('hold:r')).toBeUndefined();
+  failure.mockRestore();
+  const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
+  env.JOBS.objects.set('a:j', cold);
+  await cold.result(args);
+  expect(messages).toHaveLength(2);
+  expect((await env.ACCOUNTS.get('a').storage.get('hold:r:retry')).execution.input).toEqual({ event: 'private-event' });
+  expect(await job.storage.get('history:r')).not.toHaveProperty('retry');
+  env.OUTBOUND_FETCH = vi.fn(async () => new Response('ok'));
+  await consume({ body: messages[1], ack() {} }, env, {});
+  expect(env.OUTBOUND_FETCH.mock.calls[0][0].headers.get('X-Event')).toBe('private-event');
+  expect((await call('account')).held_microdollars).toBe(0);
+});
+
 it('skips unchanged completion settings and commits a changed outcome with its log', async () => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
   const { env, job, call } = await setup();

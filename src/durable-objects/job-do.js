@@ -60,7 +60,7 @@ export class JobDO {
       case 'runs': {
         const limit = Math.min(args.limit || 100, 100); const before = args.before || Infinity;
         const entries = (await this.summaries()).filter(r => r.created_at < before && (!args.status || r.status === args.status) && (!args.from || r.created_at >= args.from) && (!args.to || r.created_at <= args.to)).sort((a, b) => b.created_at - a.created_at);
-        const page = entries.slice(0, limit); const items = args.summary ? page.map(({ pending: _pending, ...summary }) => summary) : await Promise.all(page.map(r => this.record(r)));
+        const page = entries.slice(0, limit); const items = args.summary ? page.map(({ pending: _pending, retry: _retry, ...summary }) => summary) : await Promise.all(page.map(r => this.record(r)));
         return { items: items.filter(Boolean), next_before: entries.length > limit ? page.at(-1).created_at : null };
       }
       case 'run': return (await this.readRun(args.id)) || {};
@@ -113,7 +113,7 @@ export class JobDO {
     }
     if (reservation.duplicate && reservation.settled) return { id: args.id, duplicate: true, cost_microdollars: 0 };
     const run = { id: args.id, job: settings.name, trigger: args.trigger, scheduled_at: args.scheduled_at, created_at: Date.now(), expires_at: Date.now() + 120000, status: 'queued', reserved_microdollars: reservation.amount, attempt: args.attempt || 0, key_id: args.key_id };
-    await this.history(run);
+    await this.history(run, false, null, settings.job.retries ? { input: args.input || {} } : undefined);
     // A failed enqueue is retried from the durable pending row, without a second hold.
     await this.arm();
     await this.send(run, settings);
@@ -121,7 +121,8 @@ export class JobDO {
   }
   async send(run, settings) {
     await this.env.RUN_QUEUE.send({ account: settings.account, name: settings.name, id: run.id });
-    await this.history({ ...run, enqueued: true });
+    const retry = (await this.storage.get(`history:${run.id}`))?.retry;
+    await this.history({ ...run, enqueued: true }, false, null, retry);
   }
   async result(args) {
     const run = await this.readRun(args.id); assert(run, 'not_found', 'Run not found', 404);
@@ -132,7 +133,9 @@ export class JobDO {
       await this.publish(settings);
       return { duplicate: true };
     }
-    const retryData = args.result.status === 'failure' && run.attempt < (settings.job?.retries || 0) ? await rpc(this.env.ACCOUNTS, settings.account, 'retry-data', { id: args.id }) : {};
+    // Keep new runs' retry input with the pending outbox: settlement removes the
+    // account's execution snapshot before this object's completion can commit.
+    const retryData = args.result.status === 'failure' && run.attempt < (settings.job?.retries || 0) ? (await this.storage.get(`history:${args.id}`))?.retry || await rpc(this.env.ACCOUNTS, settings.account, 'retry-data', { id: args.id }) : {};
     const receipt = await rpc(this.env.ACCOUNTS, settings.account, 'settle', { id: args.id, actual: args.result.charge_microdollars ?? run.reserved_microdollars });
     const result = { ...run, ...args.result, id: run.id, job: run.job, cost_microdollars: receipt.charged, subrequests: receipt.gateway_count ?? args.result.subrequests ?? 0, finished_at: Date.now() };
     delete result.input; delete result.key_id;
@@ -158,13 +161,14 @@ export class JobDO {
     return summary ? this.record(summary) : this.storage.get(`run:${id}`);
   }
   async record(summary) {
-    const { pending, ...publicSummary } = summary;
+    const { pending, retry: _retry, ...publicSummary } = summary;
     // Older pending records kept their full metadata in a separate run row.
     return pending ? { ...publicSummary, ...pending } : (await this.storage.get(`run:${summary.id}`)) || publicSummary;
   }
-  async history(run, full = false, settings = null) {
+  async history(run, full = false, settings = null, retry) {
     const { id, job, status, created_at, trigger, scheduled_at, finished_at, cost_microdollars, http_status, reason } = run;
     const summary = { id, job, status, created_at, trigger, scheduled_at, finished_at, cost_microdollars, http_status, reason };
+    if (retry) summary.retry = retry;
     // Pending metadata fits in the compact index; only completed logs need a body row.
     if (status === 'queued' || status === 'running') {
       const { expires_at, reserved_microdollars, attempt, key_id, enqueued } = run;
