@@ -55,7 +55,7 @@ disagrees with it, this file wins and the other document is stale.
 | L1 | Scaffold: wrangler (prod + local), Vitest, ESLint, `dev:local`, CI, `/health` | code | ✅ | Wrangler prod/local, pinned dependencies, lint, CI, health and gated LocalDev/deposits verified. Master plan §10.1. Copy hashbin's local mode and CI shape. |
 | L2 | Accounts and auth: Clerk sessions, Clerk webhook → AccountDO, API keys with scopes and daily spend caps, `API_ROUTES` access test | code | ✅ | Clerk/LocalDev auth, signed hashed scoped keys, revocation, daily caps and Clerk webhook; access coverage tests. §4.1. Port hashbin `src/auth/`. |
 | L3 | Money: µ$ ledger, reserve/settle/expire holds, Stripe deposits, history, `cost-policy.js`, `pricing.js`, price-floor tests, `/api/quote` | code | 🟨 | Transactional ledger/holds, signed Stripe webhook, itemized Checkout and quotes tested; S4 recovery/refused-retry audit and rounded floors set HTTP price to 87 µ$ and reads to 21 µ$ plus 2 µ$/job. Existing holds keep their maximum. Real deposit remains L14. §6, `docs/business/pricing.md`. Needs D4, D6. |
-| L4 | Definitions: variables, secrets (AES-GCM, write-only), HTTP actions, templates, change billing, audit log, dry run, idempotency | code | ✅ | Atomic billed CRUD, reference checks, AES-GCM write-only secrets, dry runs, audit and idempotency tested. §2, §3.3, §4.2. |
+| L4 | Definitions: variables, secrets (AES-GCM, write-only), HTTP actions, templates, change billing, audit log, dry run, idempotency | code | ✅ | Atomic billed CRUD, reference checks, AES-GCM write-only secrets, dry runs, audit and idempotency tested. Log redaction also covers JSON-escaped secret values and unpaired surrogates. §2, §3.3, §4.2. |
 | L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | ✅ | Real local Worker/Queue HTTP path verified; retries, missed/overlap, budgets, duplicate delivery, held snapshots, refusal pause and recovery tested. Initial pending runs and recovery alarms commit atomically. Replayed starts recover original deadlines, trigger/input and key identity from the reservation after a lost response/pending/alarm write; expired reservations never enqueue. Observed results stage before settlement; Queue redelivery/alarms recover completion and private retry dispatch after restart without repeating external work or charges. Retry input/key caps survive settlement; budget refusals clear the retry. §3, §3.1, §2.3. |
 | L6 | Runs, costs, upcoming, projection APIs; retention pruning | code | ✅ | Retained/deleted-job history, NDJSON, permanent UTC cost aggregates, ledger cursors, bounded upcoming, fast cron/DST projections and byte/retention bounds tested. §4.3, §6, §7. |
 | L7 | Triggers: run now, trigger tokens, `/hook/*`, per-token rate limits, CORS, `{{input.*}}` | code | ✅ | Manual runs, signed job-only tokens, revocation, token limits, input validation and hook-only CORS tested. §4.1. |
@@ -362,3 +362,12 @@ calendar days of billed counts rather than sampling retained logs.
 - The conservative 37-write allowance and 87 µ$ price stay unchanged because
   eviction can still require a standalone write. S4 and L9–L14 owner/live acceptance
   remain open; nothing was deployed to production.
+
+## L4/L5 serialized-secret redaction — 2026-11-16
+
+- Redaction recognizes JSON-escaped secrets in HTTP request/response fields and JS
+  object output, alongside raw, URL and base64 forms. Unpaired UTF-16 surrogates
+  no longer abort redaction. Outbound requests retain their original credentials.
+- Lint and all 290 unit/integration tests pass, including serialized quotes,
+  backslashes, control characters, Unicode and HTTP log capture. JS truncation
+  before redaction is a separate follow-up; prices and live acceptance are unchanged.

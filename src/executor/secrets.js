@@ -27,12 +27,15 @@ export async function decryptSecret(env, account, name, record) {
 }
 /** Strip ciphertext and IV from every public secret response. */
 export function secretMetadata(record) { return { fingerprint: record.fingerprint, updated_at: record.updated_at, version: record.version, key_version: record.key_version || 'v1' }; }
-/** Redact raw, URL-encoded and base64 secret representations before storage. */
+/** Redact raw, encoded and JSON-escaped secret representations before storage. */
 export function redact(text, secrets) {
   let result = String(text);
   const replacements = Object.entries(secrets).flatMap(([name, value]) => {
     const bytes = new TextEncoder().encode(value); const base64 = btoa(String.fromCharCode(...bytes));
-    return [...new Set([value, encodeURIComponent(value), base64, base64url(bytes)])].filter(Boolean).map(pattern => ({ pattern, name }));
+    const patterns = [value, encodeURIComponent(new TextDecoder().decode(bytes)), base64, base64url(bytes)];
+    // Request logs and JS object output contain JSON escapes rather than the raw
+    // secret. Match those before a later excerpt/size bound can split the value.
+    return [...new Set(patterns.flatMap(pattern => [pattern, JSON.stringify(pattern).slice(1, -1)]))].filter(Boolean).map(pattern => ({ pattern, name }));
   }).sort((a, b) => b.pattern.length - a.pattern.length);
   for (const { pattern, name } of replacements) result = result.split(pattern).join(`«secret:${name}»`);
   return result;

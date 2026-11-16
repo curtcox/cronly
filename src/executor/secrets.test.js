@@ -1,9 +1,22 @@
 import { it, expect } from 'vitest';
 import { base64url } from '../auth/crypto.js';
-import { decryptSecret, encryptSecret, secretMetadata } from './secrets.js';
+import { decryptSecret, encryptSecret, secretMetadata, redact } from './secrets.js';
 import { secretKeyring } from './secret-keys.js';
 
 const ring = (active = 'v2') => ({ SECRETS_KEYRING: JSON.stringify({ active, keys: { v1: 'old-master', v2: 'new-master' } }) });
+
+it('redacts raw and serialized secret values alongside URL and base64 encodings', () => {
+  const value = 'test-"quoted"\\path\n\t雪';
+  const bytes = new TextEncoder().encode(value);
+  const variants = [value, JSON.stringify(value).slice(1, -1), encodeURIComponent(value), btoa(String.fromCharCode(...bytes)), base64url(bytes)];
+  for (const variant of variants) expect(redact(`before ${variant} after`, { token: value })).toBe('before «secret:token» after');
+  expect(JSON.parse(redact(JSON.stringify({ body: value }), { token: value }))).toEqual({ body: '«secret:token»' });
+});
+
+it('redacts secrets with unpaired surrogates without aborting log capture', () => {
+  const value = 'test-\ud800-tail';
+  expect(redact(JSON.stringify(value), { token: value })).toBe('"«secret:token»"');
+});
 
 it('reads the original v1 ciphertext format after switching active keys', async () => {
   const enc = new TextEncoder();
