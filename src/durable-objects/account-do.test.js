@@ -2,6 +2,7 @@ import { afterEach, it, expect, vi } from 'vitest';
 import { AccountDO } from './account-do.js';
 import { namespace } from '../../test-utils/storage.js';
 import { rpc } from '../utils/rpc.js';
+import { reports } from '../api/reporting.js';
 const setup = () => { const ns = namespace(AccountDO, { ENVIRONMENT: 'local' }); return (op, args) => rpc(ns, 'alice', op, args); };
 afterEach(() => vi.useRealTimers());
 it('serializes competing holds, never overspends, and settles once', async () => {
@@ -51,4 +52,25 @@ it('reports compact and archived spend after restart without duplicating legacy 
   expect(await call('account')).toMatchObject({ balance_microdollars: 950, spent_today_microdollars: 20, spent_month_microdollars: 20, spend_by_job: { j: 20 } });
   expect(await call('activity')).toEqual({ counts: { j: 3 } });
   expect(await call('metrics', { period: '2026-11' })).toMatchObject({ spent_microdollars: 30 });
+});
+
+it('reports numeric constructor-named activity and costs across UTC days after restart', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-15T12:00:00Z'));
+  const env = { ENVIRONMENT: 'local' }; const ns = namespace(AccountDO, env); env.ACCOUNTS = ns;
+  const call = (op, args) => rpc(ns, 'a', op, args);
+  await call('init', { account: 'a' }); await call('deposit', { id: 'fund', amount: 1000 });
+  for (const [id, amount] of [['first', 30], ['second', 60]]) {
+    await call('reserve', { id, amount, kind: 'run', job: 'constructor', action: 'constructor', budget: { day: 100, month: 100 } });
+    await call('settle', { id, actual: amount });
+    vi.advanceTimersByTime(86400000);
+  }
+  const storage = ns.get('a').storage;
+  ns.objects.set('a', new AccountDO({ storage, blockConcurrencyWhile: fn => fn() }, env));
+  expect(await call('activity')).toEqual({ counts: { constructor: 2 } });
+  expect(await call('account')).toMatchObject({ spend_by_job: { constructor: 90 }, balance_microdollars: 910 });
+  for (const group of ['job', 'action']) {
+    const result = await reports({ handler: 'costs' }, new Request(`https://cronly.org/api/costs?group=${group}`), env, { account: 'a' });
+    expect(result).toMatchObject({ items: [{ name: 'constructor', cost_microdollars: 90 }], total_microdollars: 90 });
+  }
+  await expect(call('reserve', { id: 'capped', amount: 11, job: 'constructor', budget: { month: 100 } })).rejects.toMatchObject({ code: 'budget_month' });
 });

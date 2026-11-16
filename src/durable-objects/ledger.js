@@ -4,6 +4,7 @@ import { assert } from '../utils/errors.js';
 import { accountMoney, accountMetric, updateAccountMetric } from './account-money.js';
 import { appendLedger } from './ledger-history.js';
 import { getHold, listHolds, putHold } from './hold-storage.js';
+import { ownValue } from '../utils/records.js';
 /** Validate all money at the boundary; never use floating balances. */
 export function money(value) { assert(Number.isSafeInteger(value) && value >= 0, 'invalid_money', 'Expected nonnegative integer micro-dollars'); return value; }
 /** Read the account's spendable funds inside the same storage transaction. */
@@ -15,7 +16,7 @@ export async function funds(tx) {
 // Budget counters share the two account summary writes. Keep reading old counters
 // until each job/key first settles in that period; no bulk migration is needed.
 async function budgetSpent(tx, metric, kind, id, period) {
-  return metric?.budget_spent?.[kind]?.[id] ?? (await tx.get(`spent:${kind}:${id}:${period}`)) ?? 0;
+  return ownValue(metric?.budget_spent?.[kind], id) ?? (await tx.get(`spent:${kind}:${id}:${period}`)) ?? 0;
 }
 // Both durable reservations and immediate charges enforce the same funds and caps.
 async function reservation(tx, args, now) {
@@ -78,9 +79,9 @@ async function settleReservation(tx, hold, actual, now, immediate = false) {
     const operation = hold.kind === 'run' && hold.execution?.trigger === 'webhook' ? 'hook' : hold.kind;
     const estimate = hold.kind === 'prose' ? Math.max(0, (amount - PRICES.proseBase) / PRICES.proseMarkup) : worstCaseCost(operation, hold.execution?.action || { job_count: hold.read_job_count || 0 }) - (hold.execution?.action?.type === 'javascript' && hold.actual_price < hold.amount ? COST_POLICY.dynamicWorkerDay : 0);
     const jobGroup = hold.job || hold.kind || 'other'; const actionGroup = hold.action || hold.kind || 'other';
-    const by_job = { ...metric.by_job, [jobGroup]: ((metric.by_job || {})[jobGroup] || 0) + amount };
-    const by_action = { ...metric.by_action, [actionGroup]: ((metric.by_action || {})[actionGroup] || 0) + amount };
-    const run_count_by_job = { ...metric.run_count_by_job, [jobGroup]: ((metric.run_count_by_job || {})[jobGroup] || 0) + (hold.kind === 'run' ? 1 : 0) };
+    const by_job = { ...metric.by_job, [jobGroup]: (ownValue(metric.by_job, jobGroup) ?? 0) + amount };
+    const by_action = { ...metric.by_action, [actionGroup]: (ownValue(metric.by_action, actionGroup) ?? 0) + amount };
+    const run_count_by_job = { ...metric.run_count_by_job, [jobGroup]: (ownValue(metric.run_count_by_job, jobGroup) ?? 0) + (hold.kind === 'run' ? 1 : 0) };
     await updateAccountMetric(tx, state, { period, budget_spent, run_count_by_job, by_job, by_action, spent_microdollars: (metric.spent_microdollars || 0) + amount, estimated_cost_microdollars: (metric.estimated_cost_microdollars || 0) + Math.ceil(estimate) });
   }
   // The balance and active summaries always commit together, including deposits.

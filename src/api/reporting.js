@@ -17,7 +17,7 @@ export async function reports(route, request, env, auth) {
     case 'projection': return projection(config, await rpc(env.ACCOUNTS, auth.account, 'account'), (await rpc(env.ACCOUNTS, auth.account, 'activity')).counts);
     case 'costs': {
       const group = params.get('group') || 'day'; assert(['day', 'job', 'action'].includes(group), 'invalid_group', 'Invalid cost grouping');
-      const metrics = await rpc(env.ACCOUNTS, auth.account, 'costs', { from: params.get('from'), to: params.get('to') }); const buckets = {};
+      const metrics = await rpc(env.ACCOUNTS, auth.account, 'costs', { from: params.get('from'), to: params.get('to') }); const buckets = Object.create(null);
       for (const metric of metrics.items) {
         const values = group === 'day' ? { [metric.period]: metric.spent_microdollars } : metric[`by_${group}`] || {};
         for (const [name, amount] of Object.entries(values)) buckets[name] = (buckets[name] || 0) + amount;

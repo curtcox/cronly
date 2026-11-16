@@ -108,7 +108,7 @@ export class AccountDO {
         return { cost_microdollars: receipt.duplicate ? 0 : amount };
       }
       case 'activity': {
-        const counts = {}; const state = await accountMoney(tx);
+        const counts = Object.create(null); const state = await accountMoney(tx);
         for (let offset = 0; offset < 7; offset++) { const period = new Date(Date.now() - offset * 86400000).toISOString().slice(0, 10); const metric = await accountMetric(tx, period, state); for (const [name, count] of Object.entries(metric?.run_count_by_job || {})) counts[name] = (counts[name] || 0) + count; }
         return { counts };
       }

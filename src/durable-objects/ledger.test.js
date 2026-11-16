@@ -11,6 +11,36 @@ async function setup() {
   return { storage, hold: args => storage.transaction(tx => reserve(tx, args, time)), charge: (id, amount, now = time) => storage.transaction(tx => settle(tx, id, amount, now)) };
 }
 
+it('bills constructor-named jobs and actions numerically and enforces their budgets', async () => {
+  const { storage, hold, charge } = await setup();
+  const args = { amount: 80, kind: 'run', job: 'constructor', action: 'constructor', budget: { day: 100, month: 100 } };
+  await hold({ ...args, id: 'first' });
+  await charge('first', 30);
+  await hold({ ...args, id: 'pending', amount: 60 });
+  await expect(hold({ ...args, id: 'refused', amount: 11 })).rejects.toMatchObject({ code: 'budget_day' });
+  await charge('pending', 60);
+  for (const period of ['2026-11-30', '2026-11']) {
+    expect(await accountMetric(storage, period)).toMatchObject({
+      spent_microdollars: 90, by_job: { constructor: 90 }, by_action: { constructor: 90 },
+      run_count_by_job: { constructor: 2 }, budget_spent: { job: { constructor: 90 } }
+    });
+  }
+  expect(await funds(storage)).toMatchObject({ balance_microdollars: 9910, held_microdollars: 0 });
+});
+
+it('preserves legacy constructor-named job budgets on their first compact settlement', async () => {
+  const { storage, hold, charge } = await setup();
+  for (const period of ['2026-11-30', '2026-11']) {
+    await storage.put(`spent:job:constructor:${period}`, 40);
+    await storage.put(`spent:account:self:${period}`, { period, budget_spent: { job: {} } });
+  }
+  const args = { job: 'constructor', kind: 'run', budget: { day: 100 } };
+  await expect(hold({ ...args, id: 'refused', amount: 61 })).rejects.toMatchObject({ code: 'budget_day' });
+  await hold({ ...args, id: 'first', amount: 60 });
+  await charge('first', 30);
+  expect((await accountMetric(storage, '2026-11')).budget_spent.job).toEqual({ constructor: 70 });
+});
+
 it('settles job and key budgets in the account summaries without separate counter writes', async () => {
   const { storage, hold, charge } = await setup();
   await hold({ id: 'r', amount: 80, kind: 'run', job: 'j', key_id: 'k', budget: { day: 100 }, key_budget: { day: 100 } });

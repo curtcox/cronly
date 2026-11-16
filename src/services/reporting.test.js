@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { upcoming, projection, countFires } from './reporting.js';
+import { upcoming, projection, countFires, costGroups } from './reporting.js';
 import { explainCron, nextFires, cron } from './cron.js';
 import { PRICES } from '../utils/pricing.js';
 const config = { actions: { ping: { type: 'http' } }, jobs: { hourly: { action: 'ping', cron: '0 * * * *', timezone: 'UTC', enabled: true, budget: {} } } };
@@ -32,4 +32,20 @@ it('matches croner across DST changes and DOM/DOW OR schedules', () => {
 it('applies each calendar-month budget separately when a forecast crosses its reset', () => {
   const capped = structuredClone(config); capped.jobs.hourly.budget = { month: 2000 };
   expect(projection(capped, { balance_microdollars: 10000, held_microdollars: 0 }, [], Date.parse('2026-11-15T00:00Z')).monthly_microdollars).toBe(4000);
+});
+
+it('projects constructor-named jobs with missing spend and webhook activity as zero', () => {
+  const named = structuredClone(config);
+  named.jobs = { constructor: { ...named.jobs.hourly, budget: { day: 100, month: 2000 } } };
+  const balance = { balance_microdollars: 10000, held_microdollars: 0, spend_today_by_job: {}, spend_by_job: {} };
+  const now = Date.parse('2026-11-01T00:00Z');
+  expect(projection(named, balance, {}, now).monthly_microdollars).toBe(2000);
+  named.jobs.constructor.cron = null;
+  expect(projection(named, balance, {}, now).monthly_microdollars).toBe(0);
+  expect(projection(named, balance, { constructor: 7 }, now).monthly_microdollars).toBe(2000);
+});
+
+it('groups constructor-named job and action charges as integer costs', () => {
+  const rows = [30, 60].map((amount, index) => ({ job: 'constructor', action: 'constructor', amount_microdollars: -amount, created_at: index + 1 }));
+  for (const group of ['job', 'action']) expect(costGroups(rows, new URLSearchParams({ group }))).toEqual({ group, items: [{ name: 'constructor', cost_microdollars: 90 }], total_microdollars: 90 });
 });

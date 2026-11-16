@@ -2,6 +2,7 @@ import { CronPattern } from 'croner';
 import { cron } from './cron.js';
 import { price, PRICES } from '../utils/pricing.js';
 import { assert } from '../utils/errors.js';
+import { ownValue } from '../utils/records.js';
 const offsetCache = new Map();
 function zoneOffset(zone, time) {
   const key = `${zone}:${time}`;
@@ -74,16 +75,16 @@ export function projection(config, balance, webhookRuns = [], now = Date.now()) 
     const months = {}; let count = 0;
     for (let day = Math.floor(from / 86400000) * 86400000; day < to; day += 86400000) {
       const start = Math.max(day, from); const end = Math.min(day + 86400000, to);
-      const dayCount = job.cron ? countFires(job.cron, job.timezone, start, end) : (Array.isArray(webhookRuns) ? webhookRuns.filter(r => r.job === name && r.created_at >= now - 7 * 86400000).length : webhookRuns[name] || 0) / 7 * (end - start) / 86400000;
+      const dayCount = job.cron ? countFires(job.cron, job.timezone, start, end) : (Array.isArray(webhookRuns) ? webhookRuns.filter(r => r.job === name && r.created_at >= now - 7 * 86400000).length : ownValue(webhookRuns, name) ?? 0) / 7 * (end - start) / 86400000;
       count += dayCount;
       let amount = Math.ceil(dayCount * runPrice) + (dayCount > 0 && action.type === 'javascript' ? PRICES.jsActivation : 0);
-      if (job.budget.day != null) amount = Math.min(amount, Math.max(0, job.budget.day - (day === Math.floor(now / 86400000) * 86400000 ? balance.spend_today_by_job?.[name] || 0 : 0)));
+      if (job.budget.day != null) amount = Math.min(amount, Math.max(0, job.budget.day - (day === Math.floor(now / 86400000) * 86400000 ? ownValue(balance.spend_today_by_job, name) ?? 0 : 0)));
       const month = new Date(day).toISOString().slice(0, 7);
       months[month] = (months[month] || 0) + amount;
     }
     let monthly = 0;
     for (const [month, amount] of Object.entries(months)) {
-      const spent = month === new Date(now).toISOString().slice(0, 7) ? balance.spend_by_job?.[name] || 0 : 0;
+      const spent = month === new Date(now).toISOString().slice(0, 7) ? ownValue(balance.spend_by_job, name) ?? 0 : 0;
       monthly += job.budget.month == null ? amount : Math.min(amount, Math.max(0, job.budget.month - spent));
     }
     jobs.push({ job: name, runs_30_days: Math.ceil(count), monthly_microdollars: monthly, daily_microdollars: Math.ceil(monthly / 30) });
@@ -103,7 +104,7 @@ export function filterRuns(runs, params) {
 /** Group permanent run charges by job, action or UTC day. */
 export function costGroups(entries, params) {
   const group = params.get('group') || 'day'; assert(['day', 'job', 'action'].includes(group), 'invalid_group', 'Group must be day, job or action');
-  const buckets = {};
+  const buckets = Object.create(null);
   for (const entry of filterRuns(entries, params)) {
     if (entry.amount_microdollars >= 0) continue;
     const key = group === 'day' ? new Date(entry.created_at).toISOString().slice(0, 10) : entry[group] || entry.kind;
