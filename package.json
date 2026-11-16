@@ -1,0 +1,31 @@
+{
+  "name": "cronly",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:local": "wrangler dev --config wrangler.local.toml --local",
+    "deploy": "wrangler deploy",
+    "lint": "eslint src scripts frontend workers test-utils --no-error-on-unmatched-pattern",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
+    "verify:production": "node scripts/verify-production.mjs"
+  },
+  "dependencies": {
+    "@clerk/backend": "2.29.2",
+    "croner": "9.1.0",
+    "cronstrue": "2.59.0",
+    "stripe": "14.25.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.57.0",
+    "eslint": "8.57.1",
+    "vitest": "5.0.3",
+    "wrangler": "4.153.0"
+  }
+}
