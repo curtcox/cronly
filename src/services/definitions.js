@@ -30,7 +30,7 @@ export function normalize(kind, value) {
     // Resolve variable-only URLs during cross-reference validation; secrets cannot choose hosts.
     const hostTemplate = value.url.split('/').slice(0, 3).join('/');
     assert(!references(hostTemplate).some(r => ['secret', 'input'].includes(r.type)), 'invalid_url', 'Secrets and webhook input cannot choose a destination host');
-    assert(value.headers === undefined || (value.headers && typeof value.headers === 'object' && !Array.isArray(value.headers) && Object.entries(value.headers).every(([k, v]) => /^[a-zA-Z0-9-]+$/.test(k) && typeof v === 'string' && !/[\r\n]/.test(v))), 'invalid_headers', 'Invalid headers');
+    assert(value.headers === undefined || (value.headers && typeof value.headers === 'object' && !Array.isArray(value.headers) && Object.entries(value.headers).every(([k, v]) => /^[a-zA-Z0-9-]+$/.test(k) && !['host', 'connection', 'upgrade', 'content-length', 'transfer-encoding'].includes(k.toLowerCase()) && typeof v === 'string' && !/[\r\n]/.test(v))), 'invalid_headers', 'Invalid headers');
     assert(value.body === undefined || (typeof value.body === 'string' && value.body.length <= 32768 && !['GET', 'HEAD'].includes(method)), 'invalid_body', 'Invalid HTTP body');
     const success = value.success_status || [[200, 299]];
     assert(Array.isArray(success) && success.length > 0 && success.length <= 10 && success.every(r => Array.isArray(r) && r.length === 2 && r.every(Number.isInteger) && r[0] >= 100 && r[1] <= 599 && r[0] <= r[1]), 'invalid_success_rule', 'Expected status ranges');
@@ -38,7 +38,7 @@ export function normalize(kind, value) {
   }
   assert(kind === 'jobs', 'invalid_kind', 'Unknown collection');
   validateName(value.action); const timezone = value.timezone || 'UTC';
-  if (value.cron !== null) cron(value.cron, timezone);
+  if (value.cron !== null) assert(cron(value.cron, timezone).nextRun(), 'invalid_cron', 'Cron expression has no future fire');
   const overlap = value.overlap || 'skip'; const missed = value.missed || 'skip'; const retries = value.retries ?? 0;
   assert(['skip', 'allow'].includes(overlap) && ['skip', 'run_once'].includes(missed) && Number.isInteger(retries) && retries >= 0 && retries <= 3, 'invalid_policy', 'Invalid job policies');
   assert(value.enabled === undefined || typeof value.enabled === 'boolean', 'invalid_enabled', 'enabled must be boolean');

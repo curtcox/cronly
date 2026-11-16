@@ -1,25 +1,50 @@
+import { CronPattern } from 'croner';
 import { cron } from './cron.js';
 import { price } from '../utils/pricing.js';
 import { assert } from '../utils/errors.js';
-/** Exact bounded-window count; dense uniform schedules avoid enumerating every minute. */
+const offsetCache = new Map();
+function zoneOffset(zone, time) {
+  const key = `${zone}:${time}`;
+  if (offsetCache.has(key)) return offsetCache.get(key);
+  const label = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'longOffset' }).formatToParts(new Date(time)).find(p => p.type === 'timeZoneName').value;
+  const match = label.match(/GMT([+-])(\d{2}):(\d{2})/);
+  const value = match ? (Number(match[2]) * 60 + Number(match[3])) * (match[1] === '-' ? -1 : 1) * 60000 : 0;
+  if (offsetCache.size > 4096) offsetCache.clear();
+  offsetCache.set(key, value); return value;
+}
+function countUtc(pattern, from, to) {
+  const slots = [];
+  for (let hour = 0; hour < 24; hour++) if (pattern.hour[hour]) for (let minute = 0; minute < 60; minute++) if (pattern.minute[minute]) slots.push(hour * 60 + minute);
+  let count = 0;
+  for (let day = Math.floor(from / 86400000) * 86400000; day < to; day += 86400000) {
+    const date = new Date(day); const dom = Boolean(pattern.day[date.getUTCDate() - 1]); const dow = Boolean(pattern.dayOfWeek[date.getUTCDay()]);
+    const matches = pattern.starDOM ? dow : pattern.starDOW ? dom : dom || dow;
+    if (!pattern.month[date.getUTCMonth()] || !matches) continue;
+    if (from <= day && to >= day + 86400000) count += slots.length;
+    else { const first = Math.ceil((from - day) / 60000); const last = Math.ceil((to - day) / 60000); count += slots.filter(slot => slot >= first && slot < last).length; }
+  }
+  return count;
+}
+/** Count numeric cron by calendar days; use croner itself on offset-transition days. */
 export function countFires(expression, timezone, from, to) {
   const schedule = cron(expression, timezone);
-  const [minute, hour, dom, month, dow] = expression.trim().split(/\s+/);
-  const uniform = /^\*(?:\/\d+)?$/.test(minute) && hour === '*' && dom === '*' && month === '*' && dow === '*';
-  if (uniform) {
-    // UTC boundaries are also minute boundaries in supported contemporary IANA zones.
-    const step = minute === '*' ? 1 : Number(minute.slice(2));
-    if (60 % step === 0) {
-      const first = schedule.nextRun(new Date(from - 1));
-      if (!first || +first >= to) return 0;
-      return Math.ceil((to - +first) / (step * 60000));
+  if (/^[0-9*/,\-\s]+$/.test(expression)) {
+    const pattern = new CronPattern(expression, timezone);
+    if (timezone === 'UTC') return countUtc(pattern, from, to);
+    let count = 0;
+    for (let day = Math.floor(from / 86400000) * 86400000; day < to; day += 86400000) {
+      const start = Math.max(from, day); const end = Math.min(to, day + 86400000);
+      const offset = zoneOffset(timezone, start); const lastOffset = zoneOffset(timezone, end - 1);
+      if (offset === lastOffset) count += countUtc(pattern, start + offset, end + offset);
+      else {
+        let cursor = new Date(start - 1);
+        for (;;) { const next = schedule.nextRun(cursor); if (!next || +next >= end) break; count++; cursor = next; }
+      }
     }
+    return count;
   }
   let count = 0; let cursor = new Date(from - 1);
-  while (count <= 50000) {
-    const next = schedule.nextRun(cursor); if (!next || +next >= to) return count;
-    count++; cursor = next;
-  }
+  while (count <= 50000) { const next = schedule.nextRun(cursor); if (!next || +next >= to) return count; count++; cursor = next; }
   assert(false, 'projection_limit', 'Projection window is too large');
 }
 /** Enumerate only a requested page of upcoming runs; the subtotal is explicitly bounded. */

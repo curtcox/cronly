@@ -1,14 +1,35 @@
-# cronly
+# cronly — cron only
 
-**cron only** — a small, pay-as-you-go scheduling service at [cronly.org](https://cronly.org).
+Named HTTP/JavaScript actions, variables and encrypted secrets, cron/manual/webhook
+triggers, and a prepaid micro-dollar ledger on Cloudflare Workers, SQLite Durable
+Objects and Queues. Vanilla frontend; Clerk auth, Stripe deposits, Anthropic prose.
 
-Define named actions (HTTP requests or JavaScript), the variables and secrets they use, and when
-they run: a cron schedule, a webhook, or a button. cronly runs them, keeps the logs, and charges
-a prepaid balance a few millionths of a dollar per run. No subscription. Describe schedules in
-plain English if you like; cronly translates them to cron and shows what the cron actually says.
+## Local development
 
-Status: planning. See [STATUS.md](STATUS.md), the design in
-[todo/master_plan.md](todo/master_plan.md), and pricing in
-[docs/business/pricing.md](docs/business/pricing.md).
+```sh
+npm ci
+npm run dev:local
+# Open http://localhost:8787/app.html, choose a local account, add development credit.
+```
 
-Working in this repo as an agent or contributor? Start with [AGENTS.md](AGENTS.md).
+LocalDev credentials and fake deposits only work with ENVIRONMENT=local. No external
+credentials are required for the local HTTP/JS workspace. Use only trusted test code in
+local JS: Miniflare does not enforce production resource limits.
+
+```sh
+npm run lint
+npm test
+npm run test:e2e
+npm run test:local       # with the local server running
+npm run docs:generate   # after changing routes or releasing the SDK
+```
+
+Deployment and live acceptance: [docs/ops/launch.md](docs/ops/launch.md).
+Status and remaining owner steps: [STATUS.md](STATUS.md).
+Design: [todo/master_plan.md](todo/master_plan.md).
+Prices and model: [docs/business/pricing.md](docs/business/pricing.md).
+
+Money is integer micro-dollars. Billable work reserves its maximum first; proposals
+never apply themselves. Every route declares authority in API_ROUTES. Tests cover
+ledger concurrency/idempotency, scopes, secrets, queues, cron/DST, proposals, cost
+floors, safety brakes, OpenAPI drift and browser quote/escape flows.

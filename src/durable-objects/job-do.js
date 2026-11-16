@@ -21,7 +21,7 @@ export class JobDO {
         const prior = await this.storage.get('settings');
         const settings = { account: args.account, name: args.name, job: args.job, paused: null };
         settings.next_fire = args.job?.enabled && args.job.cron ? (prior?.job?.cron === args.job.cron && prior?.job?.timezone === args.job.timezone && prior.next_fire > Date.now() ? prior.next_fire : Date.parse(nextFires(args.job.cron, args.job.timezone, 1)[0])) : null;
-        await this.storage.put('settings', settings); await this.arm(); return settings;
+        await this.storage.put('settings', settings); await this.publish(settings); await this.arm(); return settings;
       }
       case 'triggers': return { items: [...(await this.storage.list({ prefix: 'trigger:' })).values()].map(({ id, rate, revoked }) => ({ id, rate_per_minute: rate, revoked })) };
       case 'change-trigger': {
@@ -79,23 +79,24 @@ export class JobDO {
   }
   async start(args) {
     assert(this.env.COST_SAFETY_HARD_STOP !== 'true', 'cost_brake', 'Runs are paused by the operator', 503);
+    if (this.env.SAFETY) { const safety = await rpc(this.env.SAFETY, 'global', 'status'); if (safety.brake) { const settings = await this.storage.get('settings'); if (settings) { settings.paused = 'cost_brake'; await this.storage.put('settings', settings); await this.arm(); } assert(false, 'cost_brake', 'Runs are paused pending cost reconciliation', 503); } }
     const settings = await this.storage.get('settings'); assert(settings?.job, 'not_found', 'Job not found', 404);
     const prior = await this.storage.get(`run:${args.id}`); if (prior) return { run: prior, duplicate: true, cost_microdollars: 0 };
     let reservation;
     try {
-      reservation = await rpc(this.env.ACCOUNTS, settings.account, 'prepare-run', { ...args, name: settings.name });
+      reservation = await rpc(this.env.ACCOUNTS, settings.account, 'prepare-run', { ...args, name: settings.name, account: settings.account, test_action: settings.job.test_action });
     } catch (error) {
-      if (error.status === 402) {
+      if (error.status === 402 && ['insufficient_balance', 'budget_day', 'budget_month'].includes(error.code)) {
         settings.paused = error.code;
         if (error.code === 'budget_day') settings.resume_at = Date.parse(new Date(Date.now() + DAY).toISOString().slice(0, 10));
         if (error.code === 'budget_month') { const date = new Date(); settings.resume_at = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1); }
-        await this.storage.put('settings', settings);
+        await this.storage.put('settings', settings); await this.publish(settings);
         await this.storage.put(`run:${args.id}`, { id: args.id, status: 'paused', reason: error.code, created_at: Date.now(), cost_microdollars: 0, job: settings.name });
         await this.arm();
       }
       throw error;
     }
-    if (reservation.duplicate) return { id: args.id, duplicate: true, cost_microdollars: 0 };
+    if (reservation.duplicate && reservation.settled) return { id: args.id, duplicate: true, cost_microdollars: 0 };
     const run = { id: args.id, job: settings.name, trigger: args.trigger, scheduled_at: args.scheduled_at, created_at: Date.now(), expires_at: Date.now() + 120000, status: 'queued', reserved_microdollars: reservation.amount, attempt: args.attempt || 0, input: args.input, key_id: args.key_id };
     await this.storage.put(`run:${args.id}`, run);
     // A failed enqueue is retried from the durable pending row, without a second hold.
@@ -115,11 +116,15 @@ export class JobDO {
     const result = { ...run, ...args.result, id: run.id, job: run.job, cost_microdollars: receipt.charged, finished_at: Date.now() };
     delete result.input; delete result.key_id;
     await this.storage.put(`run:${args.id}`, result);
+    settings.last_outcome = result.status; await this.storage.put('settings', settings); await this.publish(settings);
     if (result.status === 'failure' && run.attempt < (settings.job?.retries || 0)) {
       try { await this.start({ id: `${args.id}:retry`, trigger: run.trigger, scheduled_at: run.scheduled_at, input: run.input, key_id: run.key_id, retry: true, attempt: run.attempt + 1 }); }
       catch { /* Refusal has paused the job or capped the retry; never retry unfunded work. */ }
     }
     await this.prune(); await this.arm(); return result;
+  }
+  async publish(settings) {
+    await rpc(this.env.ACCOUNTS, settings.account, 'job-runtime', { name: settings.name, runtime: { next_fire: settings.next_fire, paused: settings.paused, last_outcome: settings.last_outcome || null } });
   }
   async prune() {
     const records = [...(await this.storage.list({ prefix: 'run:' }))].sort(([, a], [, b]) => b.created_at - a.created_at);
@@ -144,7 +149,7 @@ export class JobDO {
         }
         settings = await this.storage.get('settings');
         if (!settings.paused) settings.next_fire = Date.parse(nextFires(settings.job.cron, settings.job.timezone, 1)[0]);
-        await this.storage.put('settings', settings);
+        await this.storage.put('settings', settings); await this.publish(settings);
       }
       await this.prune(); await this.arm();
     });

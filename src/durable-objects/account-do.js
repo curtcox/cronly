@@ -15,6 +15,10 @@ export class AccountDO {
       const args = await request.json();
       if (args.op === 'sync-jobs') { await this.syncJobs(); return Response.json({}); }
       const result = await this.storage.transaction(tx => this.dispatch(tx, args));
+      if (args.op === 'init' && result.needs_registration && this.env.SAFETY) {
+        await rpc(this.env.SAFETY, 'global', 'register', { account: args.account });
+        await this.storage.transaction(async tx => { const profile = await tx.get('profile'); await tx.put('profile', { ...profile, platform_registered: true }); });
+      }
       return Response.json(result ?? {});
     } catch (error) { return errorResponse(error); }
   }
@@ -25,9 +29,9 @@ export class AccountDO {
           await tx.put('profile', { id: args.account, created_at: Date.now() });
           await tx.put('balance', 0);
         }
-        return tx.get('profile');
+        const profile = await tx.get('profile'); return { ...profile, needs_registration: !profile.platform_registered };
       }
-      case 'account': { const { holds, ...balance } = await funds(tx); return { ...await tx.get('profile'), ...balance, holds: holds.map(({ id, amount, expires_at }) => ({ id, amount, expires_at })) }; }
+      case 'account': { const { holds, ...balance } = await funds(tx); return { ...await tx.get('profile'), ...balance, job_runtime: Object.fromEntries([...(await tx.list({ prefix: 'runtime:' }))].map(([key, value]) => [key.slice('runtime:'.length), value])), spend_by_job: (await tx.get(`spent:account:self:${new Date().toISOString().slice(0, 7)}`))?.by_job || {}, spend_today_by_job: (await tx.get(`spent:account:self:${new Date().toISOString().slice(0, 10)}`))?.by_job || {}, spent_today_microdollars: ((await tx.get(`spent:account:self:${new Date().toISOString().slice(0, 10)}`))?.spent_microdollars) || 0, spent_month_microdollars: ((await tx.get(`spent:account:self:${new Date().toISOString().slice(0, 7)}`))?.spent_microdollars) || 0, holds: holds.map(({ id, amount, expires_at }) => ({ id, amount, expires_at })) }; }
       case 'reserve': return reserve(tx, { ...args, ...await keyBudget(tx, args.key_id) });
       case 'gateway-request': {
         const hold = await tx.get(`hold:${args.id}`);
@@ -40,7 +44,19 @@ export class AccountDO {
         await tx.put(`rate:destination:${args.host}`, { ...rate, count: rate.count + 1 });
         await tx.put(`hold:${args.id}`, { ...hold, gateway_count: count + 1 }); return { subrequests: count + 1 };
       }
-      case 'prepare-run': return prepareRun(tx, args);
+      case 'job-runtime': await tx.put(`runtime:${args.name}`, args.runtime); return {};
+      case 'metrics': return (await tx.get(`spent:account:self:${args.period}`)) || {};
+      case 'resume-cost-jobs': {
+        const profile = await tx.get('profile');
+        for (const [key] of await tx.list({ prefix: 'def:jobs:' })) { const name = key.slice('def:jobs:'.length); await tx.put(`sync:${name}`, { name, account: profile.id, version: crypto.randomUUID() }); }
+        await tx.setAlarm(Date.now() + 1000); return {};
+      }
+      case 'maintenance': {
+        const now = Date.now();
+        for (const prefix of ['activation:', 'proposal:', 'rate:']) for (const [key, record] of await tx.list({ prefix })) if ((record.expires_at && record.expires_at < now) || (record.reset && record.reset < now) || (record.created_at && record.created_at < now - 31 * 86400000)) await tx.delete(key);
+        return {};
+      }
+      case 'prepare-run': return prepareRun(tx, args, this.env);
       case 'claim-run': return claimRun(tx, args.id);
       case 'config': return loadConfig(tx, args.public_view !== false);
       case 'mutate': return mutate(tx, args, this.env);
@@ -55,7 +71,7 @@ export class AccountDO {
         await tx.put(`prose:${args.id}`, { ...prior, response: args.response }); return {};
       }
       case 'save-proposal': {
-        const quote = await mutate(tx, { id: `validate:${args.id}`, operations: args.operations, dry_run: true }, this.env);
+        const quote = args.operations.length ? await mutate(tx, { id: `validate:${args.id}`, operations: args.operations, dry_run: true }, this.env) : { quote_microdollars: 0 };
         const proposal = { id: args.id, operations: args.operations, quote_microdollars: quote.quote_microdollars, base_hash: args.base_hash, explanation: args.explanation, expires_at: Date.now() + 86400000 };
         await tx.put(`proposal:${args.id}`, proposal); return proposal;
       }
@@ -65,7 +81,7 @@ export class AccountDO {
         assert(proposal.expires_at > Date.now(), 'proposal_expired', 'Proposal expired', 409);
         assert(await digest(JSON.stringify(await loadConfig(tx, true))) === proposal.base_hash, 'stale_proposal', 'Account changed; request a new proposal', 409);
         assert(args.expected_quote === undefined || args.expected_quote === proposal.quote_microdollars, 'quote_changed', 'Quote does not match proposal', 409);
-        const response = await mutate(tx, { account: args.account, key_id: args.key_id, id: `apply:${args.id}`, operations: proposal.operations, dry_run: args.dry_run }, this.env);
+        const response = proposal.operations.length ? await mutate(tx, { account: args.account, key_id: args.key_id, id: `apply:${args.id}`, operations: proposal.operations, dry_run: args.dry_run }, this.env) : { changes: [], quote_microdollars: 0, cost_microdollars: 0 };
         if (!args.dry_run) await tx.put(`proposal:${args.id}`, { ...proposal, applied: response }); return response;
       }
       case 'bill-change': {
@@ -110,9 +126,18 @@ export class AccountDO {
         return { cost_microdollars: amount };
       }
       case 'settle': return settle(tx, args.id, args.actual);
-      case 'deposit': return deposit(tx, args.id, args.amount);
-      case 'dev-deposit': assert(this.env.ENVIRONMENT === 'local', 'not_found', 'Not found', 404); return deposit(tx, args.id, args.amount);
-      case 'list': return { items: [...(await tx.list({ prefix: args.prefix, limit: args.limit || 1000, reverse: args.reverse || false })).values()] };
+      case 'deposit': { const result = await deposit(tx, args.id, args.amount); await this.nudge(tx); return result; }
+      case 'dev-deposit': assert(this.env.ENVIRONMENT === 'local', 'not_found', 'Not found', 404); { const result = await deposit(tx, args.id, args.amount); await this.nudge(tx); return result; }
+      case 'list': {
+        const entries = [...await tx.list({ prefix: args.prefix, ...(args.cursor ? args.reverse ? { end: args.cursor } : { startAfter: args.cursor } : {}), limit: Math.min(args.limit || 1000, 1000), reverse: args.reverse || false })];
+        return { items: entries.map(([, value]) => value), next_cursor: entries.length === Math.min(args.limit || 1000, 1000) ? entries.at(-1)[0] : null };
+      }
+      case 'costs': {
+        const prefix = 'spent:account:self:'; const from = args.from || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10); const to = args.to || new Date().toISOString().slice(0, 10);
+        assert(/^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) && Number.isFinite(Date.parse(from)) && Number.isFinite(Date.parse(to)) && Date.parse(to) >= Date.parse(from) && Date.parse(to) - Date.parse(from) <= 366 * 86400000, 'invalid_window', 'Costs use UTC dates YYYY-MM-DD, at most 366 days');
+        const rows = [...(await tx.list({ prefix, start: `${prefix}${from}`, end: `${prefix}${to}~`, limit: 1000 })).values()].filter(metric => metric.period?.length === 10);
+        return { items: rows, from, to };
+      }
       case 'get': return (await tx.get(args.key)) || null;
       case 'authenticate-key': {
         const key = await tx.get(`key:${args.id}`);
@@ -122,11 +147,16 @@ export class AccountDO {
       default: assert(false, 'unknown_operation', 'Unknown internal operation', 404);
     }
   }
+  async nudge(tx) {
+    const profile = await tx.get('profile'); if (!profile) return;
+    for (const [key] of await tx.list({ prefix: 'def:jobs:' })) { const name = key.slice('def:jobs:'.length); await tx.put(`sync:${name}`, { name, account: profile.id, version: crypto.randomUUID() }); }
+    if ((await tx.list({ prefix: 'sync:' })).size) await tx.setAlarm(Date.now() + 1000);
+  }
   async syncJobs() {
     for (const [key, item] of await this.storage.list({ prefix: 'sync:' })) {
       const job = await this.storage.get(`def:jobs:${item.name}`);
       await rpc(this.env.JOBS, `${item.account}:${item.name}`, 'configure', { account: item.account, name: item.name, job: job || null });
-      await this.storage.delete(key);
+      await this.storage.transaction(async tx => { const current = await tx.get(key); if (current?.version === item.version) await tx.delete(key); });
     }
   }
   async alarm() {

@@ -14,7 +14,11 @@
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
-    "verify:production": "node scripts/verify-production.mjs"
+    "verify:production": "node scripts/verify-production.mjs",
+    "test:local": "node scripts/verify-local.mjs",
+    "test:sandbox:live": "node scripts/verify-sandbox-live.mjs",
+    "docs:generate": "node scripts/generate-openapi.mjs && node scripts/sdk-integrity.mjs",
+    "eval:prose": "node scripts/eval-prose.mjs"
   },
   "dependencies": {
     "@clerk/backend": "2.33.9",

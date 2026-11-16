@@ -11,6 +11,7 @@ export async function checkout(request, env, auth, dryRun) {
   if (Date.now() - account.created_at < 7 * 86400000) assert(credit <= COST_POLICY.newAccountDepositCapCents, 'deposit_cap', 'New accounts may deposit at most $20 per payment');
   const total = grossUp(credit);
   if (dryRun) return { credit_cents: credit, card_cost_cents: total - credit, total_cents: total, cost_microdollars: 0 };
+  assert(env.ENVIRONMENT !== 'production' || env.LAUNCH_APPROVED === 'true', 'launch_pending', 'Payments open after owner and legal launch approval', 503);
   assert(env.STRIPE_SECRET_KEY, 'payments_unavailable', 'Payments are not configured', 503);
   const stripe = new Stripe(env.STRIPE_SECRET_KEY, { httpClient: Stripe.createFetchHttpClient() });
   const session = await stripe.checkout.sessions.create({

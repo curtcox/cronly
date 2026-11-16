@@ -3,7 +3,7 @@ import cronstrue from 'cronstrue';
 import { assert } from '../utils/errors.js';
 /** Validate standard minute cron and IANA time zone without registering a timer. */
 export function cron(expression, timezone = 'UTC') {
-  assert(typeof expression === 'string' && expression.trim().split(/\s+/).length === 5, 'invalid_cron', 'Use a five-field cron expression (minimum interval one minute)');
+  assert(typeof expression === 'string' && expression.length <= 256 && typeof timezone === 'string' && !/^[-+]/.test(timezone) && expression.trim().split(/\s+/).length === 5, 'invalid_cron', 'Use a five-field cron expression (minimum interval one minute)');
   try { new Intl.DateTimeFormat('en', { timeZone: timezone }); return new Cron(expression, { timezone, paused: true }); }
   catch { assert(false, 'invalid_cron', 'Invalid cron expression or time zone'); }
 }

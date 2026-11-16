@@ -26,7 +26,9 @@ export async function mutate(tx, args, env) {
   const receiptKey = `idempotency:${args.key_id || 'session'}:${args.id}`;
   const prior = await tx.get(receiptKey);
   if (prior) { assert(prior.request_hash === requestHash, 'idempotency_conflict', 'Idempotency key used for a different request', 409); return prior.response; }
-  const config = await loadConfig(tx); const changes = [];
+  const config = await loadConfig(tx);
+  if (args.expected_config_hash) assert(await digest(JSON.stringify(await loadConfig(tx, true))) === args.expected_config_hash, 'config_conflict', 'Configuration changed while preparing the import; retry its quote', 409);
+  const changes = [];
   for (const operation of args.operations) {
     const { kind, name, delete: deleting, value } = operation;
     assert(COLLECTIONS.includes(kind), 'invalid_kind', 'Unknown definition kind'); validateName(name);
@@ -47,13 +49,14 @@ export async function mutate(tx, args, env) {
   const hold = await reserve(tx, { id: `change:${args.id}:${args.key_id || 'session'}`, amount: quote, kind: 'change', ...await keyBudget(tx, args.key_id) });
   for (const operation of args.operations) {
     const { kind, name } = operation;
+    if (kind === 'jobs') await tx.put(`job-index:${name}`, { name, account: args.account, updated_at: Date.now() });
     if (operation.delete) await tx.delete(`def:${kind}:${name}`);
     else await tx.put(`def:${kind}:${name}`, config[kind][name]);
     // Job metadata is recalculated after action edits too.
-    if (kind === 'jobs') await tx.put(`sync:${name}`, { name, account: args.account });
+    if (kind === 'jobs') await tx.put(`sync:${name}`, { name, account: args.account, version: crypto.randomUUID() });
   }
   if (args.operations.some(op => op.kind === 'actions')) for (const [name, job] of Object.entries(config.jobs)) {
-    await tx.put(`def:jobs:${name}`, job); await tx.put(`sync:${name}`, { name, account: args.account });
+    await tx.put(`def:jobs:${name}`, job); await tx.put(`sync:${name}`, { name, account: args.account, version: crypto.randomUUID() });
   }
   await tx.put(`audit:${Date.now()}:${args.id}`, { id: args.id, changes, created_at: Date.now(), key_id: args.key_id || null });
   await settle(tx, hold.id, quote);

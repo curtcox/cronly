@@ -36,7 +36,7 @@ it('encrypts write-only secrets and binds ciphertext to account and name', async
 });
 it('enforces scoped keys and includes read spending in daily caps', async () => {
   const { api, env } = setup(); await api('/api/dev/deposit', 'POST', { amount_microdollars: 1000 });
-  const key = await api('/api/keys', 'POST', { scopes: ['read'], daily_spend_microdollars: 1 });
+  const key = await api('/api/keys', 'POST', { scopes: ['read'], daily_spend_microdollars: 20 });
   expect(key.token).toMatch(/^crk_/);
   const request = (path, method = 'GET') => worker.fetch(new Request(`https://cronly.org${path}`, { method, headers: { Authorization: `ApiKey ${key.token}` } }), env);
   expect((await request('/api/account')).status).toBe(200);

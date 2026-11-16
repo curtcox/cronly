@@ -11,6 +11,7 @@ export function parseScopes(input) {
 export function canAccess(auth, access) {
   if (access === PUBLIC) return true;
   if (!auth) return false;
+  if (Array.isArray(access)) return access.some(scope => canAccess(auth, scope));
   if (access === SESSION) return auth.session === true;
   return Boolean(access && (auth.session || auth.scopes?.includes(access)));
 }

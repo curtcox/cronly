@@ -20,7 +20,7 @@ import { namespace } from '../test-utils/storage.js';
 it('declares access for every dispatchable route', () => {
   expect(new Set(API_ROUTES.map(r => `${r.method} ${r.path}`)).size).toBe(API_ROUTES.length);
   for (const route of API_ROUTES) {
-    expect([PUBLIC, SESSION, ...USER_SCOPES]).toContain(route.access);
+    for (const access of [route.access].flat()) expect([PUBLIC, SESSION, ...USER_SCOPES]).toContain(access);
     expect(matchRoute(route.method, route.path.replaceAll(/:[a-z_]+/g, 'example'))?.handler).toBe(route.handler);
   }
 });

@@ -1,3 +1,4 @@
+import { digest } from '../auth/crypto.js';
 import { assert, readJson } from '../utils/errors.js';
 import { rpc } from '../utils/rpc.js';
 import { normalize, COLLECTIONS } from '../services/definitions.js';
@@ -25,7 +26,7 @@ export async function putConfig(request, env, auth) {
   const operations = configDiff(current, body.config || body);
   if (operations.some(op => op.kind === 'secrets')) assert(auth.session || auth.scopes.includes('secrets:write'), 'insufficient_scope', 'secrets:write is required to remove secrets', 403);
   if (!operations.length) return { changes: [], quote_microdollars: 0, cost_microdollars: 0 };
-  const result = await rpc(env.ACCOUNTS, auth.account, 'mutate', { account: auth.account, key_id: auth.key_id, id: request.headers.get('Idempotency-Key') || crypto.randomUUID(), dry_run: new URL(request.url).searchParams.get('dry_run') === '1', operations });
+  const result = await rpc(env.ACCOUNTS, auth.account, 'mutate', { account: auth.account, key_id: auth.key_id, expected_config_hash: await digest(JSON.stringify(current)), id: request.headers.get('Idempotency-Key') || crypto.randomUUID(), dry_run: new URL(request.url).searchParams.get('dry_run') === '1', operations });
   try { await rpc(env.ACCOUNTS, auth.account, 'sync-jobs'); } catch { /* The durable outbox handles recovery. */ }
   return result;
 }

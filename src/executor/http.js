@@ -22,6 +22,7 @@ export async function guardedFetch(request, env, account, signal, redirects = 0,
     const url = validateDestination(current.url);
     await rpc(env.ACCOUNTS, account, 'rate-limit', { id: `destination:${url.hostname}`, limit: 60 });
     assert(index < maxRequests, 'subrequest_limit', 'Subrequest limit reached');
+    const replayBody = ['GET', 'HEAD'].includes(current.method) ? undefined : await current.clone().arrayBuffer();
     const response = await (env.OUTBOUND_FETCH || fetch)(current, { redirect: 'manual', signal });
     if (![301, 302, 303, 307, 308].includes(response.status) || !response.headers.has('location') || index >= redirects) return response;
     const destination = validateDestination(new URL(response.headers.get('location'), current.url).href);
@@ -29,7 +30,7 @@ export async function guardedFetch(request, env, account, signal, redirects = 0,
     if (destination.origin !== url.origin) for (const name of [...headers.keys()]) headers.delete(name);
     const method = response.status === 303 || ((response.status === 301 || response.status === 302) && current.method === 'POST') ? 'GET' : current.method;
     await response.body?.cancel();
-    current = new Request(destination, { method, headers, body: ['GET', 'HEAD'].includes(method) ? undefined : await current.clone().arrayBuffer() });
+    current = new Request(destination, { method, headers, body: ['GET', 'HEAD'].includes(method) ? undefined : replayBody });
   }
 }
 /** Render, execute and redact an HTTP action within a wall-clock deadline. */

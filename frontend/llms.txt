@@ -1,0 +1,14 @@
+# cronly.org
+Prepaid scheduling of named HTTP or JavaScript actions. Standard 5-field cron, IANA zones, manual and job-only webhook triggers. No workflow chaining.
+
+- Human and agent guide: https://cronly.org/docs/agents.html
+- OpenAPI 3.1: https://cronly.org/openapi.json
+- MCP Streamable HTTP (stateless, JSON responses): https://cronly.org/mcp
+- Prices and costs: https://cronly.org/pricing.html
+
+Authenticate with Authorization: ApiKey crk_… . Scopes: read, run, change, prose, secrets:write; optional daily spend cap. API reads are billed. Browser session reads are free and rate-limited.
+Quote mutations with ?dry_run=1 first. This validates and charges nothing. Applying is a separate request, with Idempotency-Key. Every response exposes cost_microdollars and balance_microdollars. Money is integer micro-dollars; 1 USD = 1,000,000. A 402 refusal means balance or budget; do not retry without changing funding/budget.
+GET /api/config exports definitions and secret metadata. PUT /api/config imports an atomic quoted diff. Set secret values separately; they are write-only.
+Prose/change returns a proposal; it never changes an account. POST /api/changes/{id}/apply applies it after a separate quote/review. Stale proposals are rejected.
+MCP tools: list_jobs, upcoming, recent_runs, get_run, explain_cron, prose_to_cron, quote, apply_change, run_job, balance. MCP uses the same scopes, holds and budgets as HTTP.
+Do not expose API keys in public pages. Use revocable single-job trigger tokens and job budgets. The immutable browser SDK and SRI hash are at /sdk/integrity.json.

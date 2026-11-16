@@ -1,3 +1,5 @@
+import { worstCaseCost, COST_POLICY } from '../utils/cost-policy.js';
+import { PRICES } from '../utils/pricing.js';
 import { assert } from '../utils/errors.js';
 /** Validate all money at the boundary; never use floating balances. */
 export function money(value) { assert(Number.isSafeInteger(value) && value >= 0, 'invalid_money', 'Expected nonnegative integer micro-dollars'); return value; }
@@ -40,11 +42,18 @@ export async function settle(tx, id, actual, now = Date.now()) {
   const balance = (await tx.get('balance')) || 0;
   assert(balance >= amount, 'ledger_invariant', 'Invalid ledger state', 500);
   await tx.put('balance', balance - amount);
-  for (const [kind, value] of [['job', hold.job], ['key', hold.key_id]]) {
+  for (const [kind, value] of [['account', 'self'], ['job', hold.job], ['key', hold.key_id]]) {
     if (!value) continue;
     for (const period of [hold.day, hold.month]) {
       const key = `spent:${kind}:${value}:${period}`;
-      await tx.put(key, ((await tx.get(key)) || 0) + amount);
+      if (kind === 'account') {
+        const existing = await tx.get(key); const metric = typeof existing === 'number' ? { spent_microdollars: existing } : existing || {};
+        const estimate = hold.kind === 'prose' ? Math.max(0, (amount - PRICES.proseBase) / PRICES.proseMarkup) : worstCaseCost(hold.kind, hold.execution?.action) - (hold.execution?.action?.type === 'javascript' && hold.actual_price < hold.amount ? COST_POLICY.dynamicWorkerDay : 0);
+        const jobGroup = hold.job || hold.kind || 'other'; const actionGroup = hold.action || hold.kind || 'other';
+        const by_job = { ...metric.by_job, [jobGroup]: ((metric.by_job || {})[jobGroup] || 0) + amount };
+        const by_action = { ...metric.by_action, [actionGroup]: ((metric.by_action || {})[actionGroup] || 0) + amount };
+        await tx.put(key, { period, by_job, by_action, spent_microdollars: (metric.spent_microdollars || 0) + amount, estimated_cost_microdollars: (metric.estimated_cost_microdollars || 0) + Math.ceil(estimate) });
+      } else await tx.put(key, ((await tx.get(key)) || 0) + amount);
     }
   }
   const { execution: _execution, ...receipt } = hold;

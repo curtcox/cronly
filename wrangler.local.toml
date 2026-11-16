@@ -21,6 +21,8 @@ TOKEN_SIGNING_KEY = "local-only-signing-key-never-use-in-production"
 # STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, SECRETS_MASTER_KEY,
 # TOKEN_SIGNING_KEY, ANTHROPIC_API_KEY
 # Optional: CLOUDFLARE_ANALYTICS_TOKEN, CLOUDFLARE_ACCOUNT_ID, ALERT_WEBHOOK_URL
+# Required for live runs: COST_SAFETY_DO_NAMESPACES (comma-separated cronly namespace IDs).
+# JS_ACCEPTANCE_ACCOUNT allows the owner to perform live acceptance; JS_LIVE_ACCEPTED=true unlocks JS after acceptance.
 # COST_SAFETY_HARD_STOP=true provides an immediate operator brake.
 
 [[durable_objects.bindings]]
@@ -53,3 +55,16 @@ cpu_ms = 50
 
 [[worker_loaders]]
 binding = "LOADER"
+
+[[durable_objects.bindings]]
+name = "SAFETY"
+class_name = "SafetyDO"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["SafetyDO"]
+
+[[ratelimits]]
+name = "PUBLIC_LIMITER"
+namespace_id = "1001"
+simple = { limit = 240, period = 60 }

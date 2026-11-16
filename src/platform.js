@@ -4,7 +4,7 @@ import { rpc } from './utils/rpc.js';
 import { assert, errorResponse } from './utils/errors.js';
 import { validateDestination } from './executor/destinations.js';
 export { default } from './index.js';
-export { AccountDO, JobDO, API_ROUTES } from './index.js';
+export { AccountDO, JobDO, SafetyDO, API_ROUTES } from './index.js';
 
 /** Only capability passed to a sandbox; all native network access is disabled. */
 export class OutboundGateway extends WorkerEntrypoint {
@@ -16,7 +16,7 @@ export class OutboundGateway extends WorkerEntrypoint {
       const url = validateDestination(request.url);
       assert(!request.headers.has('upgrade'), 'unsupported_protocol', 'Protocol upgrades are disabled');
       await rpc(this.env.ACCOUNTS, token.account, 'gateway-request', { id: token.id, host: url.hostname });
-      const headers = new Headers(request.headers); headers.delete('x-cronly-capability');
+      const headers = new Headers(request.headers); headers.delete('x-cronly-capability'); headers.delete('host'); headers.delete('connection'); headers.delete('content-length');
       return fetch(new Request(request, { headers, redirect: 'manual', signal: AbortSignal.timeout(30000) }));
     } catch (error) { return errorResponse(error); }
   }

@@ -8,13 +8,14 @@ import { references } from '../executor/templates.js';
 import { price } from '../utils/pricing.js';
 import { COST_POLICY } from '../utils/cost-policy.js';
 /** Freeze the action and only the referenced credentials inside the prepaid hold. */
-export async function prepareRun(tx, args) {
+export async function prepareRun(tx, args, env = {}) {
   assert(args.input && typeof args.input === 'object' && !Array.isArray(args.input) && Object.keys(args.input).length <= 32 && Object.entries(args.input).every(([k, v]) => /^[a-zA-Z0-9_-]{1,64}$/.test(k) && typeof v === 'string' && v.length <= 2048), 'invalid_input', 'Webhook input must be a small object of strings');
   const prior = await tx.get(`hold:${args.id}`) || await tx.get(`receipt:${args.id}`);
-  if (prior) return { id: args.id, duplicate: true, amount: prior.amount };
-  const job = await tx.get(`def:jobs:${args.name}`);
+  if (prior) return { id: args.id, duplicate: true, amount: prior.amount, settled: prior.settled };
+  const job = args.test_action ? { action: args.test_action, enabled: true, overlap: 'allow', retries: 0, budget: {}, cron: null } : await tx.get(`def:jobs:${args.name}`);
   assert(job, 'not_found', 'Job not found', 404); assert(job.enabled, 'job_disabled', 'Job is disabled', 409);
   const action = await tx.get(`def:actions:${job.action}`); assert(action, 'unknown_action', 'Action missing', 409);
+  if (action.type === 'javascript' && env.ENVIRONMENT === 'production') assert(env.JS_LIVE_ACCEPTED === 'true' || (await tx.get('profile')).id === env.JS_ACCEPTANCE_ACCOUNT, 'sandbox_acceptance_required', 'JavaScript requires live sandbox acceptance', 503);
   const holds = [...(await tx.list({ prefix: 'hold:' })).values()];
   assert(holds.filter(h => h.kind === 'run').length < COST_POLICY.concurrency, 'concurrency_limit', 'Maximum concurrent account runs reached', 429);
   if (job.overlap === 'skip') assert(!holds.some(h => h.job === args.name), 'overlap', 'Previous run is unfinished', 409);
@@ -32,6 +33,8 @@ export async function prepareRun(tx, args) {
     }
   }
   const amount = price(args.trigger === 'webhook' ? 'hook' : 'run', action);
+  if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
+  if (args.test_action) await tx.put(`job-index:${args.name}`, { name: args.name, account: args.account, updated_at: Date.now() });
   const hold = await reserve(tx, { id: args.id, amount, job: args.name, action: job.action, kind: 'run', budget: job.budget, ...await keyBudget(tx, args.key_id), execution: { version: action.type === 'javascript' ? await digest(JSON.stringify([SANDBOX_WRAPPER, action])) : null, action, vars, secrets, job, input: args.input, trigger: args.trigger, scheduled_at: args.scheduled_at }, ttl_ms: 120000 });
   await tx.put(`last-run:${args.name}`, now);
   return { id: hold.id, amount, job };

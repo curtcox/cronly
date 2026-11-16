@@ -1,3 +1,4 @@
+import { boundLog } from './logs.js';
 import { rpc } from '../utils/rpc.js';
 import { decryptSecret } from './secrets.js';
 import { executeHttp } from './http.js';
@@ -19,6 +20,6 @@ export async function consume(message, env, ctx) {
     } else result = await executeHttp(execution, context, env, secrets);
   } catch { result = { status: 'failure', error: 'Action failed or exceeded its limits' }; }
   // Store the outcome before acknowledging. On reporting failure, the hold still bounds cost.
-  await rpc(env.JOBS, `${account}:${name}`, 'result', { id, result });
+  await rpc(env.JOBS, `${account}:${name}`, 'result', { id, result: boundLog(result) });
   message.ack();
 }

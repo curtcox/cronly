@@ -5,13 +5,13 @@ import { redact } from './secrets.js';
 // User code is imported only after the log sink is locked. This wrapper never receives
 // platform secrets; its env contains just the narrowly scoped outbound capability.
 export const SANDBOX_WRAPPER = `
+import { AsyncLocalStorage } from 'node:async_hooks';
+const logs = new AsyncLocalStorage();
 const stringify = JSON.stringify.bind(JSON);
 const parse = JSON.parse.bind(JSON);
-let log = '';
-const capture = (...args) => { if (log.length < 6000) log += args.map(x => typeof x === 'string' ? x : stringify(x)).join(' ').slice(0, 6000 - log.length) + '\\n'; };
+const capture = (...args) => { const store = logs.getStore(); if (store && store.text.length < 6000) store.text += args.map(x => typeof x === 'string' ? x : stringify(x)).join(' ').slice(0, 6000 - store.text.length) + '\\n'; };
 Object.defineProperty(globalThis, 'console', { value: Object.freeze(Object.fromEntries(['log','info','warn','error','debug','trace','dir','table','assert','time','timeEnd','count'].map(name => [name, capture]))), writable: false, configurable: false });
-export default { async fetch(request, env) {
-  log = '';
+export default { async fetch(request, env) { return logs.run({ text: '' }, async () => {
   const input = parse(await request.text());
   const gateway = env.GATEWAY;
   const capability = input.capability;
@@ -24,9 +24,9 @@ export default { async fetch(request, env) {
     const { default: run } = await import('./user.js');
     if (typeof run !== 'function') throw new Error('Default export must be a function');
     const result = await run(context);
-    return new Response(stringify({ status: 'success', value_text: stringify(result ?? null).slice(0, 6000), console: log }), { headers: { 'content-type': 'application/json' } });
-  } catch { return new Response(stringify({ status: 'failure', error: 'JavaScript action failed', console: log })); }
-} };
+    return new Response(stringify({ status: 'success', value_text: stringify(result ?? null).slice(0, 6000), console: logs.getStore().text }), { headers: { 'content-type': 'application/json' } });
+  } catch { return new Response(stringify({ status: 'failure', error: 'JavaScript action failed', console: logs.getStore().text })); }
+}); } };
 `;
 /** Use a content-addressed isolate, enforced limits and zero native network access. */
 export async function executeJavaScript(execution, context, env, ctx, secrets) {
@@ -34,7 +34,7 @@ export async function executeJavaScript(execution, context, env, ctx, secrets) {
   const action = execution.action; const version = await digest(JSON.stringify([SANDBOX_WRAPPER, action]));
   const gateway = ctx.exports.OutboundGateway({ props: { account: context.account.id } });
   const sandbox = env.LOADER.get(`${context.account.id}:${version}`, async () => ({
-    compatibilityDate: '2026-10-30', mainModule: 'wrapper.js', modules: { 'wrapper.js': SANDBOX_WRAPPER, 'user.js': action.source },
+    compatibilityDate: '2026-10-30', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2', 'nodejs_als', 'disallow_importable_env'], mainModule: 'wrapper.js', modules: { 'wrapper.js': SANDBOX_WRAPPER, 'user.js': action.source },
     env: { GATEWAY: gateway }, globalOutbound: null, limits: { cpuMs: action.cpu_ms, subRequests: action.subrequests + 1 }
   }));
   const capability = await signToken('eg_', { account: context.account.id, id: context.run.id }, env.TOKEN_SIGNING_KEY);
