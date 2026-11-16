@@ -5,7 +5,7 @@ export class MemoryStorage {
   async put(key, value) { this.rows.set(key, structuredClone(value)); }
   async delete(key) { return this.rows.delete(key); }
   async list({ prefix = '', limit = Infinity, reverse = false, start, startAfter, end } = {}) {
-    let entries = [...this.rows].filter(([key]) => key.startsWith(prefix) && (!start || key >= start) && (!startAfter || key > startAfter) && (!end || key < end)).sort(([a], [b]) => a.localeCompare(b));
+    let entries = [...this.rows].filter(([key]) => key.startsWith(prefix) && (!start || key >= start) && (!startAfter || key > startAfter) && (!end || key < end)).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
     if (reverse) entries.reverse();
     return new Map(structuredClone(entries.slice(0, limit)));
   }

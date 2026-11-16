@@ -8,6 +8,7 @@ import { parseScopes } from '../auth/scopes.js';
 import { funds, reserve, settle, deposit, charge } from './ledger.js';
 import { beginSecretRotation, finishSecretRotation } from './secret-rotation.js';
 import { accountMoney, accountMetric } from './account-money.js';
+import { listLedger } from './ledger-history.js';
 
 /** Account definitions and money share one transactional, SQLite-backed object. */
 export class AccountDO {
@@ -151,6 +152,7 @@ export class AccountDO {
       case 'deposit': { const result = await deposit(tx, args.id, args.amount); if (!result.duplicate) await this.nudge(tx); return result; }
       case 'dev-deposit': assert(this.env.ENVIRONMENT === 'local', 'not_found', 'Not found', 404); { const result = await deposit(tx, args.id, args.amount); if (!result.duplicate) await this.nudge(tx); return result; }
       case 'list': {
+        if (args.prefix === 'ledger:') return listLedger(tx, args);
         const entries = [...await tx.list({ prefix: args.prefix, ...(args.cursor ? args.reverse ? { end: args.cursor } : { startAfter: args.cursor } : {}), limit: Math.min(args.limit || 1000, 1000), reverse: args.reverse || false })];
         return { items: entries.map(([, value]) => value), next_cursor: entries.length === Math.min(args.limit || 1000, 1000) ? entries.at(-1)[0] : null };
       }

@@ -74,7 +74,7 @@ disagrees with it, this file wins and the other document is stale.
 | S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ✅ | Atomic versioned keyring, legacy reads, held per-secret re-encryption, edit/delete conflict protection, audit, scoped CLI and CI wiring verified. Persisted local Worker migrated v1 → v2 and executed a redacted JS run with v1 retired. [Operator procedure](docs/ops/secret-rotation.md). §3.3. |
 | S2 | Charge measured JS CPU instead of the configured limit | code | ⬜ | §3.4; needs per-invocation CPU data. |
 | S3 | Recalibrate prices from a month of real Cloudflare and Anthropic bills | ops/code | ⬜ | `docs/business/pricing.md`. |
-| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budget counters save 2–4 writes; unchanged alarms/runtime/recent-job indexes skip writes. Transactional reads/changes skip transient holds/expiry alarms; active day/month summaries share the balance row (two fewer ordinary settlement writes); repeated outcomes skip settings writes. Staged completion/private retry recovery is verified. The 72-path audit covers compact, rollover and large-period states, including unfunded-retry pauses: 38 writes, 30 DO requests/five Worker invocations at 89 µ$/run after rounded floors. Further durable hold/ledger compaction remains. [Cost audit](docs/business/pricing.md). |
+| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budgets, active money summaries and ledger buffering reduce ordinary writes; unchanged alarms/runtime/recent-job indexes and completion settings skip writes. Transactional reads/changes skip transient holds. Ledger pages retain legacy cursors and permanent receipts. The 72-path audit includes ledger archival, compact/rollover/large-period money summaries and unfunded-retry pauses: 38 writes, 30 DO requests/five Worker invocations at 89 µ$/run after rounded floors. Further durable hold compaction remains. [Cost audit](docs/business/pricing.md). |
 
 ## Backlog
 
@@ -269,3 +269,19 @@ calendar days of billed counts rather than sampling retained logs.
   redaction, native networking denial, gateway, funded retry and ledger/cost totals).
 - S4 durable hold/ledger compaction and L9–L14 owner/live acceptance remain open.
   Nothing was deployed to production; published prices are unchanged.
+
+## S4 buffered ledger unit acceptance — 2026-11-16
+
+- Recent ledger entries share the transactional balance write. A full buffer archives
+  into one permanent page, bounded to 100 entries or 16,000 UTF-8 bytes; both active
+  money summaries and history fit within the compact storage value limit.
+- Ordinary settlement/immediate billing uses two puts instead of three. Permanent
+  receipt tombstones remain separate, so duplicate checks and active-hold scans stay
+  bounded. Legacy standalone history and cursors remain readable in both directions.
+- Lint and all 181 unit/integration tests pass, covering mixed-history pagination,
+  byte bounds, simultaneous entries, backwards clocks, cold restart, duplicate charges
+  and transactional rollback at archive/balance/receipt failures. All 72 full-path
+  cost checks now force ledger archival as well as their existing recovery states.
+- Archival retains the previous worst-case allowance, so the 89 µ$ price is unchanged.
+  Browser/build/local Worker acceptance is pending for this increment. L9–L14 live
+  acceptance and owner steps remain open; nothing was deployed to production.

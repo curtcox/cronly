@@ -2,6 +2,7 @@ import { worstCaseCost, COST_POLICY } from '../utils/cost-policy.js';
 import { PRICES } from '../utils/pricing.js';
 import { assert } from '../utils/errors.js';
 import { accountMoney, accountMetric, updateAccountMetric } from './account-money.js';
+import { appendLedger } from './ledger-history.js';
 /** Validate all money at the boundary; never use floating balances. */
 export function money(value) { assert(Number.isSafeInteger(value) && value >= 0, 'invalid_money', 'Expected nonnegative integer micro-dollars'); return value; }
 /** Read the account's spendable funds inside the same storage transaction. */
@@ -80,13 +81,13 @@ async function settleReservation(tx, hold, actual, now, immediate = false) {
     await updateAccountMetric(tx, state, { period, budget_spent, run_count_by_job, by_job, by_action, spent_microdollars: (metric.spent_microdollars || 0) + amount, estimated_cost_microdollars: (metric.estimated_cost_microdollars || 0) + Math.ceil(estimate) });
   }
   // The balance and active summaries always commit together, including deposits.
+  await appendLedger(tx, state, { id, amount_microdollars: -amount, kind: hold.kind, job: hold.job, action: hold.action, created_at: now });
   await tx.put('balance', state);
   const { execution: _execution, ...receipt } = hold;
   const result = { ...receipt, settled: true, charged: amount, settled_at: now };
   // The permanent receipt is also the reservation tombstone; duplicates cannot spend twice.
   if (!immediate) await tx.delete(`hold:${id}`);
   await tx.put(`receipt:${id}`, result);
-  await tx.put(`ledger:${String(now).padStart(13, '0')}:${id}`, { id, amount_microdollars: -amount, kind: hold.kind, job: hold.job, action: hold.action, created_at: now });
   return result;
 }
 /** Credit a verified payment once, even across repeated webhook deliveries. */
@@ -95,7 +96,7 @@ export async function deposit(tx, id, amount, now = Date.now()) {
   if (await tx.get(`deposit:${id}`)) return { duplicate: true };
   const state = await accountMoney(tx);
   const balance = state.balance_microdollars + amount; money(balance);
+  await appendLedger(tx, state, { id, kind: 'deposit', amount_microdollars: amount, created_at: now });
   await tx.put('balance', { ...state, balance_microdollars: balance }); await tx.put(`deposit:${id}`, { amount, created_at: now });
-  await tx.put(`ledger:${now}:deposit:${id}`, { id, kind: 'deposit', amount_microdollars: amount, created_at: now });
   return { balance_microdollars: balance };
 }

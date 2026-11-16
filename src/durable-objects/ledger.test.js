@@ -2,6 +2,7 @@ import { it, expect, vi } from 'vitest';
 import { MemoryStorage } from '../../test-utils/storage.js';
 import { reserve, settle, deposit, funds, charge } from './ledger.js';
 import { accountMetric } from './account-money.js';
+import { listLedger } from './ledger-history.js';
 
 const time = Date.parse('2026-11-30T23:59:00Z');
 async function setup() {
@@ -15,7 +16,7 @@ it('settles job and key budgets in the account summaries without separate counte
   await hold({ id: 'r', amount: 80, kind: 'run', job: 'j', key_id: 'k', budget: { day: 100 }, key_budget: { day: 100 } });
   const put = vi.spyOn(storage, 'put');
   await charge('r', 30);
-  expect(put).toHaveBeenCalledTimes(3); // Compact balance/summaries, receipt and ledger.
+  expect(put).toHaveBeenCalledTimes(2); // Compact balance/summaries/history and receipt.
   expect(put.mock.calls.some(([key]) => key.startsWith('spent:job:') || key.startsWith('spent:key:'))).toBe(false);
   for (const period of ['2026-11-30', '2026-11']) expect(await accountMetric(storage, period)).toMatchObject({ budget_spent: { job: { j: 30 }, key: { k: 30 } }, spent_microdollars: 30 });
   put.mockClear(); await charge('r', 80); expect(put).not.toHaveBeenCalled();
@@ -80,7 +81,7 @@ it('charges transactional work once without a transient hold or expiry alarm', a
   const args = { id: 'read', amount: 20, kind: 'read', key_id: 'k', key_budget: { day: 100 } };
   const billed = await storage.transaction(tx => charge(tx, args, time));
   expect(billed).toMatchObject({ settled: true, charged: 20 });
-  expect(put).toHaveBeenCalledTimes(3);
+  expect(put).toHaveBeenCalledTimes(2);
   expect(remove).not.toHaveBeenCalled(); expect(setAlarm).not.toHaveBeenCalled();
   expect(await storage.getAlarm()).toBe(alarm);
   expect(await funds(storage)).toMatchObject({ balance_microdollars: 9980, held_microdollars: 80 });
@@ -104,7 +105,7 @@ it('rolls back an immediate charge when its definition write fails', async () =>
   expect(await storage.get('receipt:change')).toBeUndefined();
   expect(await accountMetric(storage, '2026-11')).toBeUndefined();
   expect(await storage.get('def:variables:value')).toBeUndefined();
-  expect((await storage.list({ prefix: 'ledger:' })).size).toBe(1); // Original deposit only.
+  expect((await listLedger(storage)).items).toHaveLength(1); // Original deposit only.
   expect(await storage.getAlarm()).toBeNull();
 });
 
@@ -126,14 +127,14 @@ it('archives UTC windows once, preserves deposits and applies late settlements t
   const put = vi.spyOn(storage, 'put');
   const next = Date.parse('2026-12-01T00:01:00Z');
   await storage.transaction(tx => charge(tx, { id: 'new', amount: 20, kind: 'read', key_id: 'k', key_budget: { day: 20 } }, next));
-  expect(put).toHaveBeenCalledTimes(5); // Two archives plus compact state, receipt and ledger.
+  expect(put).toHaveBeenCalledTimes(4); // Two archives plus compact state and receipt.
   expect(await storage.get('spent:account:self:2026-11')).toEqual(november);
   const december = await accountMetric(storage, '2026-12');
   await storage.transaction(tx => deposit(tx, 'more', 100, next));
   expect(await accountMetric(storage, '2026-12')).toEqual(december);
   put.mockClear();
   await finish('late', 50, next);
-  expect(put).toHaveBeenCalledTimes(5); // Late periods stay standalone.
+  expect(put).toHaveBeenCalledTimes(4); // Late periods stay standalone.
   expect(await accountMetric(storage, '2026-11')).toMatchObject({ spent_microdollars: 80, budget_spent: { job: { j: 80 }, key: { k: 80 } } });
   expect(await accountMetric(storage, '2026-12')).toEqual(december);
   expect(await funds(storage)).toMatchObject({ balance_microdollars: 10000, held_microdollars: 0 });

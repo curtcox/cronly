@@ -82,7 +82,16 @@ for (const summaryMode of ['compact', 'rollover', 'large-periods']) {
           await job.storage.put(`run:${run.id}`, run); await job.history(run);
         }
         job.historyCache = null; // Include the cold object's index scan.
-        await env.ACCOUNTS.get('a').storage.deleteAlarm(); // Include a fresh hold's expiry alarm.
+        const accountStorage = env.ACCOUNTS.get('a').storage;
+        // Include a full ledger buffer: this run must archive a page as well as
+        // roll over/archive money summaries in the corresponding scenarios.
+        const state = await accountStorage.get('balance');
+        while (state.ledger.items.length < 100) {
+          const sequence = ++state.ledger.sequence;
+          state.ledger.items.push([`ledger:${state.ledger.timestamp}:~${String(sequence).padStart(16, '0')}:seed`, { id: `seed-${sequence}`, amount_microdollars: 0, created_at: state.ledger.timestamp }]);
+        }
+        await accountStorage.put('balance', state);
+        await accountStorage.deleteAlarm(); // Include a fresh hold's expiry alarm.
         usage.writes = 0; usage.requests = 0; usage.reads = 0; usage.workerRequests = 0;
         if (mode === 'schedule') { job.storage.alarm = null; usage.requests++; await job.alarm(); }
         else await api(mode === 'test' ? '/api/actions/ping/test' : mode === 'hook' ? `/hook/${token}` : '/api/jobs/j/run', mode === 'hook' ? {} : undefined);

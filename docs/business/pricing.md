@@ -118,9 +118,18 @@ saved atomically with completed logs; the worst-case bound still includes that w
 
 Pending-run metadata now shares the compact history row, saving another write per
 run. Completed logs and summaries commit atomically. Legacy queued records remain
-readable, and cold outbox recovery is tested. Permanent receipt tombstones and the
-sortable ledger remain separate so outstanding-hold scans stay bounded; further
-safe compaction remains S4 work.
+readable, and cold outbox recovery is tested. Permanent receipt tombstones remain
+separate so outstanding-hold scans stay bounded. Recent ledger entries now share
+the balance row, saving one more ordinary settlement write. A full buffer archives
+to one immutable page, bounded to 100 entries or 16,000 UTF-8 bytes; this leaves
+room beside the two 50,000-byte money summaries. Transaction history merges buffered
+entries, archived pages and legacy standalone rows using bounded reads in either
+direction; old cursors remain valid. New cursors use a persisted sequence to order
+simultaneous entries and withstand a backwards wall clock, while entries retain
+their actual creation times. Receipt lookup and all accounting still commit atomically.
+The 72 cost checks force a full ledger buffer alongside their money-summary and
+recovery scenarios; archival needs the saved write, so the worst-case bound and
+prices are unchanged. Further safe hold compaction remains S4 work.
 
 ## Verified provider sources
 
