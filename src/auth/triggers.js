@@ -4,7 +4,7 @@ import { assert, readJson } from '../utils/errors.js';
 /** Manage signed job-only credentials; revocation state stays with the job. */
 export async function triggers(route, request, env, auth) {
   const name = route.params.name; const config = await rpc(env.ACCOUNTS, auth.account, 'config');
-  assert(config.jobs[name], 'not_found', 'Job not found', 404);
+  assert(Object.hasOwn(config.jobs, name), 'not_found', 'Job not found', 404);
   if (request.method === 'GET') return rpc(env.JOBS, `${auth.account}:${name}`, 'triggers');
   const idempotency = request.headers.get('Idempotency-Key') || crypto.randomUUID();
   const id = route.params.id || (await digest(`${auth.account}:${name}:${idempotency}`)).slice(0, 32);

@@ -56,9 +56,9 @@ disagrees with it, this file wins and the other document is stale.
 | L2 | Accounts and auth: Clerk sessions, Clerk webhook → AccountDO, API keys with scopes and daily spend caps, `API_ROUTES` access test | code | ✅ | Clerk/LocalDev auth, signed hashed scoped keys, revocation, daily caps and Clerk webhook; access coverage tests. §4.1. Port hashbin `src/auth/`. |
 | L3 | Money: µ$ ledger, reserve/settle/expire holds, Stripe deposits, history, `cost-policy.js`, `pricing.js`, price-floor tests, `/api/quote` | code | 🟨 | Transactional ledger/holds, signed Stripe webhook, itemized Checkout and quotes tested; S4 recovery/refused-retry audit and rounded floors set HTTP price to 87 µ$ and reads to 21 µ$ plus 2 µ$/job. Valid `constructor` names retain numeric summaries and enforce current/legacy budgets without inherited-property lookups. Existing holds keep their maximum. Real deposit remains L14. §6, `docs/business/pricing.md`. Needs D4, D6. |
 | L4 | Definitions: variables, secrets (AES-GCM, write-only), HTTP actions, templates, change billing, audit log, dry run, idempotency | code | ✅ | Atomic billed CRUD, reference checks, AES-GCM write-only secrets, dry runs, audit and idempotency tested. Log redaction also covers JSON-escaped secret values and unpaired surrogates. §2, §3.3, §4.2. |
-| L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | ✅ | Real local Worker/Queue HTTP path verified; retries, missed/overlap, budgets, duplicate delivery, held snapshots, refusal pause and recovery tested. Initial pending runs and recovery alarms commit atomically. Replayed starts recover original deadlines, trigger/input and key identity from the reservation after a lost response/pending/alarm write; expired reservations never enqueue. Observed results stage before settlement; Queue redelivery/alarms recover completion and private retry dispatch after restart without repeating external work or charges. Retry input/key caps survive settlement; budget refusals clear the retry. §3, §3.1, §2.3. |
+| L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | ✅ | Real local Worker/Queue HTTP path verified; retries, missed/overlap, budgets, duplicate delivery, held snapshots, refusal pause and recovery tested. Initial pending runs and recovery alarms commit atomically. Replayed starts recover original deadlines, trigger/input and key identity from the reservation after a lost response/pending/alarm write; expired reservations never enqueue. Observed results stage before settlement; Queue redelivery/alarms recover completion and private retry dispatch after restart without repeating external work or charges. Retry input/key caps survive settlement; budget refusals clear the retry. Reconciliation preserves deletion of prototype-named jobs. §3, §3.1, §2.3. |
 | L6 | Runs, costs, upcoming, projection APIs; retention pruning | code | ✅ | Retained/deleted-job history, NDJSON, permanent UTC cost aggregates, ledger cursors, bounded upcoming, fast cron/DST projections and byte/retention bounds tested. Constructor-named jobs/actions have numeric grouped costs, seven-day activity and forecasts across UTC rollovers/restarts. §4.3, §6, §7. |
-| L7 | Triggers: run now, trigger tokens, `/hook/*`, per-token rate limits, CORS, `{{input.*}}` | code | ✅ | Manual runs, signed job-only tokens, revocation, token limits, input validation and hook-only CORS tested. §4.1. |
+| L7 | Triggers: run now, trigger tokens, `/hook/*`, per-token rate limits, CORS, `{{input.*}}` | code | ✅ | Manual runs, signed job-only tokens, revocation, token limits, input validation and hook-only CORS tested. Run/test/trigger/quote guards reject absent prototype-named definitions before job dispatch. §4.1. |
 | L8 | Web UI with balance + runway header on every signed-in page; Playwright tests | code | ✅ | All workspace pages, runtime status/runway, direct action tests, quote dialogs and logo implemented; mobile and browser save/run/escaping/cron flows pass. §5. |
 | L9 | Prose: free cron explain; Claude to-cron, ask, change proposals + apply; holds and billing; to-cron eval | code/ops | 🟨 | Structured client, held read-only conversations, usage billing, separate stale-checked proposals and 100-case two-model eval implemented. Live eval requires owner Anthropic access. §3.5. Needs D3 and an Anthropic API key (ops). |
 | L10 | JavaScript actions: sandbox, outbound gateway, CPU/subrequest limits and pricing, editor | code/ops | 🟨 | Content-addressed Worker Loader, blocked native networking, counted gateway, daily activation settlement and editor implemented; real local JS succeeds. Shared redaction runs inside the sandbox before console/return truncation; its code participates in version/activation hashing. Live CPU-limit acceptance required. §2.2, §3.4. Needs D2. |
@@ -387,3 +387,20 @@ calendar days of billed counts rather than sampling retained logs.
   compact/standalone reservations, retry billing, ledger archival and cost totals.
 - Prices and existing reservation maxima are unchanged. L9–L14 live/owner/legal
   acceptance and S4 reductions remain open; nothing was deployed to production.
+
+## L3/L5/L6/L7/L8 customer-name correctness — 2026-11-16
+
+- The valid name `constructor` no longer reads inherited properties in budget,
+  spend, run-count or reporting maps. Current and legacy budgets, numeric grouped
+  costs and seven-day activity survive UTC rollovers and restarts. Missing spend
+  and activity count as zero in forecasts and the browser.
+- Run, action-test, trigger and quote endpoints return 404 for absent
+  prototype-named definitions before dispatching to a JobDO. Reconciliation keeps
+  a deleted `constructor` job deleted; existing jobs retain pause/resume support.
+- Lint, all 303 unit/integration tests (including the 144 cost checks), all four
+  browser flows and the production dry-run build pass. Real local SQLite/Queue
+  acceptance executes a budgeted constructor-named HTTP job/action and verifies
+  numeric spend, grouped costs, bounded forecasts and ledger agreement, alongside
+  the existing JS, redaction, gateway, retry and ledger-archival checks.
+- Prices and storage-operation allowances are unchanged. L9–L14 live/owner/legal
+  acceptance and further S4 reductions remain open; nothing was deployed.

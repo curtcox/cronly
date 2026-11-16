@@ -98,7 +98,7 @@ async function handle(route, request, env, auth) {
       if (op === 'read' && url.searchParams.get('resource') === 'runs') { const caller = await authenticate(request, env); assert(canAccess(caller, 'read'), 'insufficient_scope', 'read scope required', 403); action.job_count = url.searchParams.has('job') ? 1 : (await rpc(env.ACCOUNTS, caller.account, 'read-plan')).names.length; }
       if (url.searchParams.has('job') && ['run', 'hook'].includes(op)) {
         const caller = await authenticate(request, env); assert(canAccess(caller, ['read', 'run']), 'insufficient_scope', 'read scope required', 403);
-        const config = await rpc(env.ACCOUNTS, caller.account, 'config'); const job = config.jobs[url.searchParams.get('job')]; assert(job, 'not_found', 'Job not found', 404); action = config.actions[job.action];
+        const config = await rpc(env.ACCOUNTS, caller.account, 'config'); const name = url.searchParams.get('job'); assert(Object.hasOwn(config.jobs, name), 'not_found', 'Job not found', 404); action = config.actions[config.jobs[name].action];
       }
       return { quote_microdollars: op === 'prose' ? proseQuote('ask') : price(op, action), cost_microdollars: 0 };
     }

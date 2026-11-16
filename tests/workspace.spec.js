@@ -57,3 +57,21 @@ test('keeps balance visible across workspace pages and tests an action without a
   await expect(page.locator('#review-price')).toContainText(`${PRICES.run} µ$`); await apply(page);
   await expect(page.locator('#notice')).toContainText('Test queued');
 });
+
+test('shows zero spend and reviews changes for a constructor-named job', async ({ page }) => {
+  await login(page);
+  const user = await page.evaluate(() => sessionStorage.getItem('cronly-local-user'));
+  const headers = { Authorization: `LocalDev ${user}` };
+  expect((await page.request.post('/api/dev/deposit', { headers, data: { amount_microdollars: 5000000 } })).ok()).toBe(true);
+  expect((await page.request.put('/api/actions/constructor', { headers, data: { url: 'https://example.com' } })).ok()).toBe(true);
+  expect((await page.request.put('/api/jobs/constructor', { headers, data: { action: 'constructor', cron: null, budget: { day: 100 } } })).ok()).toBe(true);
+  await page.getByRole('link', { name: 'Jobs', exact: true }).click();
+  await expect(page.locator('.list')).toContainText('constructor');
+  await expect(page.locator('.list')).toContainText('Today: $0.00 / $0.0001');
+  await expect(page.locator('.list')).not.toContainText('NaN');
+  await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  await expect(page.locator('#review-price')).toContainText('100 µ$'); await apply(page);
+  await expect(page.getByRole('button', { name: 'Resume', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Resume', exact: true }).click(); await apply(page);
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+});

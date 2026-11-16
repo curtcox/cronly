@@ -88,7 +88,7 @@ export class JobDO {
   async reconcile() {
     const settings = await this.storage.get('settings'); if (!settings) return;
     const config = await rpc(this.env.ACCOUNTS, settings.account, 'config');
-    settings.job = config.jobs[settings.name] || null;
+    settings.job = Object.hasOwn(config.jobs, settings.name) ? config.jobs[settings.name] : null;
     if (!settings.job) { settings.next_fire = null; settings.paused = 'deleted'; }
     if (settings.job?.enabled && settings.job.cron && !settings.paused) settings.next_fire = Date.parse(nextFires(settings.job.cron, settings.job.timezone, 1)[0]);
     await this.storage.put('settings', settings); await this.arm();
