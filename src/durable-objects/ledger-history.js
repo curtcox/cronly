@@ -1,8 +1,9 @@
 import { accountMoney } from './account-money.js';
+import { ACCOUNT_STATE_LIMITS } from './account-state-limits.js';
 
 const PAGE_PREFIX = 'ledger-page:';
 const MAX_ENTRIES = 100;
-const MAX_BYTES = 16000;
+const MAX_BYTES = ACCOUNT_STATE_LIMITS.ledgerBytes;
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 
 /** Append history to the balance write; archive a bounded page only when full. */

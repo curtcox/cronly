@@ -40,10 +40,10 @@ async function reservation(tx, args, now) {
   return { ...args, day, month, created_at: now, expires_at: now + (args.ttl_ms || 120000), settled: false };
 }
 /** Reserve before any external work; budgets include every outstanding hold. */
-export async function reserve(tx, args, now = Date.now()) {
+export async function reserve(tx, args, now = Date.now(), activity) {
   const hold = await reservation(tx, args, now);
   if (hold.duplicate) return hold;
-  await putHold(tx, hold);
+  await putHold(tx, hold, activity);
   const alarm = await tx.getAlarm();
   if (!alarm || alarm > hold.expires_at) await tx.setAlarm(hold.expires_at);
   return hold;

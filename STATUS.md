@@ -74,7 +74,7 @@ disagrees with it, this file wins and the other document is stale.
 | S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ✅ | Atomic versioned keyring, legacy reads, held per-secret re-encryption, edit/delete conflict protection, audit, scoped CLI and CI wiring verified. Persisted local Worker migrated v1 → v2 and executed a redacted JS run with v1 retired. [Operator procedure](docs/ops/secret-rotation.md). §3.3. |
 | S2 | Charge measured JS CPU instead of the configured limit | code | ⬜ | §3.4; needs per-invocation CPU data. |
 | S3 | Recalibrate prices from a month of real Cloudflare and Anthropic bills | ops/code | ⬜ | `docs/business/pricing.md`. |
-| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budgets, active money summaries and ledger buffering reduce ordinary writes; unchanged alarms/runtime indexes and completion settings skip writes. Transactional reads/changes skip transient holds. Ledger pages retain legacy cursors and permanent receipts. Small durable reservations share the balance row; large/legacy snapshots stay standalone. Finalization reuses the durable staged log. Cooldowns now share the bounded recent-job index, saving a write when switching jobs; evicted cooldowns remain standalone. Repeated balance/budget refusals skip writes after one atomic pause/log/reset-wakeup transition; unchanged configuration replay skips settings writes. The 144-path audit includes ledger archival, compact/rollover/large-period summaries and unfunded-retry pauses: conservative 37 writes, 30 DO requests/five Worker invocations at 87 µ$/run after rounded floors. Further worst-case reductions remain. [Cost audit](docs/business/pricing.md). |
+| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budgets, active money summaries and ledger buffering reduce ordinary writes; unchanged alarms/runtime indexes and completion settings skip writes. Transactional reads/changes skip transient holds. Ledger pages retain legacy cursors and permanent receipts. Small durable reservations share the balance row; large/legacy snapshots stay standalone. Finalization reuses the durable staged log. Cooldowns/recent-job activity now share the reservation balance write, saving another ordinary compact-run write; evicted cooldowns remain standalone and larger legacy hold arrays migrate after draining. Repeated balance/budget refusals skip writes after one atomic pause/log/reset-wakeup transition; unchanged configuration replay skips settings writes. The 288-path audit includes activity eviction, ledger archival, compact/rollover/large-period summaries and unfunded-retry pauses: conservative 37 writes, 30 DO requests/five Worker invocations at 87 µ$/run after rounded floors. Further worst-case reductions remain. [Cost audit](docs/business/pricing.md). |
 
 ## Backlog
 
@@ -491,3 +491,17 @@ calendar days of billed counts rather than sampling retained logs.
   dry-run build and real local SQLite/Queue acceptance pass. HTTP prices and cost
   bounds are unchanged. No production deployment or live acceptance was performed;
   L9–L14 live/owner/legal steps and further S4 reductions remain open.
+
+## S4 reservation activity compaction — 2026-11-16
+
+- Recent-job activity and cooldowns share compact reservations' balance writes,
+  saving one more ordinary per-run write. Standalone holds retain one activity
+  write; large legacy compact hold arrays migrate after sufficient space frees.
+- Shared storage partitions bound activity, claim-update headroom, two money
+  summaries and ledger buffering below the 128 KiB value limit. Legacy indexes,
+  evicted cooldowns, backwards clocks and cold restarts preserve rate limits.
+- Lint, all 497 unit/integration tests, all four browser flows and the production
+  dry-run build pass. The expanded 288-path cost audit includes activity eviction
+  alongside archival, rollovers, oversized summaries and failed recovery writes.
+- Conservative cost bounds and the 87 µ$ price remain unchanged. Further S4
+  reductions and L9–L14 live/owner/legal steps remain open; nothing was deployed.

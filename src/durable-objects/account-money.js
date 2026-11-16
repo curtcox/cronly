@@ -1,3 +1,5 @@
+import { ACCOUNT_STATE_LIMITS } from './account-state-limits.js';
+
 /** Read compact money state while accepting the original scalar balance. */
 export async function accountMoney(tx) {
   const value = await tx.get('balance');
@@ -18,7 +20,7 @@ export async function updateAccountMetric(tx, state, metric) {
   // Two summaries must fit comfortably inside a single 128 KiB storage value.
   // A large new period stays standalone: retaining the older compact period avoids
   // paying to archive it AND write the new period during the same settlement.
-  const oversized = new TextEncoder().encode(JSON.stringify(metric)).byteLength > 50000;
+  const oversized = new TextEncoder().encode(JSON.stringify(metric)).byteLength > ACCOUNT_STATE_LIMITS.summaryBytes;
   if (oversized || (current && current.period > metric.period)) {
     await tx.put(`spent:account:self:${metric.period}`, metric);
     if (current?.period === metric.period) delete state.summaries[slot];

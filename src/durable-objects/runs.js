@@ -7,7 +7,7 @@ import { references } from '../executor/templates.js';
 import { price } from '../utils/pricing.js';
 import { COST_POLICY } from '../utils/cost-policy.js';
 import { getHold, listHolds, putHold } from './hold-storage.js';
-import { runActivity, lastRun, recordRun } from './run-activity.js';
+import { runActivity, lastRun } from './run-activity.js';
 
 // Recovery must use the original reservation, even if a response or JobDO write
 // was lost. Return only orchestration data, never the frozen credentials/code.
@@ -47,8 +47,7 @@ export async function prepareRun(tx, args, env = {}) {
   const amount = price(args.trigger === 'webhook' ? 'hook' : 'run', action);
   if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
   if (args.test_action) await tx.put(`job-index:${args.name}`, { name: args.name, account: args.account, updated_at: Date.now() });
-  const hold = await reserve(tx, { id: args.id, amount, job: args.name, action: job.action, kind: 'run', budget: job.budget, ...await keyBudget(tx, args.key_id), execution: { version: action.type === 'javascript' ? await javascriptVersion(action) : null, action, vars, secrets, job, input: args.input, trigger: args.trigger, scheduled_at: args.scheduled_at, attempt: args.attempt || 0 }, ttl_ms: 120000 });
-  await recordRun(tx, args.name, now, activity);
+  const hold = await reserve(tx, { id: args.id, amount, job: args.name, action: job.action, kind: 'run', budget: job.budget, ...await keyBudget(tx, args.key_id), execution: { version: action.type === 'javascript' ? await javascriptVersion(action) : null, action, vars, secrets, job, input: args.input, trigger: args.trigger, scheduled_at: args.scheduled_at, attempt: args.attempt || 0 }, ttl_ms: 120000 }, now, { name: args.name, now, items: activity });
   return prepared(hold);
 }
 /** A queue redelivery cannot re-execute an already claimed external request. */

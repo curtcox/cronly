@@ -182,6 +182,18 @@ redelivery can finish a failed reset. Configuration replay also skips unchanged
 settings while retaining the last completed outcome. These reduce repeated or
 administrative work; the conservative paid-run bound and 87 µ$ price are unchanged.
 
+Recent-job activity and cooldowns now share a compact reservation's balance write,
+removing one more ordinary per-run write. Activity is bounded to 100 names and
+10,000 UTF-8 bytes. With activity present, compact holds use at most 4,000 bytes,
+leaving room for both 50,000-byte summaries, the 16,000-byte ledger and metadata
+inside one 128 KiB value. Larger snapshots stay standalone; existing compact hold
+arrays retain the old layout until there is room for activity and claim-update
+headroom. Legacy activity/cooldown rows remain readable, and evicted cooldowns
+remain authoritative across restarts and backwards clocks. The expanded 288-path
+audit also forces index eviction, alongside the existing archival and recovery
+scenarios. Standalone holds and eviction can still use the saved write, so the
+conservative 37-write bound and 87 µ$ base price are unchanged.
+
 ## Verified provider sources
 
 - [Workers](https://developers.cloudflare.com/workers/platform/pricing/)

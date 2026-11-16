@@ -35,10 +35,10 @@ function meter(ns, usage) {
   };
 }
 
-for (const holdMode of ['compact', 'standalone']) for (const summaryMode of ['compact', 'rollover', 'large-periods']) {
+for (const activityMode of ['ordinary', 'eviction']) for (const holdMode of ['compact', 'standalone']) for (const summaryMode of ['compact', 'rollover', 'large-periods']) {
   for (const mode of ['schedule', 'manual', 'test', 'hook']) {
     for (const recovery of ['normal', 'settlement', 'completion', ...(mode === 'test' ? [] : ['retry', 'retry-dispatch', 'retry-cleanup', 'retry-budget'])]) {
-      it(`bounds full ${mode}/${recovery}/${summaryMode}/${holdMode} bookkeeping with redirects, redelivery, cold history and pruning`, async () => {
+      it(`bounds full ${mode}/${recovery}/${summaryMode}/${holdMode}/${activityMode} bookkeeping with redirects, redelivery, cold history and pruning`, async () => {
         vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-30T23:59:00Z'));
         const usage = { writes: 0, requests: 0, reads: 0, workerRequests: 0 }; const messages = []; let fetches = 0;
         const withRetry = recovery.startsWith('retry');
@@ -83,6 +83,7 @@ for (const holdMode of ['compact', 'standalone']) for (const summaryMode of ['co
         }
         job.historyCache = null; // Include the cold object's index scan.
         const accountStorage = env.ACCOUNTS.get('a').storage;
+        if (activityMode === 'eviction') await accountStorage.put('recent-jobs', { items: Array.from({ length: 100 }, (_, index) => [`old-${index}`, Date.now() - 1000]) });
         // Include a full ledger buffer: this run must archive a page as well as
         // roll over/archive money summaries in the corresponding scenarios.
         const state = await accountStorage.get('balance');
@@ -125,7 +126,7 @@ for (const holdMode of ['compact', 'standalone']) for (const summaryMode of ['co
         const runs = withRetry && recovery !== 'retry-budget' ? 2 : 1;
         expect(messages).toHaveLength(runs); expect(fetches).toBe(6 * runs);
         const measured = { ...usage };
-        expect(measured.writes, JSON.stringify(measured)).toBeLessThanOrEqual(runs * (COST_POLICY.runRowWrites - (holdMode === 'compact' ? 1 : 0)) + (mode === 'hook' ? 1 : 0));
+        expect(measured.writes, JSON.stringify(measured)).toBeLessThanOrEqual(runs * (COST_POLICY.runRowWrites - (holdMode === 'compact' ? 2 : 0)) + (mode === 'hook' ? 1 : 0) + (activityMode === 'eviction' ? 1 : 0));
         expect(measured.requests, JSON.stringify(measured)).toBeLessThanOrEqual(runs * COST_POLICY.runDoRequests);
         expect(measured.workerRequests, JSON.stringify(measured)).toBeLessThanOrEqual(runs * COST_POLICY.runWorkerRequests);
         expect(measured.reads, JSON.stringify(measured)).toBeLessThanOrEqual(runs * 3000);
