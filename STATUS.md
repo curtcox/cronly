@@ -61,7 +61,7 @@ disagrees with it, this file wins and the other document is stale.
 | L7 | Triggers: run now, trigger tokens, `/hook/*`, per-token rate limits, CORS, `{{input.*}}` | code | ✅ | Manual runs, signed job-only tokens, revocation, token limits, input validation and hook-only CORS tested. Run/test/trigger/quote guards reject absent prototype-named definitions before job dispatch. §4.1. |
 | L8 | Web UI with balance + runway header on every signed-in page; Playwright tests | code | ✅ | All workspace pages, runtime status/runway, direct action tests, quote dialogs and logo implemented; mobile and browser save/run/escaping/cron flows pass. §5. |
 | L9 | Prose: free cron explain; Claude to-cron, ask, change proposals + apply; holds and billing; to-cron eval | code/ops | 🟨 | Structured client, held read-only conversations, usage billing, separate stale-checked proposals and 100-case two-model eval implemented. Live eval requires owner Anthropic access. §3.5. Needs D3 and an Anthropic API key (ops). |
-| L10 | JavaScript actions: sandbox, outbound gateway, CPU/subrequest limits and pricing, editor | code/ops | 🟨 | Content-addressed Worker Loader, blocked native networking, counted gateway, daily activation settlement and editor implemented; real local JS succeeds. Activation follows the claim's UTC day and discounts only settled payments, including concurrent claims and safety refunds; reserved budget periods stay unchanged. Shared redaction runs inside the sandbox before console/return truncation; its code participates in version/activation hashing. Live CPU-limit acceptance required. §2.2, §3.4. Needs D2. |
+| L10 | JavaScript actions: sandbox, outbound gateway, CPU/subrequest limits and pricing, editor | code/ops | 🟨 | Content-addressed Worker Loader, blocked native networking, counted gateway, daily activation settlement and editor implemented; real local JS succeeds. Activation follows the claim's UTC day and discounts only settled payments, including concurrent claims and safety refunds; reserved budget periods stay unchanged. Real SQLite/Queue verifies one activation across three jobs sharing a version. Shared redaction runs inside the sandbox before console/return truncation; its code participates in version/activation hashing. Live CPU-limit acceptance required. §2.2, §3.4. Needs D2. |
 | L11 | Agent surface: OpenAPI + drift test, `llms.txt`, agent docs, MCP server, `/api/config`, browser snippet | code | ✅ | Atomic config with conflict checks, OpenAPI drift test, scoped MCP protocol tests, llms.txt/agent docs and immutable SHA-384 SRI trigger SDK verified. §4.4, §4.5. |
 | L12 | Abuse and cost safety: limits, destination rules, rate-limit rules, daily cost reconciliation and brake, invite-only sign-up | code/ops | 🟨 | Account/job/destination caps, native ingress limiter, destination checks, conservative daily analytics reconciliation and stale-report brake implemented. Live schema/WAF/billing alerts and Clerk Restricted mode remain owner steps. §8. |
 | L13 | Terms of Service and Privacy Policy (acceptable use, refunds, suspension) | legal | 🟨 | Service-specific drafts prepared; owner directed shared entity/jurisdiction with hashbin and separate contacts, approving placeholders for now. Offline profile renders escaped facts into both drafts with drift checks; approved-launch deploys require complete pinned facts. Actual facts, cronly contacts and policy approval remain. Checkout is gated by launch approval. |
@@ -404,3 +404,22 @@ calendar days of billed counts rather than sampling retained logs.
   the existing JS, redaction, gateway, retry and ledger-archival checks.
 - Prices and storage-operation allowances are unchanged. L9–L14 live/owner/legal
   acceptance and further S4 reductions remain open; nothing was deployed.
+
+## L3/L10 paid activation settlement — 2026-11-16
+
+- JS activation follows the execution claim's UTC day instead of the reservation
+  day. A delayed Queue delivery across midnight/month-end still consumes its
+  original job/key budget periods while paying activation for the new day.
+- Activation payment commits atomically with settlement, ledger and receipt.
+  Concurrent claims retain full reservations until one payment settles; the others
+  release the activation portion. A fully refunded safety-braked claim grants no
+  activation discount. Legacy claimed holds keep their promised maximum.
+- Lint and all 314 unit/integration tests pass, including compact/standalone holds,
+  concurrent settlement orders, refunds, UTC rollover, rollback and cold restarts.
+  Compact-hold headroom also covers the additional activation-day metadata.
+- All four browser flows and the production dry-run build pass. Real local
+  SQLite/Queue acceptance executes nine runs, checking one activation charge across
+  three jobs sharing a version, funded retries, gateway/network restrictions,
+  redaction, released holds, ledger archival and matching balance/cost totals.
+- Prices and HTTP storage-operation allowances remain unchanged. L9–L14 live,
+  owner and legal acceptance remain open; nothing was deployed to production.

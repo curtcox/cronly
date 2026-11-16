@@ -1,5 +1,4 @@
-import { PRICES } from '../utils/pricing.js';
-import { price } from '../utils/pricing.js';
+import { price, PRICES } from '../utils/pricing.js';
 import { afterEach, it, expect, vi } from 'vitest';
 import worker from '../index.js';
 import { AccountDO } from '../durable-objects/account-do.js';

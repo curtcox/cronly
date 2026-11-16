@@ -25,6 +25,10 @@ for (const [name, action] of Object.entries({
   await api(`/api/actions/${name}`, 'PUT', action); await api(`/api/jobs/${name}`, 'PUT', { action: name, cron: null, retries: name === 'retry' ? 1 : 0, ...(name === 'http' ? { overlap: 'allow' } : {}), ...(name === 'constructor' ? { budget: { day: PRICES.run, month: PRICES.run } } : {}) });
   await api(`/api/jobs/${name}/run`, 'POST', name === 'retry' ? { input: { event: 'acceptance-event' } } : {}, `run-${name}`);
 }
+// Independent jobs share an action version. Queue batches can claim both before
+// either settles; real SQLite must grant only one paid activation across them.
+for (const name of ['shared-left', 'shared-right']) await api(`/api/jobs/${name}`, 'PUT', { action: 'js', cron: null });
+await Promise.all(['shared-left', 'shared-right'].map(name => api(`/api/jobs/${name}/run`, 'POST', {}, `run-${name}`)));
 // The shared activity index must retain the HTTP cooldown after switching jobs.
 // Replaying the original id stays free and cannot enqueue a second execution.
 assert.equal((await api('/api/jobs/http/run', 'POST', {}, 'cooldown-http', 429)).code, 'run_rate_limit');
@@ -32,10 +36,10 @@ assert.equal((await api('/api/jobs/http/run', 'POST', {}, 'run-http')).duplicate
 const deadline = Date.now() + 60000; let runs;
 while (Date.now() < deadline) {
   runs = (await api('/api/runs')).items;
-  if (runs.length === 7 && runs.every(r => ['success', 'failure'].includes(r.status))) break;
+  if (runs.length === 9 && runs.every(r => ['success', 'failure'].includes(r.status))) break;
   await new Promise(resolve => setTimeout(resolve, 1000));
 }
-assert.equal(runs.length, 7);
+assert.equal(runs.length, 9);
 const details = await Promise.all(runs.map(run => api(`/api/runs/${encodeURIComponent(run.id)}`)));
 assert(!JSON.stringify(details).includes('acceptance-secret'));
 for (const { run } of details) {
@@ -48,7 +52,11 @@ assert(details.find(result => result.run.job === 'js').run.return_value.includes
 assert(details.find(result => result.run.job === 'gateway').run.console.includes('«secret:token»'));
 assert(details.find(result => result.run.job === 'gateway').run.return_value.includes('200'));
 assert.equal(details.find(result => result.run.job === 'gateway').run.subrequests, 1);
-for (const name of ['http', 'constructor', 'js', 'gateway']) assert.equal(runs.find(r => r.job === name).status, 'success', `${name} did not succeed`);
+for (const name of ['http', 'constructor', 'js', 'gateway', 'shared-left', 'shared-right']) assert.equal(runs.find(r => r.job === name).status, 'success', `${name} did not succeed`);
+const sharedRuns = runs.filter(run => ['js', 'shared-left', 'shared-right'].includes(run.job));
+const jsMaximum = price('run', { type: 'javascript', cpu_ms: 100, subrequests: 0 });
+assert.equal(sharedRuns.reduce((sum, run) => sum + run.cost_microdollars, 0), 3 * jsMaximum - 2 * PRICES.jsActivation);
+assert.equal(sharedRuns.filter(run => run.cost_microdollars === jsMaximum).length, 1);
 for (const name of ['blocked']) assert.equal(runs.find(r => r.job === name).status, 'failure', `${name} escaped sandbox limits`);
 const retryRuns = details.filter(result => result.run.job === 'retry').map(result => result.run);
 assert.equal(retryRuns.length, 2);
@@ -67,7 +75,7 @@ assert(Number.isSafeInteger(forecast) && forecast >= 0 && forecast <= 2 * PRICES
 const transactions = (await api('/api/transactions')).items;
 const spent = -transactions.filter(row => row.kind !== 'deposit').reduce((sum, row) => sum + row.amount_microdollars, 0);
 assert.equal(account.balance_microdollars, transactions.reduce((sum, row) => sum + row.amount_microdollars, 0));
-assert.equal(transactions.filter(row => row.kind === 'run').length, 7);
+assert.equal(transactions.filter(row => row.kind === 'run').length, 9);
 assert.equal((await api('/api/costs')).total_microdollars, spent);
 for (const group of ['job', 'action']) {
   const costs = await api(`/api/costs?group=${group}`);
@@ -93,4 +101,4 @@ assert.equal((await api('/api/account')).balance_microdollars, account.balance_m
 assert.equal((await api('/api/costs')).total_microdollars, spent);
 await api('/api/dev/deposit', 'POST', { amount_microdollars: 1 }, archiveId(0));
 assert.deepEqual((await api('/api/transactions')).items, archived);
-console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
+console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, one settled activation across three jobs sharing an action version, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');

@@ -73,7 +73,7 @@ it('bounds UTF-8 snapshots beside full summaries and ledger and preserves update
   let state = await accountMoney(storage);
   expect(state.holds.length).toBeGreaterThan(0); expect(state.holds.length).toBeLessThan(20);
   const standalone = await storage.list({ prefix: 'hold:' });
-  for (const hold of state.holds) await storage.transaction(tx => putHold(tx, { ...hold, claimed: true, actual_price: Number.MAX_SAFE_INTEGER, gateway_count: 100 }));
+  for (const hold of state.holds) await storage.transaction(tx => putHold(tx, { ...hold, claimed: true, actual_price: Number.MAX_SAFE_INTEGER, gateway_count: 100, activation_day: '2026-11-16' }));
   state = await accountMoney(storage); expect(size(state.holds)).toBeLessThanOrEqual(8000);
   for (const [slot, period] of [['day', '2026-11-16'], ['month', '2026-11']]) state.summaries[slot] = { period, padding: 'x'.repeat(49900) };
   state.ledger.items = [['ledger:large', { padding: 'x'.repeat(15900) }]];

@@ -34,6 +34,8 @@ charges one activation and discounts the others. A safety-braked, fully refunded
 claim does not grant a free activation to a later run. Legacy claimed holds retain
 their promised maximum. UTC month rollover, refunds, settlement order, storage
 rollback and cold restarts are covered for compact and standalone reservations.
+Real local Worker/Queue acceptance also verifies one activation charge across
+three jobs sharing a version, with matching run logs, ledger, costs and balance.
 
 A regular hourly HTTP job is about $0.06264 per 30 days; a minutely job is $3.7584. These
 are run charges only. Changes, API polling, prose and JS activation are additional.
