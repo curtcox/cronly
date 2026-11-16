@@ -1,6 +1,6 @@
 # cronly pricing and cost model
 
-Audited 2026-11-15. D4–D6 approved the proposed launch defaults and upward corrections
+Audited 2026-11-16. D4–D6 approved the proposed launch defaults and upward corrections
 required by cost floors. The implementation audit found two material planning errors:
 per-read transactional ledger writes cost more than a 1 µ$ read, and prose's original
 1.5× markup fails the 1.5× margin after the 8% haircut. Dynamic Workers also now charge
@@ -11,12 +11,12 @@ constants as the API; historical numbers in the master plan are superseded here.
 
 | Operation | Price | Estimated worst-case marginal cost |
 |---|---|---|
-| HTTP run | 60 µ$ | ceil(policy run bound), currently 36 µ$ |
-| Webhook run | HTTP/JS price + 5 µ$ | run bound + 1 µ$ |
+| HTTP run | 80 µ$ | ceil(policy run bound), currently 48 µ$ |
+| Webhook run | HTTP/JS price + 5 µ$ | run bound + 2 µ$ |
 | Change: action, variable, secret (including key rotation), job, key, trigger | 100 µ$ | 20 µ$ |
 | API-key read | 20 µ$ base + 2 µ$ per job scanned for aggregate history | 12 µ$ base + 1.2 µ$/job |
 | Web session reads, cron explain, quotes, mutation dry runs | Free, rate-limited | Bounded fixed operating cost |
-| JavaScript run | 60 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
+| JavaScript run | 80 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
 | JS daily activation | 3,300 µ$ on first invocation of each action version per UTC day | 2,000 µ$ provider activation |
 | Prose | ceil(1.64 × actual model-token cost) + 500 µ$ | actual tokens + bookkeeping |
 
@@ -26,7 +26,7 @@ configuration contribute to the content hash. CPU is billed at the configured li
 until per-invocation measured CPU is available (S2). Retries are separately reserved
 and charged as runs. Queue redelivery never repeats a claimed outbound operation.
 
-A regular hourly HTTP job is about $0.0432 per 30 days; a minutely job is $2.592. These
+A regular hourly HTTP job is about $0.0576 per 30 days; a minutely job is $3.456. These
 are run charges only. Changes, API polling, prose and JS activation are additional.
 
 ## Units and deposits
@@ -49,10 +49,23 @@ reviewed Terms and applicable law.
 
 Rates live only in `src/utils/cost-policy.js`; prices only in `src/utils/pricing.js`;
 model rates only in `src/utils/llm-policy.js`. Included allowances are ignored.
-The HTTP bound includes 24 row writes, 12 DO requests and 3,000 compact-index row reads, queue retry allowance, CPU,
+The HTTP bound includes 34 row writes, 24 DO requests and 3,000 compact-index row reads, queue retry allowance, CPU,
 awake time and 16 KB retained logs; orchestration caches compact summaries instead of loading log bodies. Read and change bounds include actual ledger,
 key-budget, audit and rate-counter bookkeeping rather than just one request.
-Permanent cost summaries share the account's existing daily/monthly counter writes.
+Permanent cost summaries and job/key budget counters share the account's two
+daily/monthly summary writes. Old standalone budget counters remain readable until
+each job/key first settles in a period, preserving existing caps without bulk migration.
+
+The S4 audit counts the entire schedule/manual/action-test/webhook path, including
+six HTTP requests when following redirects, cold retained-history scans, retention
+deletes, alarm writes, ingress counters and production safety lookups. Integration
+tests fail if these paths exceed the policy's row/request allowances. Merely batching
+separate keys into one storage call would not reduce billed SQLite rows.
+
+This corrects the earlier 24-write/12-request allowance, which omitted some of that
+bookkeeping. Despite S4's savings, the prior 60 µ$ run price fails the audited floor;
+the corrected default is 80 µ$. Persisted job quotes follow the current price;
+already-held runs settle within their original maximum.
 
 Tests assert `price × 0.92 >= 1.5 × worstCaseCost` for every operation and JS extremes.
 Prose markup is 1.64 because `1.64 × 0.92 >= 1.5`; 1.5 itself fails. The additive
@@ -65,8 +78,10 @@ is used when deterministic output validation fails.
 These are conservative engineering estimates, not measured production costs. L12's
 monitor distinguishes measured Worker/DO totals from a conservative ledger allowance
 for Queue/sandbox usage. Missing, truncated or stale analytics activates the brake.
-S3 recalibrates from actual bills; S4 reduces reservation/ledger row writes before
-passing savings into lower prices.
+S3 recalibrates from actual bills. S4 has removed 2–4 separate budget-counter writes
+per run and avoids unchanged alarm/runtime/recent-job writes. Further hold/ledger
+compaction and safe price reductions remain pending; permanent receipt tombstones
+and the sortable ledger are still separate so outstanding-hold scans stay bounded.
 
 ## Verified provider sources
 

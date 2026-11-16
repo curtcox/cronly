@@ -53,6 +53,6 @@ test('keeps balance visible across workspace pages and tests an action without a
   await page.getByRole('link', { name: 'Actions', exact: true }).click();
   await page.getByRole('button', { name: 'Edit', exact: true }).click();
   await page.getByRole('button', { name: 'Review test run', exact: true }).click();
-  await expect(page.locator('#review-price')).toContainText('60 µ$'); await apply(page);
+  await expect(page.locator('#review-price')).toContainText('80 µ$'); await apply(page);
   await expect(page.locator('#notice')).toContainText('Test queued');
 });

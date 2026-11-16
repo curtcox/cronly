@@ -5,7 +5,9 @@ export const COST_POLICY = Object.freeze({
   queueOperation: 0.40, dynamicWorkerDay: 2000, stripeRate: 0.029, stripeFixedCents: 30,
   revenueKept: 0.92, minimumMargin: 1.5, newAccountDepositCapCents: 2000,
   maxJobs: 100, newAccountMaxJobs: 10, concurrency: 10,
-  destinationRequestsPerMinute: 60, projectionBrakeCents: 5000
+  destinationRequestsPerMinute: 60, projectionBrakeCents: 5000,
+  // Full-path audit includes redirects, test-job setup, alarms and retention deletes.
+  runRowWrites: 34, runDoRequests: 24
 });
 /** Gross up the credit to itemize payment costs, ported from hashbin. */
 export function grossUp(creditCents) {
@@ -15,7 +17,7 @@ export function grossUp(creditCents) {
 /** Conservative bounds; queue retries and bookkeeping have explicit allowances. */
 export function worstCaseCost(op, action = {}) {
   const c = COST_POLICY;
-  const base = 12 * c.doRequest + 24 * c.rowWritten + 6 * c.queueOperation + c.workerRequest + 20 * c.workerCpuMs + 16 * c.storageKBMonth + c.doSecond * 0.2 + 3000 * c.rowRead;
-  if (op === 'run' || op === 'hook') return base + (op === 'hook' ? 1 : 0) + (action.type === 'javascript' ? c.dynamicWorkerDay + c.workerRequest + action.cpu_ms * c.workerCpuMs + action.subrequests * 2.3 : 0);
+  const base = c.runDoRequests * c.doRequest + c.runRowWrites * c.rowWritten + 6 * c.queueOperation + c.workerRequest + 20 * c.workerCpuMs + 16 * c.storageKBMonth + c.doSecond * 0.2 + 3000 * c.rowRead;
+  if (op === 'run' || op === 'hook') return base + (op === 'hook' ? 2 : 0) + (action.type === 'javascript' ? c.dynamicWorkerDay + c.workerRequest + action.cpu_ms * c.workerCpuMs + action.subrequests * 2.3 : 0);
   return op === 'change' ? 20 : op === 'read' ? 12 + (action.job_count || 0) * 1.2 : 0;
 }

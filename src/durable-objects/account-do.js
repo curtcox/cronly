@@ -45,7 +45,11 @@ export class AccountDO {
         await tx.put(`rate:destination:${args.host}`, { ...rate, count: rate.count + 1 });
         await tx.put(`hold:${args.id}`, { ...hold, gateway_count: count + 1 }); return { subrequests: count + 1 };
       }
-      case 'job-runtime': await tx.put(`runtime:${args.name}`, args.runtime); return {};
+      case 'job-runtime': {
+        const prior = await tx.get(`runtime:${args.name}`);
+        if (JSON.stringify(prior) !== JSON.stringify(args.runtime)) await tx.put(`runtime:${args.name}`, args.runtime);
+        return {};
+      }
       case 'metrics': return (await tx.get(`spent:account:self:${args.period}`)) || {};
       case 'resume-cost-jobs': {
         const profile = await tx.get('profile');

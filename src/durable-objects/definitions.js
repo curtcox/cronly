@@ -10,6 +10,9 @@ export async function loadConfig(tx, publicView = false) {
   for (const kind of COLLECTIONS) {
     config[kind] = Object.fromEntries([...(await tx.list({ prefix: `def:${kind}:` }))].map(([key, value]) => [key.slice(`def:${kind}:`.length), kind === 'secrets' && publicView ? secretMetadata(value) : value]));
   }
+  // Quotes follow current prices even when a definition predates a price change.
+  // Queued executions keep their already-reserved amount in the hold instead.
+  for (const job of Object.values(config.jobs)) job.max_run_microdollars = price('run', config.actions[job.action]);
   return config;
 }
 /** Apply the same budget restrictions to every operation delegated through a key. */

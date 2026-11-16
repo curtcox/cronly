@@ -72,8 +72,11 @@ export class JobDO {
     // Once disabled, old logs get one final cleanup alarm, then hibernate indefinitely.
     const records = summaries;
     if (records.length) timers.push(Math.min(...records.map(r => r.created_at + 30 * DAY)));
-    if (timers.length) await this.storage.setAlarm(Math.max(Date.now() + 1000, Math.min(...timers)));
-    else await this.storage.deleteAlarm();
+    const alarm = await this.storage.getAlarm();
+    if (timers.length) {
+      const next = Math.max(Date.now() + 1000, Math.min(...timers));
+      if (alarm !== next) await this.storage.setAlarm(next);
+    } else if (alarm !== null) await this.storage.deleteAlarm();
   }
   async reconcile() {
     const settings = await this.storage.get('settings'); if (!settings) return;
@@ -157,6 +160,8 @@ export class JobDO {
         if (run.expires_at <= Date.now()) await this.result({ id: run.id, result: { status: 'expired', error: 'Result was not received before the deadline' } });
         else if (!run.enqueued) await this.send(run, settings);
       }
+      // Expiry reporting can update the outcome or pause a refused retry.
+      settings = await this.storage.get('settings');
       if (settings.resume_at && settings.resume_at <= Date.now()) { settings.paused = null; settings.resume_at = null; await this.storage.put('settings', settings); }
       const due = settings.next_fire;
       if (!settings.paused && settings.job?.enabled && due && due <= Date.now()) {

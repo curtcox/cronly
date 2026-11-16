@@ -44,3 +44,15 @@ it('enforces scoped keys and includes read spending in daily caps', async () => 
   expect((await request('/api/variables/x', 'PUT')).status).toBe(403);
   await api(`/api/keys/${key.id}`, 'DELETE'); expect((await request('/api/account')).status).toBe(401);
 });
+
+it('quotes current prices for persisted jobs while honoring an older queued hold', async () => {
+  const { api, env } = setup();
+  await api('/api/dev/deposit', 'POST', { amount_microdollars: 1000 });
+  await api('/api/actions/ping', 'PUT', { url: 'https://example.com' });
+  const storage = env.ACCOUNTS.get('alice').storage;
+  await storage.put('def:jobs:j', { action: 'ping', cron: null, enabled: true, budget: {}, max_run_microdollars: 60 });
+  await rpc(env.ACCOUNTS, 'alice', 'reserve', { id: 'old', amount: 60, kind: 'run', job: 'j' });
+  expect((await api('/api/jobs/j')).value.max_run_microdollars).toBe(80);
+  expect((await api('/api/quote?op=run&job=j')).quote_microdollars).toBe(80);
+  expect(await rpc(env.ACCOUNTS, 'alice', 'settle', { id: 'old', actual: 80 })).toMatchObject({ charged: 60 });
+});

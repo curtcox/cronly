@@ -23,12 +23,12 @@ it('queues only after holding funds, redacts output, and deduplicates delivery',
   const { api, messages, env } = await setup();
   const first = await api('/api/jobs/pinger/run', 'POST', {}, { 'Idempotency-Key': 'r1' });
   expect(first.status).toBe(200); expect(messages).toHaveLength(1);
-  expect((await api('/api/account')).held_microdollars).toBe(60);
+  expect((await api('/api/account')).held_microdollars).toBe(80);
   const ack = vi.fn(); const message = { body: messages[0], ack };
   await consume(message, env, {}); await consume(message, env, {});
   expect(env.OUTBOUND_FETCH).toHaveBeenCalledTimes(1);
   const runs = await rpc(env.JOBS, 'a:pinger', 'runs');
-  expect(runs.items[0]).toMatchObject({ status: 'success', cost_microdollars: 60 });
+  expect(runs.items[0]).toMatchObject({ status: 'success', cost_microdollars: 80 });
   expect(JSON.stringify(runs)).not.toContain('secret-token');
   expect((await api('/api/account')).held_microdollars).toBe(0);
   await api('/api/jobs/pinger/run', 'POST', {}, { 'Idempotency-Key': 'r1' }); expect(messages).toHaveLength(1);

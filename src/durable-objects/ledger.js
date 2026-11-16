@@ -55,7 +55,8 @@ export async function settle(tx, id, actual, now = Date.now()) {
     for (const [kind, value] of [['job', hold.job], ['key', hold.key_id]]) {
       if (value) budget_spent[kind] = { ...budget_spent[kind], [value]: await budgetSpent(tx, metric, kind, value, period) + amount };
     }
-    const estimate = hold.kind === 'prose' ? Math.max(0, (amount - PRICES.proseBase) / PRICES.proseMarkup) : worstCaseCost(hold.kind, hold.execution?.action || { job_count: hold.read_job_count || 0 }) - (hold.execution?.action?.type === 'javascript' && hold.actual_price < hold.amount ? COST_POLICY.dynamicWorkerDay : 0);
+    const operation = hold.kind === 'run' && hold.execution?.trigger === 'webhook' ? 'hook' : hold.kind;
+    const estimate = hold.kind === 'prose' ? Math.max(0, (amount - PRICES.proseBase) / PRICES.proseMarkup) : worstCaseCost(operation, hold.execution?.action || { job_count: hold.read_job_count || 0 }) - (hold.execution?.action?.type === 'javascript' && hold.actual_price < hold.amount ? COST_POLICY.dynamicWorkerDay : 0);
     const jobGroup = hold.job || hold.kind || 'other'; const actionGroup = hold.action || hold.kind || 'other';
     const by_job = { ...metric.by_job, [jobGroup]: ((metric.by_job || {})[jobGroup] || 0) + amount };
     const by_action = { ...metric.by_action, [actionGroup]: ((metric.by_action || {})[actionGroup] || 0) + amount };

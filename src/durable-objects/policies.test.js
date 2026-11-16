@@ -1,9 +1,10 @@
-import { it, expect } from 'vitest';
+import { afterEach, it, expect, vi } from 'vitest';
 import { AccountDO } from './account-do.js';
 import { JobDO } from './job-do.js';
 import { namespace } from '../../test-utils/storage.js';
 import { rpc } from '../utils/rpc.js';
 import { consume } from '../executor/consumer.js';
+afterEach(() => vi.useRealTimers());
 async function setup(job = {}) {
   const messages = []; const env = { ENVIRONMENT: 'local', RUN_QUEUE: { send: async body => messages.push(body) }, OUTBOUND_FETCH: async () => new Response('failed', { status: 500 }) };
   env.ACCOUNTS = namespace(AccountDO, env); env.JOBS = namespace(JobDO, env);
@@ -19,7 +20,7 @@ it('reserves and separately charges each immediate retry', async () => {
   for (let index = 0; index < 3; index++) await consume({ body: messages[index], ack() {} }, env, {});
   expect(messages).toHaveLength(3);
   const runs = (await rpc(env.JOBS, 'a:j', 'runs')).items;
-  expect(runs.every(r => r.status === 'failure' && r.cost_microdollars === 60)).toBe(true);
+  expect(runs.every(r => r.status === 'failure' && r.cost_microdollars === 80)).toBe(true);
   expect((await call('account')).held_microdollars).toBe(0);
 });
 it('pauses a daily budget until the next UTC window', async () => {
@@ -50,4 +51,45 @@ it('prunes expired and excess logs while preserving recent history', async () =>
 it('keeps the total redacted log within the paid byte limit', async () => {
   const { boundLog } = await import('../executor/logs.js'); const result = boundLog({ status: 'success', console: '😀'.repeat(8000), return_value: '\\'.repeat(8000) });
   expect(new TextEncoder().encode(JSON.stringify(result)).length).toBeLessThanOrEqual(15000); expect(result.truncated).toBe(true);
+});
+
+it('leaves an unchanged alarm and runtime alone, and clears the final alarm once', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
+  const { env, job } = await setup();
+  const setAlarm = vi.spyOn(job.storage, 'setAlarm');
+  await job.arm(); await job.arm(); expect(setAlarm).not.toHaveBeenCalled();
+  const accountPut = vi.spyOn(env.ACCOUNTS.get('a').storage, 'put');
+  await job.publish(await job.storage.get('settings')); expect(accountPut).not.toHaveBeenCalled();
+  const settings = await job.storage.get('settings'); settings.job.enabled = false;
+  await job.storage.put('settings', settings);
+  const deleteAlarm = vi.spyOn(job.storage, 'deleteAlarm');
+  await job.arm(); await job.arm(); expect(deleteAlarm).toHaveBeenCalledTimes(1);
+});
+
+it('recovers a failed queue send from its prepaid outbox without another hold', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
+  const { env, job, messages, call } = await setup();
+  const send = env.RUN_QUEUE.send;
+  env.RUN_QUEUE.send = vi.fn().mockRejectedValueOnce(new Error('queue unavailable')).mockImplementation(send);
+  await expect(rpc(env.JOBS, 'a:j', 'start', { id: 'r', input: {}, trigger: 'manual' })).rejects.toThrow();
+  expect((await call('account')).held_microdollars).toBe(80);
+  expect(job.storage.alarm).toBe(Date.now() + 1000);
+  await vi.advanceTimersByTimeAsync(1000); await job.alarm();
+  expect(messages).toHaveLength(1);
+  await consume({ body: messages[0], ack() {} }, env, {});
+  await job.alarm(); expect(messages).toHaveLength(1);
+  expect(await call('account')).toMatchObject({ held_microdollars: 0 });
+  expect((await job.storage.get('run:r')).cost_microdollars).toBe(80);
+});
+
+it('keeps an expired outcome when the same alarm advances the schedule', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
+  const { env, job, call } = await setup();
+  await rpc(env.JOBS, 'a:j', 'start', { id: 'old', input: {}, trigger: 'manual' });
+  await vi.advanceTimersByTimeAsync(180000);
+  const settings = await job.storage.get('settings'); settings.next_fire = Date.now();
+  await job.storage.put('settings', settings);
+  await job.alarm();
+  expect((await job.storage.get('settings')).last_outcome).toBe('expired');
+  expect((await call('account')).job_runtime.j.last_outcome).toBe('expired');
 });
