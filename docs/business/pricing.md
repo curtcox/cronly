@@ -11,12 +11,12 @@ constants as the API; historical numbers in the master plan are superseded here.
 
 | Operation | Price | Estimated worst-case marginal cost |
 |---|---|---|
-| HTTP run | 78 µ$ | ceil(policy run bound), currently 47 µ$ |
+| HTTP run | 80 µ$ | ceil(policy run bound), currently 49 µ$ |
 | Webhook run | HTTP/JS price + 5 µ$ | run bound + 2 µ$ |
 | Change: action, variable, secret (including key rotation), job, key, trigger | 100 µ$ | 20 µ$ |
 | API-key read | 20 µ$ base + 2 µ$ per job scanned for aggregate history | 12 µ$ base + 1.2 µ$/job |
 | Web session reads, cron explain, quotes, mutation dry runs | Free, rate-limited | Bounded fixed operating cost |
-| JavaScript run | 78 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
+| JavaScript run | 80 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
 | JS daily activation | 3,300 µ$ on first invocation of each action version per UTC day | 2,000 µ$ provider activation |
 | Prose | ceil(1.64 × actual model-token cost) + 500 µ$ | actual tokens + bookkeeping |
 
@@ -26,7 +26,7 @@ configuration contribute to the content hash. CPU is billed at the configured li
 until per-invocation measured CPU is available (S2). Retries are separately reserved
 and charged as runs. Queue redelivery never repeats a claimed outbound operation.
 
-A regular hourly HTTP job is about $0.05616 per 30 days; a minutely job is $3.3696. These
+A regular hourly HTTP job is about $0.0576 per 30 days; a minutely job is $3.456. These
 are run charges only. Changes, API polling, prose and JS activation are additional.
 
 ## Units and deposits
@@ -49,7 +49,8 @@ reviewed Terms and applicable law.
 
 Rates live only in `src/utils/cost-policy.js`; prices only in `src/utils/pricing.js`;
 model rates only in `src/utils/llm-policy.js`. Included allowances are ignored.
-The HTTP bound includes 33 row writes, 24 DO requests and 3,000 compact-index row reads, queue retry allowance, CPU,
+The HTTP bound includes 33 row writes, 30 DO requests, five Worker invocations and
+3,000 compact-index row reads, six Queue operations, CPU,
 awake time and 16 KB retained logs; orchestration caches compact summaries instead of loading log bodies. Read and change bounds include actual ledger,
 key-budget, audit and rate-counter bookkeeping rather than just one request.
 Permanent cost summaries and job/key budget counters share the account's two
@@ -61,11 +62,19 @@ six HTTP requests when following redirects, cold retained-history scans, retenti
 deletes, alarm writes, ingress counters and production safety lookups. Integration
 tests fail if these paths exceed the policy's row/request allowances. Merely batching
 separate keys into one storage call would not reduce billed SQLite rows.
+All four paths also include three Queue redeliveries, using the configured production
+retry count. Consumers repair committed outcome publication after settlement without
+repeating outbound work or charging twice. Redelivery does not rescan retained history;
+the existing pending-run alarm still guarantees cleanup. The invocation allowance
+includes one ingress request and four separately billed consumer batches, without
+assuming messages share a batch. Cloudflare documents [consumer request/CPU billing](https://developers.cloudflare.com/queues/configuration/consumer-concurrency/)
+separately from [Queue operation charges](https://developers.cloudflare.com/queues/platform/pricing/).
 
 This corrects the earlier 24-write/12-request allowance, which omitted some of that
 bookkeeping. The prior 60 µ$ run price fails the audited floor. Compact pending-run records
-now remove one more write per run and support reducing the corrected 80 µ$ default
-to 78 µ$. Persisted job quotes follow the current price;
+removed one write per run and initially reduced the corrected 80 µ$ default to 78 µ$.
+The subsequent redelivery audit includes recovery RPCs and all consumer invocations,
+so the current default is 80 µ$ to retain the floor. Persisted job quotes follow the current price;
 already-held runs settle within their original maximum.
 
 Tests assert `price × 0.92 >= 1.5 × worstCaseCost` for every operation and JS extremes.

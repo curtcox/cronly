@@ -1,3 +1,4 @@
+import { PRICES } from '../utils/pricing.js';
 import { afterEach, it, expect, vi } from 'vitest';
 import { AccountDO } from './account-do.js';
 import { JobDO } from './job-do.js';
@@ -20,7 +21,7 @@ it('reserves and separately charges each immediate retry', async () => {
   for (let index = 0; index < 3; index++) await consume({ body: messages[index], ack() {} }, env, {});
   expect(messages).toHaveLength(3);
   const runs = (await rpc(env.JOBS, 'a:j', 'runs')).items;
-  expect(runs.every(r => r.status === 'failure' && r.cost_microdollars === 78)).toBe(true);
+  expect(runs.every(r => r.status === 'failure' && r.cost_microdollars === PRICES.run)).toBe(true);
   expect((await call('account')).held_microdollars).toBe(0);
 });
 it('pauses a daily budget until the next UTC window', async () => {
@@ -72,14 +73,14 @@ it('recovers a failed queue send from its prepaid outbox without another hold', 
   const send = env.RUN_QUEUE.send;
   env.RUN_QUEUE.send = vi.fn().mockRejectedValueOnce(new Error('queue unavailable')).mockImplementation(send);
   await expect(rpc(env.JOBS, 'a:j', 'start', { id: 'r', input: {}, trigger: 'manual' })).rejects.toThrow();
-  expect((await call('account')).held_microdollars).toBe(78);
+  expect((await call('account')).held_microdollars).toBe(PRICES.run);
   expect(job.storage.alarm).toBe(Date.now() + 1000);
   await vi.advanceTimersByTimeAsync(1000); await job.alarm();
   expect(messages).toHaveLength(1);
   await consume({ body: messages[0], ack() {} }, env, {});
   await job.alarm(); expect(messages).toHaveLength(1);
   expect(await call('account')).toMatchObject({ held_microdollars: 0 });
-  expect((await job.storage.get('run:r')).cost_microdollars).toBe(78);
+  expect((await job.storage.get('run:r')).cost_microdollars).toBe(PRICES.run);
 });
 
 it('keeps an expired outcome when the same alarm advances the schedule', async () => {
@@ -103,7 +104,7 @@ it('restores a compact pending run after a cold restart without exposing its out
   expect(await job.storage.get('run:r')).toBeUndefined();
   const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
   env.JOBS.objects.set('a:j', cold);
-  expect(await rpc(env.JOBS, 'a:j', 'run', { id: 'r' })).toMatchObject({ id: 'r', status: 'queued', reserved_microdollars: 78, expires_at: Date.now() + 120000 });
+  expect(await rpc(env.JOBS, 'a:j', 'run', { id: 'r' })).toMatchObject({ id: 'r', status: 'queued', reserved_microdollars: PRICES.run, expires_at: Date.now() + 120000 });
   const summary = (await rpc(env.JOBS, 'a:j', 'runs', { summary: true })).items[0];
   expect(summary).not.toHaveProperty('pending'); expect(summary).not.toHaveProperty('key_id');
   await vi.advanceTimersByTimeAsync(1000); await cold.alarm();
@@ -148,7 +149,7 @@ it('rolls back the completed log and index together and retries settlement once'
   await job.result(args);
   expect((await job.storage.get('run:r')).response_body).toBe('ok');
   expect((await job.summaries())[0].status).toBe('success');
-  expect((await call('account')).balance_microdollars).toBe(before - 78);
+  expect((await call('account')).balance_microdollars).toBe(before - PRICES.run);
 });
 
 it('skips unchanged completion settings and commits a changed outcome with its log', async () => {

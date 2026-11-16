@@ -1,3 +1,4 @@
+import { PRICES } from '../utils/pricing.js';
 import { it, expect, vi } from 'vitest';
 import worker from '../index.js';
 import { AccountDO } from '../durable-objects/account-do.js';
@@ -23,12 +24,12 @@ it('queues only after holding funds, redacts output, and deduplicates delivery',
   const { api, messages, env } = await setup();
   const first = await api('/api/jobs/pinger/run', 'POST', {}, { 'Idempotency-Key': 'r1' });
   expect(first.status).toBe(200); expect(messages).toHaveLength(1);
-  expect((await api('/api/account')).held_microdollars).toBe(78);
+  expect((await api('/api/account')).held_microdollars).toBe(PRICES.run);
   const ack = vi.fn(); const message = { body: messages[0], ack };
   await consume(message, env, {}); await consume(message, env, {});
   expect(env.OUTBOUND_FETCH).toHaveBeenCalledTimes(1);
   const runs = await rpc(env.JOBS, 'a:pinger', 'runs');
-  expect(runs.items[0]).toMatchObject({ status: 'success', cost_microdollars: 78 });
+  expect(runs.items[0]).toMatchObject({ status: 'success', cost_microdollars: PRICES.run });
   expect(JSON.stringify(runs)).not.toContain('secret-token');
   expect((await api('/api/account')).held_microdollars).toBe(0);
   await api('/api/jobs/pinger/run', 'POST', {}, { 'Idempotency-Key': 'r1' }); expect(messages).toHaveLength(1);
@@ -59,4 +60,61 @@ it('executes an old-key snapshot after the active key and stored secret change',
   const runs = await rpc(env.JOBS, 'a:pinger', 'runs');
   expect(runs.items[0].status).toBe('success');
   expect(JSON.stringify(runs)).not.toContain('secret-token');
+});
+
+it('recovers committed completion publication on Queue redelivery after restart', async () => {
+  const { api, messages, env } = await setup();
+  await api('/api/jobs/pinger/run', 'POST', {});
+  const job = env.JOBS.get('a:pinger');
+  const publication = vi.spyOn(job, 'publish').mockRejectedValueOnce(new Error('account unavailable'));
+  const ack = vi.fn(); const message = { body: messages[0], ack };
+  await expect(consume(message, env, {})).rejects.toMatchObject({ status: 500 });
+  expect(ack).not.toHaveBeenCalled();
+  expect((await job.storage.get(`run:${message.body.id}`)).status).toBe('success');
+  const before = await api('/api/account');
+  expect(before.held_microdollars).toBe(0);
+  expect(before.job_runtime.pinger.last_outcome).toBe(null);
+  publication.mockRestore();
+  const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
+  env.JOBS.objects.set('a:pinger', cold);
+  const list = vi.spyOn(cold.storage, 'list');
+  // A second reporting outage must still leave the delivery unacknowledged.
+  vi.spyOn(cold, 'publish').mockRejectedValueOnce(new Error('still unavailable'));
+  await expect(consume(message, env, {})).rejects.toMatchObject({ status: 500 });
+  expect(ack).not.toHaveBeenCalled();
+  await consume(message, env, {});
+  expect(ack).toHaveBeenCalledTimes(1);
+  expect(env.OUTBOUND_FETCH).toHaveBeenCalledTimes(1);
+  const after = await api('/api/account');
+  expect(after.balance_microdollars).toBe(before.balance_microdollars);
+  expect(after.job_runtime.pinger.last_outcome).toBe('success');
+  expect(list.mock.calls.some(([options]) => options?.prefix === 'history:')).toBe(false);
+});
+
+it('still dispatches a configured action retry when completion publication fails', async () => {
+  const { api, messages, env } = await setup();
+  await api('/api/jobs/pinger', 'PUT', { action: 'ping', cron: '* * * * *', retries: 1 });
+  env.OUTBOUND_FETCH.mockImplementation(async () => new Response('failed', { status: 500 }));
+  await api('/api/jobs/pinger/run', 'POST', {});
+  const job = env.JOBS.get('a:pinger');
+  vi.spyOn(job, 'publish').mockRejectedValueOnce(new Error('account unavailable'));
+  const ack = vi.fn(); const message = { body: messages[0], ack };
+  await expect(consume(message, env, {})).rejects.toMatchObject({ status: 500 });
+  expect(messages).toHaveLength(2);
+  expect(messages[1].id).toBe(`${messages[0].id}:retry`);
+  await consume(message, env, {});
+  await consume({ body: messages[1], ack }, env, {});
+  expect(env.OUTBOUND_FETCH).toHaveBeenCalledTimes(2);
+  const runs = (await rpc(env.JOBS, 'a:pinger', 'runs')).items;
+  expect(runs).toHaveLength(2);
+  expect(runs.every(run => run.status === 'failure' && run.cost_microdollars === PRICES.run)).toBe(true);
+  expect((await api('/api/account')).held_microdollars).toBe(0);
+});
+
+it('acknowledges an unknown expired delivery without fabricating a run', async () => {
+  const { env } = await setup(); const ack = vi.fn();
+  await consume({ body: { account: 'a', name: 'pinger', id: 'unknown' }, ack }, env, {});
+  expect(ack).toHaveBeenCalledOnce();
+  expect(env.OUTBOUND_FETCH).not.toHaveBeenCalled();
+  expect((await rpc(env.JOBS, 'a:pinger', 'runs')).items).toEqual([]);
 });

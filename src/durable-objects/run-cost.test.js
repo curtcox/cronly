@@ -1,4 +1,5 @@
 import { afterEach, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import worker from '../index.js';
 import { AccountDO } from './account-do.js';
 import { JobDO } from './job-do.js';
@@ -9,6 +10,7 @@ import { consume } from '../executor/consumer.js';
 import { COST_POLICY } from '../utils/cost-policy.js';
 
 afterEach(() => vi.useRealTimers());
+const queueRetries = Number(readFileSync(new URL('../../wrangler.toml', import.meta.url), 'utf8').match(/max_retries\s*=\s*(\d+)/)[1]);
 
 // Count operations, including deletes and alarm writes, rather than just final rows.
 function meter(ns, usage) {
@@ -33,9 +35,9 @@ function meter(ns, usage) {
 }
 
 for (const mode of ['schedule', 'manual', 'test', 'hook']) {
-  it(`bounds full ${mode} run bookkeeping with redirects, cold history and pruning`, async () => {
+  it(`bounds full ${mode} run bookkeeping with redirects, redelivery, cold history and pruning`, async () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
-    const usage = { writes: 0, requests: 0, reads: 0 }; const messages = []; let fetches = 0;
+    const usage = { writes: 0, requests: 0, reads: 0, workerRequests: 0 }; const messages = []; let fetches = 0;
     const env = { ENVIRONMENT: 'local', TOKEN_SIGNING_KEY: 'test', APP_ORIGIN: 'https://cronly.org', RUN_QUEUE: { send: async body => messages.push(body) }, OUTBOUND_FETCH: async () => ++fetches <= 5 ? new Response(null, { status: 302, headers: { location: `https://example.com/${fetches}` } }) : new Response('ok') };
     env.ACCOUNTS = namespace(AccountDO, env); env.JOBS = namespace(JobDO, env);
     env.SAFETY = namespace(SafetyDO, env);
@@ -43,6 +45,7 @@ for (const mode of ['schedule', 'manual', 'test', 'hook']) {
     await rpc(env.SAFETY, 'global', 'record', { report: { checked_at: Date.now(), brake: false } });
     const account = (op, args) => rpc(env.ACCOUNTS, 'a', op, args);
     const api = async (path, headers = { Authorization: 'LocalDev a' }) => {
+      usage.workerRequests++;
       const response = await worker.fetch(new Request(`https://cronly.org${path}`, { method: 'POST', headers, body: '{}' }), env);
       expect(response.status).toBe(200); return response.json();
     };
@@ -64,15 +67,19 @@ for (const mode of ['schedule', 'manual', 'test', 'hook']) {
     }
     job.historyCache = null; // Include the cold object's index scan.
     await env.ACCOUNTS.get('a').storage.deleteAlarm(); // Include a fresh hold's expiry alarm.
-    usage.writes = 0; usage.requests = 0; usage.reads = 0;
+    usage.writes = 0; usage.requests = 0; usage.reads = 0; usage.workerRequests = 0;
     if (mode === 'schedule') { job.storage.alarm = null; usage.requests++; await job.alarm(); }
     else await api(mode === 'test' ? '/api/actions/ping/test' : mode === 'hook' ? `/hook/${token}` : '/api/jobs/j/run', mode === 'hook' ? {} : undefined);
     expect(messages).toHaveLength(1);
-    await consume({ body: messages[0], ack() {} }, env, {});
+    for (let attempt = 0; attempt <= queueRetries; attempt++) {
+      usage.workerRequests++; // Include a separate consumer invocation for each delivery.
+      await consume({ body: messages[0], ack() {} }, env, {});
+    }
     expect(fetches).toBe(6);
     const measured = { ...usage };
     expect(measured.writes, JSON.stringify(measured)).toBeLessThanOrEqual(COST_POLICY.runRowWrites + (mode === 'hook' ? 1 : 0));
     expect(measured.requests, JSON.stringify(measured)).toBeLessThanOrEqual(COST_POLICY.runDoRequests);
+    expect(measured.workerRequests, JSON.stringify(measured)).toBeLessThanOrEqual(COST_POLICY.runWorkerRequests);
     expect(measured.reads, JSON.stringify(measured)).toBeLessThanOrEqual(3000);
     expect(await job.storage.get('run:old')).toBeUndefined();
     expect((await account('account')).held_microdollars).toBe(0);

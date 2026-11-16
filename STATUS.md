@@ -54,9 +54,9 @@ disagrees with it, this file wins and the other document is stale.
 |----|------|-------|--------|-------------------|
 | L1 | Scaffold: wrangler (prod + local), Vitest, ESLint, `dev:local`, CI, `/health` | code | ✅ | Wrangler prod/local, pinned dependencies, lint, CI, health and gated LocalDev/deposits verified. Master plan §10.1. Copy hashbin's local mode and CI shape. |
 | L2 | Accounts and auth: Clerk sessions, Clerk webhook → AccountDO, API keys with scopes and daily spend caps, `API_ROUTES` access test | code | ✅ | Clerk/LocalDev auth, signed hashed scoped keys, revocation, daily caps and Clerk webhook; access coverage tests. §4.1. Port hashbin `src/auth/`. |
-| L3 | Money: µ$ ledger, reserve/settle/expire holds, Stripe deposits, history, `cost-policy.js`, `pricing.js`, price-floor tests, `/api/quote` | code | 🟨 | Transactional ledger/holds, signed Stripe webhook, itemized Checkout and quotes tested; S4 full-path audit and pending-run compaction set the HTTP price to 78 µ$ including redirects, alarms and retention. Existing holds keep their maximum. Real deposit remains L14. §6, `docs/business/pricing.md`. Needs D4, D6. |
+| L3 | Money: µ$ ledger, reserve/settle/expire holds, Stripe deposits, history, `cost-policy.js`, `pricing.js`, price-floor tests, `/api/quote` | code | 🟨 | Transactional ledger/holds, signed Stripe webhook, itemized Checkout and quotes tested; S4 redelivery audit sets HTTP price to 80 µ$ including recovery RPCs and consumer invocations, redirects, alarms and retention. Existing holds keep their maximum. Real deposit remains L14. §6, `docs/business/pricing.md`. Needs D4, D6. |
 | L4 | Definitions: variables, secrets (AES-GCM, write-only), HTTP actions, templates, change billing, audit log, dry run, idempotency | code | ✅ | Atomic billed CRUD, reference checks, AES-GCM write-only secrets, dry runs, audit and idempotency tested. §2, §3.3, §4.2. |
-| L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | ✅ | Real local Worker/Queue HTTP path verified; retries, missed/overlap, budgets, duplicate delivery, held snapshots, refusal pause and recovery tested. §3, §3.1, §2.3. |
+| L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | ✅ | Real local Worker/Queue HTTP path verified; retries, missed/overlap, budgets, duplicate delivery, held snapshots, refusal pause and recovery tested. Queue redelivery repairs committed outcome publication after settlement/restart without repeating external work or charges. §3, §3.1, §2.3. |
 | L6 | Runs, costs, upcoming, projection APIs; retention pruning | code | ✅ | Retained/deleted-job history, NDJSON, permanent UTC cost aggregates, ledger cursors, bounded upcoming, fast cron/DST projections and byte/retention bounds tested. §4.3, §6, §7. |
 | L7 | Triggers: run now, trigger tokens, `/hook/*`, per-token rate limits, CORS, `{{input.*}}` | code | ✅ | Manual runs, signed job-only tokens, revocation, token limits, input validation and hook-only CORS tested. §4.1. |
 | L8 | Web UI with balance + runway header on every signed-in page; Playwright tests | code | ✅ | All workspace pages, runtime status/runway, direct action tests, quote dialogs and logo implemented; mobile and browser save/run/escaping/cron flows pass. §5. |
@@ -74,7 +74,7 @@ disagrees with it, this file wins and the other document is stale.
 | S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ✅ | Atomic versioned keyring, legacy reads, held per-secret re-encryption, edit/delete conflict protection, audit, scoped CLI and CI wiring verified. Persisted local Worker migrated v1 → v2 and executed a redacted JS run with v1 retired. [Operator procedure](docs/ops/secret-rotation.md). §3.3. |
 | S2 | Charge measured JS CPU instead of the configured limit | code | ⬜ | §3.4; needs per-invocation CPU data. |
 | S3 | Recalibrate prices from a month of real Cloudflare and Anthropic bills | ops/code | ⬜ | `docs/business/pricing.md`. |
-| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budget counters save 2–4 writes; unchanged alarms/runtime/recent-job indexes skip writes. Full-path HTTP cost guards cover redirects, cold history, pruning and safety. Compact pending runs reduce the bound to 33 writes/24 requests and the run price to 78 µ$; transactional reads/changes skip transient holds and expiry alarms. Repeated outcomes skip a settings write; changed outcomes commit with logs and redelivery repairs publication. Further durable hold/ledger compaction remains. [Cost audit](docs/business/pricing.md). |
+| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budget counters save 2–4 writes; unchanged alarms/runtime/recent-job indexes skip writes. Compact pending runs retain a 33-write bound; the redelivery audit includes 30 DO requests/five Worker invocations at 80 µ$/run. Transactional reads/changes skip transient holds/expiry alarms. Repeated outcomes skip a settings write; changed outcomes commit with logs and Queue redelivery repairs publication. Further durable hold/ledger compaction remains. [Cost audit](docs/business/pricing.md). |
 
 ## Backlog
 
@@ -178,3 +178,22 @@ calendar days of billed counts rather than sampling retained logs.
   approval remain outstanding. No hashbin files or live services were changed.
 - Lint, 73 unit/integration tests, all three browser flows and the production dry-run
   build pass, including escaping, schema/provenance checks and incomplete-launch refusal.
+
+## L5/S4 Queue completion recovery acceptance — 2026-11-16
+
+- A removed/expired hold now takes the Queue consumer through a bounded JobDO
+  recovery check before acknowledgment. Committed outcomes republish current runtime
+  after restart; pending or unknown runs are left for their existing expiry alarm.
+- The end-to-end test injects two publication outages and a cold restart. Delivery
+  stays unacknowledged until recovery succeeds; outbound execution and billing occur
+  once. Recovery skips retained-history scans and leaves cleanup to the existing alarm.
+  A configured action retry is still reserved and dispatched if publication fails.
+- Four full-path cost checks now include all three configured Queue redeliveries.
+  Bounds are 33 writes, 30 DO requests, five Worker invocations and 3,000 row reads,
+  plus webhook ingress. Six Queue operations cover send, four reads and delete.
+- Consumer invocation fees were missing from the old bound. The HTTP base is now
+  80 µ$ to preserve the floor; JS includes the same base. Existing holds retain
+  their original maximum. Lint and all 76 unit/integration tests pass.
+- All three browser flows, the production dry-run build and real local SQLite/Queue
+  acceptance pass: HTTP, JS, redaction, native networking denial, counted gateway and
+  released holds. No production deployment or live acceptance is claimed.

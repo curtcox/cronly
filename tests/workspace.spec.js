@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { PRICES } from '../src/utils/pricing.js';
 async function login(page) {
   await page.goto('/app.html'); await page.getByLabel('Local account name').fill(`browser-${crypto.randomUUID()}`);
   await page.getByRole('button', { name: 'Use local account' }).click();
@@ -53,6 +54,6 @@ test('keeps balance visible across workspace pages and tests an action without a
   await page.getByRole('link', { name: 'Actions', exact: true }).click();
   await page.getByRole('button', { name: 'Edit', exact: true }).click();
   await page.getByRole('button', { name: 'Review test run', exact: true }).click();
-  await expect(page.locator('#review-price')).toContainText('78 µ$'); await apply(page);
+  await expect(page.locator('#review-price')).toContainText(`${PRICES.run} µ$`); await apply(page);
   await expect(page.locator('#notice')).toContainText('Test queued');
 });

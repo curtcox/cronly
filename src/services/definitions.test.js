@@ -1,3 +1,4 @@
+import { PRICES } from '../utils/pricing.js';
 import { it, expect } from 'vitest';
 import worker from '../index.js';
 import { AccountDO } from '../durable-objects/account-do.js';
@@ -52,10 +53,10 @@ it('quotes current prices for persisted jobs while honoring an older queued hold
   const storage = env.ACCOUNTS.get('alice').storage;
   await storage.put('def:jobs:j', { action: 'ping', cron: null, enabled: true, budget: {}, max_run_microdollars: 60 });
   await rpc(env.ACCOUNTS, 'alice', 'reserve', { id: 'old', amount: 60, kind: 'run', job: 'j' });
-  expect((await api('/api/jobs/j')).value.max_run_microdollars).toBe(78);
-  expect((await api('/api/quote?op=run&job=j')).quote_microdollars).toBe(78);
-  expect(await rpc(env.ACCOUNTS, 'alice', 'settle', { id: 'old', actual: 78 })).toMatchObject({ charged: 60 });
-  // A pre-reduction hold keeps its original maximum through execution/settlement.
-  await rpc(env.ACCOUNTS, 'alice', 'reserve', { id: 'higher', amount: 80, kind: 'run', job: 'j' });
-  expect(await rpc(env.ACCOUNTS, 'alice', 'settle', { id: 'higher', actual: 80 })).toMatchObject({ charged: 80 });
+  expect((await api('/api/jobs/j')).value.max_run_microdollars).toBe(PRICES.run);
+  expect((await api('/api/quote?op=run&job=j')).quote_microdollars).toBe(PRICES.run);
+  expect(await rpc(env.ACCOUNTS, 'alice', 'settle', { id: 'old', actual: PRICES.run })).toMatchObject({ charged: 60 });
+  // A hold above today's quote also keeps its original maximum.
+  await rpc(env.ACCOUNTS, 'alice', 'reserve', { id: 'higher', amount: 100, kind: 'run', job: 'j' });
+  expect(await rpc(env.ACCOUNTS, 'alice', 'settle', { id: 'higher', actual: 100 })).toMatchObject({ charged: 100 });
 });

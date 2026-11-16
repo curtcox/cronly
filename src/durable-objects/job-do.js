@@ -47,6 +47,11 @@ export class JobDO {
       case 'status': return await this.storage.get('settings') || {};
       case 'start': return this.start(args);
       case 'result': return this.result(args);
+      case 'recover-result': {
+        const run = await this.readRun(args.id);
+        if (run && ['success', 'failure', 'expired'].includes(run.status)) return this.result({ id: args.id });
+        return {};
+      }
       case 'wake': {
         const settings = await this.storage.get('settings'); if (!settings?.job) return {};
         if (settings.paused === 'insufficient_balance' || args.force) { settings.paused = null; await this.storage.put('settings', settings); await this.reconcile(); }
@@ -122,8 +127,9 @@ export class JobDO {
     const run = await this.readRun(args.id); assert(run, 'not_found', 'Run not found', 404);
     const settings = await this.storage.get('settings');
     if (run.status === 'success' || run.status === 'failure' || run.status === 'expired') {
-      // A committed outcome may still need its cross-object publication or cleanup.
-      await this.publish(settings); await this.prune(); await this.arm();
+      // Repair publication without reloading retained history on every redelivery.
+      // The pending run's existing alarm still guarantees pruning and rearming.
+      await this.publish(settings);
       return { duplicate: true };
     }
     const retryData = args.result.status === 'failure' && run.attempt < (settings.job?.retries || 0) ? await rpc(this.env.ACCOUNTS, settings.account, 'retry-data', { id: args.id }) : {};
@@ -133,10 +139,13 @@ export class JobDO {
     const changed = settings.last_outcome !== result.status;
     settings.last_outcome = result.status;
     await this.history(result, true, changed ? settings : null);
-    await this.publish(settings);
-    if (result.status === 'failure' && run.attempt < (settings.job?.retries || 0)) {
-      try { await this.start({ id: `${args.id}:retry`, trigger: run.trigger, scheduled_at: run.scheduled_at, input: retryData.input || {}, key_id: run.key_id, retry: true, attempt: run.attempt + 1 }); }
-      catch { /* Refusal has paused the job or capped the retry; never retry unfunded work. */ }
+    try { await this.publish(settings); }
+    finally {
+      // A reporting outage must not suppress an otherwise prepaid configured retry.
+      if (result.status === 'failure' && run.attempt < (settings.job?.retries || 0)) {
+        try { await this.start({ id: `${args.id}:retry`, trigger: run.trigger, scheduled_at: run.scheduled_at, input: retryData.input || {}, key_id: run.key_id, retry: true, attempt: run.attempt + 1 }); }
+        catch { /* Refusal has paused the job or capped the retry; never retry unfunded work. */ }
+      }
     }
     await this.prune(); await this.arm(); return result;
   }

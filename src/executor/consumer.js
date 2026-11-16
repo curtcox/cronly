@@ -7,7 +7,14 @@ export async function consume(message, env, ctx) {
   const { account, name, id } = message.body;
   let execution;
   try { execution = await rpc(env.ACCOUNTS, account, 'claim-run', { id }); }
-  catch (error) { if (error.code === 'expired_run') { message.ack(); return; } throw error; }
+  catch (error) {
+    if (error.code === 'expired_run') {
+      // Settlement can remove the hold before outcome publication/cleanup finishes.
+      await rpc(env.JOBS, `${account}:${name}`, 'recover-result', { id });
+      message.ack(); return;
+    }
+    throw error;
+  }
   if (execution.duplicate) { message.ack(); return; }
   let result;
   try {
