@@ -270,7 +270,7 @@ calendar days of billed counts rather than sampling retained logs.
 - S4 durable hold/ledger compaction and L9–L14 owner/live acceptance remain open.
   Nothing was deployed to production; published prices are unchanged.
 
-## S4 buffered ledger unit acceptance — 2026-11-16
+## S4 buffered ledger acceptance — 2026-11-16
 
 - Recent ledger entries share the transactional balance write. A full buffer archives
   into one permanent page, bounded to 100 entries or 16,000 UTF-8 bytes; both active
@@ -282,6 +282,10 @@ calendar days of billed counts rather than sampling retained logs.
   byte bounds, simultaneous entries, backwards clocks, cold restart, duplicate charges
   and transactional rollback at archive/balance/receipt failures. All 72 full-path
   cost checks now force ledger archival as well as their existing recovery states.
+- All three browser flows, the production dry-run bundle and real local SQLite/Queue
+  acceptance pass: HTTP, JavaScript, redaction, blocked native networking, counted
+  gateway and funded retry. Fifty small deposits with long valid IDs force the byte
+  boundary; history, balances, cost totals and duplicate protection survive archival.
 - Archival retains the previous worst-case allowance, so the 89 µ$ price is unchanged.
-  Browser/build/local Worker acceptance is pending for this increment. L9–L14 live
-  acceptance and owner steps remain open; nothing was deployed to production.
+  Further durable hold compaction and L9–L14 live acceptance/owner steps remain open;
+  nothing was deployed to production.

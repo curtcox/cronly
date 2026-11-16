@@ -59,4 +59,18 @@ await api('/api/dev/deposit', 'POST', { amount_microdollars: 1000 }, 'top-up');
 await api('/api/dev/deposit', 'POST', { amount_microdollars: 1000 }, 'top-up');
 assert.equal((await api('/api/account')).balance_microdollars, account.balance_microdollars + 1000);
 assert.equal((await api('/api/costs')).total_microdollars, spent);
-console.log('Local acceptance passed: deposits, dry runs, HTTP, JS, redaction, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement and spend preservation across deposits. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
+// Force a ledger page to archive in real SQLite, then compare every financial row
+// with the pre-archive result. No external payment or run is needed for this check.
+const beforeArchive = (await api('/api/transactions')).items;
+// Long, valid IDs reach the byte boundary with fewer than 120 requests/minute.
+const archiveId = index => `archive-${index}`.padEnd(128, 'x');
+for (let index = 0; index < 50; index++) await api('/api/dev/deposit', 'POST', { amount_microdollars: 1 }, archiveId(index));
+const archived = (await api('/api/transactions')).items;
+assert.equal(archived.length, beforeArchive.length + 50);
+assert.deepEqual(archived.filter(row => !row.id.startsWith('archive-')), beforeArchive);
+assert.equal(archived.reduce((sum, row) => sum + row.amount_microdollars, 0), account.balance_microdollars + 1050);
+assert.equal((await api('/api/account')).balance_microdollars, account.balance_microdollars + 1050);
+assert.equal((await api('/api/costs')).total_microdollars, spent);
+await api('/api/dev/deposit', 'POST', { amount_microdollars: 1 }, archiveId(0));
+assert.deepEqual((await api('/api/transactions')).items, archived);
+console.log('Local acceptance passed: deposits, dry runs, HTTP, JS, redaction, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
