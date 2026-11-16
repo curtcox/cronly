@@ -14,7 +14,9 @@ assert.equal((await api('/api/account')).balance_microdollars, before.balance_mi
 await api('/api/secrets/token', 'PUT', { value: 'acceptance-secret' });
 for (const [name, action] of Object.entries({
   http: { url: 'https://example.com' },
-  js: { type: 'javascript', source: 'export default async ctx => { console.log(ctx.secrets.token); return { ok: true }; }', cpu_ms: 100, subrequests: 0 },
+  // A UTF-8 snapshot above the compact-hold limit exercises standalone SQLite
+  // reservations alongside the small HTTP, gateway and retry snapshots below.
+  js: { type: 'javascript', source: 'export default async ctx => { console.log(ctx.secrets.token); return { ok: true }; }\n/*' + '😀'.repeat(2200) + '*/', cpu_ms: 100, subrequests: 0 },
   blocked: { type: 'javascript', source: 'export default async () => { await fetch("https://example.com"); }', cpu_ms: 100, subrequests: 0 },
   gateway: { type: 'javascript', source: 'export default async ctx => { const result = await ctx.fetch("https://example.com"); return { status: result.status }; }', cpu_ms: 100, subrequests: 1 },
   retry: { type: 'javascript', source: 'export default async ctx => { if (!ctx.run.id.endsWith(":retry")) throw new Error("retry"); return { event: ctx.input.event }; }', cpu_ms: 100, subrequests: 0 }
@@ -73,4 +75,4 @@ assert.equal((await api('/api/account')).balance_microdollars, account.balance_m
 assert.equal((await api('/api/costs')).total_microdollars, spent);
 await api('/api/dev/deposit', 'POST', { amount_microdollars: 1 }, archiveId(0));
 assert.deepEqual((await api('/api/transactions')).items, archived);
-console.log('Local acceptance passed: deposits, dry runs, HTTP, JS, redaction, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
+console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, redaction, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
