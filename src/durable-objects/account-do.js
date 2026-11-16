@@ -1,4 +1,5 @@
 import { errorResponse, assert } from '../utils/errors.js';
+import { digest } from '../auth/crypto.js';
 import { prepareRun, claimRun } from './runs.js';
 import { loadConfig, mutate, keyBudget } from './definitions.js';
 import { rpc } from '../utils/rpc.js';
@@ -32,6 +33,36 @@ export class AccountDO {
       case 'claim-run': return claimRun(tx, args.id);
       case 'config': return loadConfig(tx, args.public_view !== false);
       case 'mutate': return mutate(tx, args, this.env);
+      case 'begin-prose': {
+        const prior = await tx.get(`prose:${args.id}`);
+        if (prior) { assert(prior.request_hash === args.request_hash, 'idempotency_conflict', 'Idempotency key reused', 409); return { duplicate: true, response: prior.response }; }
+        await reserve(tx, { id: args.id, amount: args.amount, kind: 'prose', ttl_ms: 240000, ...await keyBudget(tx, args.key_id) });
+        await tx.put(`prose:${args.id}`, { request_hash: args.request_hash }); return {};
+      }
+      case 'finish-prose': {
+        await settle(tx, args.id, args.actual); const prior = await tx.get(`prose:${args.id}`);
+        await tx.put(`prose:${args.id}`, { ...prior, response: args.response }); return {};
+      }
+      case 'save-proposal': {
+        const quote = await mutate(tx, { id: `validate:${args.id}`, operations: args.operations, dry_run: true }, this.env);
+        const proposal = { id: args.id, operations: args.operations, quote_microdollars: quote.quote_microdollars, base_hash: args.base_hash, explanation: args.explanation, expires_at: Date.now() + 86400000 };
+        await tx.put(`proposal:${args.id}`, proposal); return proposal;
+      }
+      case 'apply-proposal': {
+        const proposal = await tx.get(`proposal:${args.id}`); assert(proposal, 'not_found', 'Proposal not found', 404);
+        if (proposal.applied) return proposal.applied;
+        assert(proposal.expires_at > Date.now(), 'proposal_expired', 'Proposal expired', 409);
+        assert(await digest(JSON.stringify(await loadConfig(tx, true))) === proposal.base_hash, 'stale_proposal', 'Account changed; request a new proposal', 409);
+        assert(args.expected_quote === undefined || args.expected_quote === proposal.quote_microdollars, 'quote_changed', 'Quote does not match proposal', 409);
+        const response = await mutate(tx, { account: args.account, key_id: args.key_id, id: `apply:${args.id}`, operations: proposal.operations, dry_run: args.dry_run }, this.env);
+        if (!args.dry_run) await tx.put(`proposal:${args.id}`, { ...proposal, applied: response }); return response;
+      }
+      case 'bill-change': {
+        const amount = price('change'); if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
+        const hold = await reserve(tx, { id: args.id, amount, kind: 'change', ...await keyBudget(tx, args.key_id) });
+        if (!hold.duplicate) { await settle(tx, hold.id, amount); await tx.put(`audit:${Date.now()}:${args.id}`, { id: args.id, kind: 'trigger', created_at: Date.now() }); }
+        return { cost_microdollars: hold.duplicate ? 0 : amount };
+      }
       case 'meter-read': {
         const hold = await reserve(tx, { id: args.id, amount: price('read'), kind: 'read', ...await keyBudget(tx, args.key_id) });
         await settle(tx, hold.id, hold.amount); return { cost_microdollars: hold.amount };

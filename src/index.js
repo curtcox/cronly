@@ -1,4 +1,11 @@
-import { runJob } from './api/jobs.js';
+import { proseQuote } from './services/llm.js';
+import { openapi } from './services/openapi.js';
+import { prose, applyProposal } from './api/prose.js';
+import { putConfig } from './api/config.js';
+import { mcp } from './api/mcp.js';
+import { reports } from './api/reporting.js';
+import { hook, triggers } from './auth/triggers.js';
+import { runJob, toggleJob } from './api/jobs.js';
 import { consume } from './executor/consumer.js';
 import { definitions, keys } from './api/definitions.js';
 import { clerkWebhook } from './auth/clerk-webhook.js';
@@ -14,7 +21,15 @@ export { JobDO } from './durable-objects/job-do.js';
 
 // Routes are the sole dispatch source: an undeclared endpoint cannot execute.
 export const API_ROUTES = [
+  { method: 'GET', path: '/openapi.json', access: PUBLIC, handler: 'openapi' },
   { method: 'GET', path: '/health', access: PUBLIC, handler: 'health' },
+  ...['upcoming', 'projection', 'costs', 'runs'].map(handler => ({ method: 'GET', path: `/api/${handler}`, access: 'read', handler })),
+  { method: 'GET', path: '/api/runs/:id', access: 'read', handler: 'run-detail' },
+  { method: 'POST', path: '/api/prose/:mode', access: 'prose', handler: 'prose' },
+  { method: 'POST', path: '/api/changes/:id/apply', access: 'change', handler: 'apply-proposal' },
+  { method: 'PUT', path: '/api/config', access: 'change', handler: 'config-write' },
+  ...['GET', 'POST'].map(method => ({ method, path: '/mcp', access: 'read', handler: 'mcp' })),
+  { method: 'GET', path: '/api/config', access: 'read', handler: 'config-read' },
   { method: 'GET', path: '/api/account', access: 'read', handler: 'account' },
   { method: 'GET', path: '/api/quote', access: PUBLIC, handler: 'quote' },
   { method: 'POST', path: '/api/dev/deposit', access: SESSION, handler: 'dev-deposit' },
@@ -23,6 +38,10 @@ export const API_ROUTES = [
   { method: 'POST', path: '/api/payments/checkout', access: SESSION, handler: 'checkout' },
   { method: 'GET', path: '/api/transactions', access: 'read', handler: 'transactions' },
   { method: 'GET', path: '/api/audit', access: 'read', handler: 'audit' },
+  ...['GET', 'POST'].map(method => ({ method, path: '/api/jobs/:name/triggers', access: method === 'GET' ? 'read' : 'change', handler: 'triggers' })),
+  { method: 'DELETE', path: '/api/jobs/:name/triggers/:id', access: 'change', handler: 'triggers' },
+  ...['GET', 'POST'].map(method => ({ method, path: '/hook/:token', access: PUBLIC, handler: 'hook' })),
+  ...['pause', 'resume'].map(op => ({ method: 'POST', path: `/api/jobs/:name/${op}`, access: 'change', handler: `${op}-job` })),
   { method: 'POST', path: '/api/jobs/:name/run', access: 'run', handler: 'run-job' },
   { method: 'GET', path: '/api/keys', access: SESSION, handler: 'keys' },
   { method: 'POST', path: '/api/keys', access: SESSION, handler: 'keys' },
@@ -35,7 +54,7 @@ export function matchRoute(method, path) {
   for (const route of API_ROUTES) {
     if (route.method !== method) continue;
     const names = [];
-    const pattern = route.path.replace(/:[a-z_]+/g, name => { names.push(name.slice(1)); return '([^/]+)'; });
+    const pattern = route.path.split('/').map(part => { if (part.startsWith(':')) { names.push(part.slice(1)); return '([^/]+)'; } return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('/');
     const match = path.match(new RegExp(`^${pattern}$`));
     if (match) return { ...route, params: { ...(route.kind ? { kind: route.kind } : {}), ...Object.fromEntries(names.map((name, i) => [name, decodeURIComponent(match[i + 1])])) } };
   }
@@ -44,6 +63,13 @@ export function matchRoute(method, path) {
 async function handle(route, request, env, auth) {
   const url = new URL(request.url); const dryRun = url.searchParams.get('dry_run') === '1';
   switch (route.handler) {
+    case 'prose': return prose(route, request, env, auth);
+    case 'apply-proposal': return applyProposal(route, request, env, auth);
+    case 'config-write': return putConfig(request, env, auth);
+    case 'config-read': case 'upcoming': case 'projection': case 'costs': case 'runs': case 'run-detail': return reports(route, request, env, auth);
+    case 'hook': return hook(route, request, env);
+    case 'triggers': return triggers(route, request, env, auth);
+    case 'pause-job': case 'resume-job': return toggleJob(route, request, env, auth);
     case 'run-job': return runJob(route, request, env, auth);
     case 'definitions': return definitions(route, request, env, auth);
     case 'keys': return keys(route, request, env, auth);
@@ -53,8 +79,17 @@ async function handle(route, request, env, auth) {
     case 'transactions': return rpc(env.ACCOUNTS, auth.account, 'list', { prefix: 'ledger:', reverse: true });
     case 'audit': return rpc(env.ACCOUNTS, auth.account, 'list', { prefix: 'audit:', reverse: true });
     case 'cron-explain': { const body = await readJson(request); return { ...explainCron(body.cron, body.timezone), cost_microdollars: 0 }; }
+    case 'openapi': return openapi(API_ROUTES);
     case 'health': return { status: 'ok', environment: env.ENVIRONMENT, git_sha: env.GIT_SHA || 'local' };
-    case 'quote': return { quote_microdollars: price(new URL(request.url).searchParams.get('op')), cost_microdollars: 0 };
+    case 'quote': {
+      const op = url.searchParams.get('op'); assert(['run', 'hook', 'change', 'read', 'prose'].includes(op), 'invalid_operation', 'Unknown operation');
+      let action = {};
+      if (url.searchParams.has('job')) {
+        const caller = await authenticate(request, env); assert(canAccess(caller, 'read'), 'insufficient_scope', 'read scope required', 403);
+        const config = await rpc(env.ACCOUNTS, caller.account, 'config'); const job = config.jobs[url.searchParams.get('job')]; assert(job, 'not_found', 'Job not found', 404); action = config.actions[job.action];
+      }
+      return { quote_microdollars: op === 'prose' ? proseQuote('ask') : price(op, action), cost_microdollars: 0 };
+    }
     case 'account': return rpc(env.ACCOUNTS, auth.account, 'account');
     case 'dev-deposit': {
       assert(env.ENVIRONMENT === 'local', 'not_found', 'Not found', 404);
@@ -64,18 +99,20 @@ async function handle(route, request, env, auth) {
   }
 }
 /** Main Worker: access checks happen before every handler. */
-export default {
+const worker = {
   async queue(batch, env, ctx) {
-    for (const message of batch.messages) { try { await consume(message, env, ctx); } catch { message.retry(); } }
+    for (const message of batch.messages) { try { await consume(message, env, ctx); } catch (error) { console.error('Queue operation failed', error.code || 'internal_error'); message.retry(); } }
   },
   async fetch(request, env) {
     try {
       const path = new URL(request.url).pathname;
+      if (path.startsWith('/hook/') && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Idempotency-Key', 'Access-Control-Max-Age': '86400' } });
       const route = matchRoute(request.method, path);
       if (!route && !path.startsWith('/api/') && env.ASSETS && request.method === 'GET') return env.ASSETS.fetch(request);
       assert(route, 'not_found', 'Not found', 404);
       const auth = route.access === PUBLIC ? null : await authenticate(request, env);
       assert(canAccess(auth, route.access), 'insufficient_scope', 'Credential does not allow this operation', 403);
+      if (route.handler === 'mcp') return mcp(request, env, auth, (path, method, body) => worker.fetch(new Request(new URL(path, request.url), { method, headers: { Authorization: request.headers.get('Authorization'), 'Content-Type': 'application/json', 'Idempotency-Key': request.headers.get('Idempotency-Key') || crypto.randomUUID() }, body: method === 'GET' ? undefined : JSON.stringify(body) }), env));
       if (auth) await rpc(env.ACCOUNTS, auth.account, 'rate-limit', { id: 'api', limit: 120 });
       let cost = 0;
       if (auth?.key_id && request.method === 'GET' && !new URL(request.url).searchParams.has('dry_run')) {
@@ -83,7 +120,10 @@ export default {
       }
       const data = await handle(route, request, env, auth);
       const balance = auth ? await rpc(env.ACCOUNTS, auth.account, 'account') : {};
-      return Response.json({ cost_microdollars: cost, balance_microdollars: balance.balance_microdollars, ...data });
-    } catch (error) { return errorResponse(error); }
+      if (route.handler === 'runs' && new URL(request.url).searchParams.get('format') === 'ndjson') return new Response(data.items.map(item => JSON.stringify(item)).join('\n') + '\n', { headers: { 'content-type': 'application/x-ndjson', 'X-Cost-Microdollars': String(cost), 'X-Balance-Microdollars': String(balance.balance_microdollars) } });
+      return Response.json({ cost_microdollars: cost, balance_microdollars: balance.balance_microdollars, ...data }, { headers: path.startsWith('/hook/') ? { 'Access-Control-Allow-Origin': '*' } : {} });
+    } catch (error) { const response = errorResponse(error); if (new URL(request.url).pathname.startsWith('/hook/')) response.headers.set('Access-Control-Allow-Origin', '*'); return response; }
   }
 };
+
+export default worker;

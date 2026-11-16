@@ -1,0 +1,20 @@
+import { it, expect } from 'vitest';
+import worker from '../index.js';
+import { AccountDO } from '../durable-objects/account-do.js';
+import { JobDO } from '../durable-objects/job-do.js';
+import { namespace } from '../../test-utils/storage.js';
+it('restricts hooks to a signed single-job token and supports CORS and revocation', async () => {
+  const queued = []; const env = { ENVIRONMENT: 'local', TOKEN_SIGNING_KEY: 'test', APP_ORIGIN: 'https://cronly.org', RUN_QUEUE: { send: async body => queued.push(body) } };
+  env.ACCOUNTS = namespace(AccountDO, env); env.JOBS = namespace(JobDO, env);
+  const api = async (path, method, body, headers = { Authorization: 'LocalDev a' }) => worker.fetch(new Request(`https://cronly.org${path}`, { method, headers, body: body && JSON.stringify(body) }), env);
+  await api('/api/dev/deposit', 'POST', { amount_microdollars: 2000 });
+  await api('/api/actions/ping', 'PUT', { url: 'https://example.com/{{input.message}}' });
+  await api('/api/jobs/pinger', 'PUT', { action: 'ping', cron: null });
+  const trigger = await (await api('/api/jobs/pinger/triggers', 'POST', {})).json();
+  const response = await api(`/hook/${trigger.token}`, 'POST', { message: 'hello' }, {});
+  expect(response.status).toBe(200); expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*'); expect(queued).toHaveLength(1);
+  expect((await api(`/hook/${trigger.token}x`, 'POST', {}, {})).status).toBe(401);
+  await api(`/api/jobs/pinger/triggers/${trigger.id}`, 'DELETE');
+  expect((await api(`/hook/${trigger.token}`, 'POST', {}, {})).status).toBe(401);
+  expect((await api('/api/account', 'GET')).headers.has('Access-Control-Allow-Origin')).toBe(false);
+});

@@ -1,6 +1,6 @@
 name = "cronly"
 main = "src/index.js"
-compatibility_date = "2026-11-15"
+compatibility_date = "2026-10-30"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 

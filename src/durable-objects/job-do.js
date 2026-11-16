@@ -1,5 +1,6 @@
 import { assert, errorResponse } from '../utils/errors.js';
 import { rpc } from '../utils/rpc.js';
+import { price } from '../utils/pricing.js';
 import { nextFires } from '../services/cron.js';
 
 const DAY = 86400000;
@@ -21,6 +22,27 @@ export class JobDO {
         const settings = { account: args.account, name: args.name, job: args.job, paused: null };
         settings.next_fire = args.job?.enabled && args.job.cron ? (prior?.job?.cron === args.job.cron && prior?.job?.timezone === args.job.timezone && prior.next_fire > Date.now() ? prior.next_fire : Date.parse(nextFires(args.job.cron, args.job.timezone, 1)[0])) : null;
         await this.storage.put('settings', settings); await this.arm(); return settings;
+      }
+      case 'triggers': return { items: [...(await this.storage.list({ prefix: 'trigger:' })).values()].map(({ id, rate, revoked }) => ({ id, rate_per_minute: rate, revoked })) };
+      case 'change-trigger': {
+        const settings = await this.storage.get('settings'); assert(settings?.job, 'not_found', 'Job not found', 404);
+        const prior = await this.storage.get(`trigger:${args.id}`);
+        if (args.revoke) assert(prior, 'not_found', 'Trigger not found', 404);
+        else assert(!prior || prior.rate === args.rate, 'idempotency_conflict', 'Trigger id already used', 409);
+        assert(prior || (await this.storage.list({ prefix: 'trigger:' })).size < 100, 'trigger_limit', 'Maximum 100 triggers per job');
+        const result = await rpc(this.env.ACCOUNTS, settings.account, 'bill-change', { id: `trigger:${settings.name}:${args.id}:${args.revoke ? 'revoke' : 'create'}`, key_id: args.key_id, dry_run: args.dry_run });
+        if (!args.dry_run) await this.storage.put(`trigger:${args.id}`, { id: args.id, rate: args.rate, revoked: args.revoke || prior?.revoked || false });
+        return { ...result, id: args.id };
+      }
+      case 'hook': {
+        const settings = await this.storage.get('settings'); const trigger = await this.storage.get(`trigger:${args.token_id}`);
+        assert(settings?.job && trigger && !trigger.revoked, 'invalid_trigger', 'Invalid trigger token', 401);
+        if (args.dry_run) { const config = await rpc(this.env.ACCOUNTS, settings.account, 'config'); return { quote_microdollars: price('hook', config.actions[settings.job.action]), cost_microdollars: 0 }; }
+        let bucket = await this.storage.get(`trigger-rate:${args.token_id}`); const now = Date.now();
+        if (!bucket || bucket.reset <= now) bucket = { count: 0, reset: now + 60000 };
+        assert(bucket.count < trigger.rate, 'rate_limited', 'Trigger rate exceeded', 429);
+        bucket.count++; await this.storage.put(`trigger-rate:${args.token_id}`, bucket);
+        return this.start({ ...args, trigger: 'webhook', scheduled_at: new Date().toISOString() });
       }
       case 'status': return await this.storage.get('settings') || {};
       case 'start': return this.start(args);

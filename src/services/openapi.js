@@ -1,0 +1,34 @@
+import { PUBLIC, SESSION } from '../auth/scopes.js';
+const integerMoney = { type: 'integer', minimum: 0, description: 'Integer micro-dollars (1 USD = 1,000,000).' };
+const schemas = {
+  Error: { type: 'object', required: ['error', 'code'], properties: { error: { type: 'string' }, code: { type: 'string' } } },
+  Value: { type: 'object', required: ['value'], properties: { value: { type: 'string', maxLength: 8192 } } },
+  Job: { type: 'object', required: ['action', 'cron'], properties: { action: { type: 'string', pattern: '^[a-z0-9-]{1,64}$' }, cron: { type: ['string', 'null'] }, timezone: { type: 'string', default: 'UTC' }, overlap: { enum: ['skip', 'allow'] }, missed: { enum: ['skip', 'run_once'] }, enabled: { type: 'boolean' }, retries: { type: 'integer', minimum: 0, maximum: 3 }, budget: { type: 'object', properties: { day: integerMoney, month: integerMoney } } } },
+  Action: { type: 'object', properties: { type: { enum: ['http', 'javascript'] }, url: { type: 'string' }, method: { enum: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] }, headers: { type: 'object', additionalProperties: { type: 'string' } }, body: { type: 'string' }, timeout_seconds: { type: 'integer', minimum: 1, maximum: 30 }, follow_redirects: { type: 'boolean' }, source: { type: 'string', maxLength: 262144 }, cpu_ms: { type: 'integer', minimum: 10, maximum: 30000 }, subrequests: { type: 'integer', minimum: 0, maximum: 50 } } },
+  Config: { type: 'object', properties: { variables: { type: 'object', additionalProperties: { type: 'string' } }, secrets: { type: 'object', description: 'Metadata only; set secret values with the write-only endpoint.' }, actions: { type: 'object', additionalProperties: { $ref: '#/components/schemas/Action' } }, jobs: { type: 'object', additionalProperties: { $ref: '#/components/schemas/Job' } } } },
+  Response: { type: 'object', properties: { cost_microdollars: integerMoney, balance_microdollars: integerMoney, quote_microdollars: integerMoney } }
+};
+/** Generate the served and checked-in contract from the only dispatch table. */
+export function openapi(routes) {
+  const paths = {};
+  for (const route of routes) {
+    if (route.path === '/mcp') continue;
+    const path = route.path.replace(/:([a-z_]+)/g, '{$1}');
+    const operation = { operationId: `${route.method.toLowerCase()}_${route.path.replace(/[^a-z0-9]/gi, '_')}`, summary: route.handler, 'x-access': route.access,
+      security: route.access === PUBLIC ? [] : route.access === SESSION ? [{ ClerkSession: [] }] : [{ ApiKey: [] }, { ClerkSession: [] }],
+      parameters: [...route.path.matchAll(/:([a-z_]+)/g)].map(([, name]) => ({ name, in: 'path', required: true, schema: { type: 'string' } })),
+      responses: { 200: { description: 'Successful result; money is integer micro-dollars.', content: { 'application/json': { schema: { $ref: '#/components/schemas/Response' } } } }, 400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } }, 401: { description: 'Invalid credential' }, 403: { description: 'Insufficient scope' }, 402: { description: 'Insufficient balance or budget' }, 409: { description: 'Stale proposal, overlap or idempotency conflict' }, 429: { description: 'Rate limit exceeded' } } };
+    if (['PUT', 'POST', 'DELETE'].includes(route.method) && route.path.startsWith('/api/')) operation.parameters.push({ name: 'dry_run', in: 'query', schema: { enum: ['1'] }, description: 'Validate and quote without applying or charging.' }, { name: 'Idempotency-Key', in: 'header', schema: { type: 'string', maxLength: 128 } });
+    if (['PUT', 'POST'].includes(route.method)) {
+      let schema = { type: 'object' };
+      if (route.handler === 'definitions') schema = { $ref: `#/components/schemas/${route.kind === 'jobs' ? 'Job' : route.kind === 'actions' ? 'Action' : 'Value'}` };
+      if (route.handler === 'config-write') schema = { $ref: '#/components/schemas/Config' };
+      operation.requestBody = { content: { 'application/json': { schema } } };
+    }
+    if (route.handler === 'quote') for (const name of ['op', 'job']) operation.parameters.push({ name, in: 'query', schema: { type: 'string' } });
+    if (['runs', 'costs', 'upcoming'].includes(route.handler)) for (const name of ['from', 'to', 'job', 'status', 'group', 'limit', 'format']) operation.parameters.push({ name, in: 'query', schema: { type: 'string' } });
+    (paths[path] ||= {})[route.method.toLowerCase()] = operation;
+  }
+  return { openapi: '3.1.0', info: { title: 'cronly API', version: '0.1.0', description: 'Prepaid cron actions. Quote first, apply separately. Session reads are free; API reads are metered.' }, servers: [{ url: 'https://cronly.org' }], paths,
+    components: { securitySchemes: { ApiKey: { type: 'apiKey', in: 'header', name: 'Authorization', description: 'ApiKey crk_…; scoped and optionally capped per UTC day.' }, ClerkSession: { type: 'http', scheme: 'bearer', bearerFormat: 'Clerk JWT' } }, schemas } };
+}
