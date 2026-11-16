@@ -63,7 +63,15 @@ export async function charge(tx, args, now = Date.now()) {
 async function settleReservation(tx, hold, actual, now, immediate = false) {
   if (hold.settled) return hold;
   const id = hold.id;
-  const amount = Math.min(hold.amount, actual, hold.actual_price ?? Infinity);
+  let maximum = hold.actual_price ?? hold.amount;
+  if (hold.activation_day) {
+    const activationKey = `activation:${hold.execution.version}:${hold.activation_day}`;
+    // Concurrent claims each retain the full hold until one activation is paid.
+    // A refunded/braked claim must not give later executions a free activation.
+    if (await tx.get(activationKey)) maximum = Math.min(maximum, hold.amount - PRICES.jsActivation);
+    else if (Math.min(hold.amount, actual, maximum) >= PRICES.jsActivation) await tx.put(activationKey, { created_at: now });
+  }
+  const amount = Math.min(hold.amount, actual, maximum);
   const state = await accountMoney(tx);
   const balance = state.balance_microdollars;
   assert(balance >= amount, 'ledger_invariant', 'Invalid ledger state', 500);
@@ -77,7 +85,7 @@ async function settleReservation(tx, hold, actual, now, immediate = false) {
       if (value) budget_spent[kind] = { ...budget_spent[kind], [value]: await budgetSpent(tx, metric, kind, value, period) + amount };
     }
     const operation = hold.kind === 'run' && hold.execution?.trigger === 'webhook' ? 'hook' : hold.kind;
-    const estimate = hold.kind === 'prose' ? Math.max(0, (amount - PRICES.proseBase) / PRICES.proseMarkup) : worstCaseCost(operation, hold.execution?.action || { job_count: hold.read_job_count || 0 }) - (hold.execution?.action?.type === 'javascript' && hold.actual_price < hold.amount ? COST_POLICY.dynamicWorkerDay : 0);
+    const estimate = hold.kind === 'prose' ? Math.max(0, (amount - PRICES.proseBase) / PRICES.proseMarkup) : worstCaseCost(operation, hold.execution?.action || { job_count: hold.read_job_count || 0 }) - (hold.execution?.action?.type === 'javascript' && maximum < hold.amount ? COST_POLICY.dynamicWorkerDay : 0);
     const jobGroup = hold.job || hold.kind || 'other'; const actionGroup = hold.action || hold.kind || 'other';
     const by_job = { ...metric.by_job, [jobGroup]: (ownValue(metric.by_job, jobGroup) ?? 0) + amount };
     const by_action = { ...metric.by_action, [actionGroup]: (ownValue(metric.by_action, actionGroup) ?? 0) + amount };
@@ -88,7 +96,7 @@ async function settleReservation(tx, hold, actual, now, immediate = false) {
   await appendLedger(tx, state, { id, amount_microdollars: -amount, kind: hold.kind, job: hold.job, action: hold.action, created_at: now });
   await tx.put('balance', state);
   const { execution: _execution, ...receipt } = hold;
-  const result = { ...receipt, settled: true, charged: amount, settled_at: now };
+  const result = { ...receipt, ...(hold.activation_day ? { actual_price: maximum } : {}), settled: true, charged: amount, settled_at: now };
   // The permanent receipt is also the reservation tombstone; duplicates cannot spend twice.
   if (!immediate && !compact) await tx.delete(`hold:${id}`);
   await tx.put(`receipt:${id}`, result);

@@ -202,6 +202,12 @@ re-uploaded. Pricing (§6) charges the **configured** CPU limit per run until me
 available per invocation (Tail Worker `cpuTime` or equivalent), then charges measured CPU with
 the configured limit as the hold.
 
+Dynamic Worker activation is held on every run and charged once per account/action
+version and UTC execution-claim day. Record paid activation atomically with
+settlement so concurrent runs share one charge and a fully refunded safety-braked
+claim cannot discount later execution. Queue delay across midnight changes the
+activation day while preserving the reservation's job/key budget day and month.
+
 ### 3.5 Prose (Claude)
 
 Three endpoints, all metered and all reserved before the call (§6):

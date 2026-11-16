@@ -26,6 +26,15 @@ configuration contribute to the content hash. CPU is billed at the configured li
 until per-invocation measured CPU is available (S2). Retries are separately reserved
 and charged as runs. Queue redelivery never repeats a claimed outbound operation.
 
+Activation uses the UTC day when execution is claimed, even if the reservation was
+made before midnight. Job/key budgets still use the original reserved day/month.
+An activation is recorded as paid in the same transaction as its settlement,
+ledger and receipt. Concurrent first claims keep their full holds; settlement
+charges one activation and discounts the others. A safety-braked, fully refunded
+claim does not grant a free activation to a later run. Legacy claimed holds retain
+their promised maximum. UTC month rollover, refunds, settlement order, storage
+rollback and cold restarts are covered for compact and standalone reservations.
+
 A regular hourly HTTP job is about $0.06264 per 30 days; a minutely job is $3.7584. These
 are run charges only. Changes, API polling, prose and JS activation are additional.
 

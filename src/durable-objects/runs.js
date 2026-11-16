@@ -57,11 +57,14 @@ export async function claimRun(tx, id) {
   assert(hold && hold.expires_at > Date.now(), 'expired_run', 'Run hold expired', 409);
   if (hold.claimed) return { duplicate: true };
   let actual_price = hold.amount;
+  let activation_day;
   if (hold.execution.action.type === 'javascript') {
-    const activationKey = `activation:${hold.execution.version}:${hold.day}`;
+    // Queue delay can cross UTC midnight. Budgets keep the reservation period,
+    // while activation follows execution and only recognizes settled payments.
+    activation_day = new Date().toISOString().slice(0, 10);
+    const activationKey = `activation:${hold.execution.version}:${activation_day}`;
     if (await tx.get(activationKey)) actual_price -= PRICES.jsActivation;
-    else await tx.put(activationKey, { created_at: Date.now() });
   }
-  await putHold(tx, { ...hold, claimed: true, actual_price });
+  await putHold(tx, { ...hold, claimed: true, actual_price, ...(activation_day ? { activation_day } : {}) });
   return { ...hold.execution, amount: hold.amount, actual_price };
 }

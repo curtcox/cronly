@@ -1,4 +1,5 @@
 import { PRICES } from '../utils/pricing.js';
+import { price } from '../utils/pricing.js';
 import { afterEach, it, expect, vi } from 'vitest';
 import worker from '../index.js';
 import { AccountDO } from '../durable-objects/account-do.js';
@@ -118,6 +119,31 @@ it('acknowledges an unknown expired delivery without fabricating a run', async (
   expect(ack).toHaveBeenCalledOnce();
   expect(env.OUTBOUND_FETCH).not.toHaveBeenCalled();
   expect((await rpc(env.JOBS, 'a:pinger', 'runs')).items).toEqual([]);
+});
+
+it('refunds a braked JS run without discounting the next actual sandbox activation', async () => {
+  const { api, messages, env } = await setup(10000);
+  const action = { type: 'javascript', source: 'export default () => 1', cpu_ms: 100, subrequests: 0 };
+  await api('/api/actions/ping', 'PUT', action);
+  await api('/api/jobs/pinger', 'PUT', { action: 'ping', cron: null });
+  await api('/api/jobs/next', 'PUT', { action: 'ping', cron: null });
+  await api('/api/jobs/pinger/run', 'POST', {});
+  let brake = true;
+  env.SAFETY = { idFromName: id => id, get: () => ({ fetch: async () => Response.json({ brake }) }) };
+  const invoke = vi.fn(async () => Response.json({ status: 'success', value_text: '1' }));
+  env.LOADER = { get: () => ({ getEntrypoint: () => ({ fetch: invoke }) }) };
+  env.TOKEN_SIGNING_KEY = 'test';
+  const ctx = { exports: { OutboundGateway: () => ({}) } };
+  await consume({ body: messages[0], ack() {} }, env, ctx);
+  expect(invoke).not.toHaveBeenCalled();
+  expect(await rpc(env.JOBS, 'a:pinger', 'run', { id: messages[0].id })).toMatchObject({ cost_microdollars: 0 });
+  brake = false;
+  await api('/api/jobs/next/run', 'POST', {});
+  await consume({ body: messages[1], ack() {} }, env, ctx);
+  await consume({ body: messages[1], ack() {} }, env, ctx);
+  expect(invoke).toHaveBeenCalledOnce();
+  expect(await rpc(env.JOBS, 'a:next', 'run', { id: messages[1].id })).toMatchObject({ status: 'success', cost_microdollars: price('run', action) });
+  expect((await api('/api/account')).held_microdollars).toBe(0);
 });
 
 for (const failureAt of ['settle', 'completion']) {
