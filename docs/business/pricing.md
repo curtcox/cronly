@@ -80,7 +80,7 @@ The audit also injects failed settlement, completion writes, retry dispatch and 
 outbox cleanup, plus the pause when a retry exceeds its budget. Results are staged
 durably before settlement; recovery completes the same outcome and charges once.
 A failed run's retry context stays private until its
-deterministic child is reserved/enqueued or refused by its job/key budget. The 72 checks repeat these paths with compact summaries, UTC day/month rollovers
+deterministic child is reserved/enqueued or refused by its job/key budget. The 144 checks repeat these paths with compact and standalone reservations, compact summaries, UTC day/month rollovers
 and oversized standalone summaries. The same
 38-write/30-DO-request/five-invocation allowance covers these tested paths; separately
 billed retries each contribute their own allowance. Refused retries have no separate
@@ -127,9 +127,21 @@ entries, archived pages and legacy standalone rows using bounded reads in either
 direction; old cursors remain valid. New cursors use a persisted sequence to order
 simultaneous entries and withstand a backwards wall clock, while entries retain
 their actual creation times. Receipt lookup and all accounting still commit atomically.
-The 72 cost checks force a full ledger buffer alongside their money-summary and
+The 144 cost checks force a full ledger buffer alongside their money-summary and
 recovery scenarios; archival needs the saved write, so the worst-case bound and
-prices are unchanged. Further safe hold compaction remains S4 work.
+prices are unchanged.
+
+Small durable reservations now also share the balance row. Their final settlement
+removes the prepaid execution snapshot in the same balance write, saving one row
+delete per run. The compact hold array is limited to 8,000 UTF-8 bytes, with 128
+bytes per hold reserved for claim/activation/gateway updates; together with both
+summaries and ledger it fits below the storage value limit. Large snapshots and
+legacy holds remain standalone, without migration writes. Funds, budgets, account
+concurrency, job overlap and expiry include both formats. Permanent receipts remain
+separate and never expose execution snapshots. The full-path audit checks both
+formats and requires compact runs to use one fewer write; standalone runs retain
+the 38-write bound and therefore the same 89 µ$ price. Further worst-case write
+reductions remain S4 work.
 
 ## Verified provider sources
 

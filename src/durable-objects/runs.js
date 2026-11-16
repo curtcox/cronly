@@ -7,6 +7,7 @@ import { keyBudget } from './definitions.js';
 import { references } from '../executor/templates.js';
 import { price } from '../utils/pricing.js';
 import { COST_POLICY } from '../utils/cost-policy.js';
+import { getHold, listHolds, putHold } from './hold-storage.js';
 
 // Recovery must use the original reservation, even if a response or JobDO write
 // was lost. Return only orchestration data, never the frozen credentials/code.
@@ -21,13 +22,13 @@ function prepared(hold) {
 /** Freeze the action and only the referenced credentials inside the prepaid hold. */
 export async function prepareRun(tx, args, env = {}) {
   assert(args.input && typeof args.input === 'object' && !Array.isArray(args.input) && Object.keys(args.input).length <= 32 && Object.entries(args.input).every(([k, v]) => /^[a-zA-Z0-9_-]{1,64}$/.test(k) && typeof v === 'string' && v.length <= 2048), 'invalid_input', 'Webhook input must be a small object of strings');
-  const prior = await tx.get(`hold:${args.id}`) || await tx.get(`receipt:${args.id}`);
+  const prior = await getHold(tx, args.id) || await tx.get(`receipt:${args.id}`);
   if (prior) return { ...prepared(prior), duplicate: true };
   const job = args.test_action ? { action: args.test_action, enabled: true, overlap: 'allow', retries: 0, budget: {}, cron: null } : await tx.get(`def:jobs:${args.name}`);
   assert(job, 'not_found', 'Job not found', 404); assert(job.enabled, 'job_disabled', 'Job is disabled', 409);
   const action = await tx.get(`def:actions:${job.action}`); assert(action, 'unknown_action', 'Action missing', 409);
   if (action.type === 'javascript' && env.ENVIRONMENT === 'production') assert(env.JS_LIVE_ACCEPTED === 'true' || (await tx.get('profile')).id === env.JS_ACCEPTANCE_ACCOUNT, 'sandbox_acceptance_required', 'JavaScript requires live sandbox acceptance', 503);
-  const holds = [...(await tx.list({ prefix: 'hold:' })).values()];
+  const holds = await listHolds(tx);
   assert(holds.filter(h => h.kind === 'run').length < COST_POLICY.concurrency, 'concurrency_limit', 'Maximum concurrent account runs reached', 429);
   if (job.overlap === 'skip') assert(!holds.some(h => h.job === args.name), 'overlap', 'Previous run is unfinished', 409);
   const now = Date.now(); const last = await tx.get(`last-run:${args.name}`);
@@ -54,7 +55,7 @@ export async function prepareRun(tx, args, env = {}) {
 }
 /** A queue redelivery cannot re-execute an already claimed external request. */
 export async function claimRun(tx, id) {
-  const hold = await tx.get(`hold:${id}`);
+  const hold = await getHold(tx, id);
   assert(hold && hold.expires_at > Date.now(), 'expired_run', 'Run hold expired', 409);
   if (hold.claimed) return { duplicate: true };
   let actual_price = hold.amount;
@@ -63,6 +64,6 @@ export async function claimRun(tx, id) {
     if (await tx.get(activationKey)) actual_price -= PRICES.jsActivation;
     else await tx.put(activationKey, { created_at: Date.now() });
   }
-  await tx.put(`hold:${id}`, { ...hold, claimed: true, actual_price });
+  await putHold(tx, { ...hold, claimed: true, actual_price });
   return { ...hold.execution, amount: hold.amount, actual_price };
 }

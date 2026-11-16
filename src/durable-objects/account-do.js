@@ -9,6 +9,7 @@ import { funds, reserve, settle, deposit, charge } from './ledger.js';
 import { beginSecretRotation, finishSecretRotation } from './secret-rotation.js';
 import { accountMoney, accountMetric } from './account-money.js';
 import { listLedger } from './ledger-history.js';
+import { getHold, listHolds, putHold } from './hold-storage.js';
 
 /** Account definitions and money share one transactional, SQLite-backed object. */
 export class AccountDO {
@@ -42,7 +43,7 @@ export class AccountDO {
       }
       case 'reserve': return reserve(tx, { ...args, ...await keyBudget(tx, args.key_id) });
       case 'gateway-request': {
-        const hold = await tx.get(`hold:${args.id}`);
+        const hold = await getHold(tx, args.id);
         assert(hold?.claimed && hold.expires_at > Date.now() && hold.execution?.action?.type === 'javascript', 'invalid_capability', 'Run is not active', 403);
         const count = hold.gateway_count || 0;
         assert(count < hold.execution.action.subrequests, 'subrequest_limit', 'Subrequest limit reached', 429);
@@ -50,7 +51,7 @@ export class AccountDO {
         if (!rate || rate.reset <= now) rate = { count: 0, reset: now + 60000 };
         assert(rate.count < 60, 'destination_rate_limit', 'Destination rate exceeded', 429);
         await tx.put(`rate:destination:${args.host}`, { ...rate, count: rate.count + 1 });
-        await tx.put(`hold:${args.id}`, { ...hold, gateway_count: count + 1 }); return { subrequests: count + 1 };
+        await putHold(tx, { ...hold, gateway_count: count + 1 }); return { subrequests: count + 1 };
       }
       case 'job-runtime': {
         const prior = await tx.get(`runtime:${args.name}`);
@@ -69,7 +70,7 @@ export class AccountDO {
         return {};
       }
       case 'prepare-run': return prepareRun(tx, args, this.env);
-      case 'retry-data': { const hold = await tx.get(`hold:${args.id}`); return { input: hold?.execution?.input || {} }; }
+      case 'retry-data': { const hold = await getHold(tx, args.id); return { input: hold?.execution?.input || {} }; }
       case 'claim-run': return claimRun(tx, args.id);
       case 'config': return loadConfig(tx, args.public_view !== false);
       case 'mutate': return mutate(tx, args, this.env);
@@ -111,7 +112,7 @@ export class AccountDO {
         return { counts };
       }
       case 'read-plan': return { names: (await tx.get('recent-jobs')) || [] };
-      case 'run-route': { const hold = await tx.get(`hold:${args.id}`) || await tx.get(`receipt:${args.id}`); if (hold?.job) return { job: hold.job }; const profile = await tx.get('profile'); const prefix = `${profile.id}:`; assert(args.id.startsWith(prefix), 'not_found', 'Run not found', 404); const parts = args.id.slice(prefix.length).split(':'); const name = parts[0] === '_test' ? parts.slice(0, 2).join(':') : parts[0]; assert(await tx.get(`job-index:${name}`), 'not_found', 'Run not found', 404); return { job: name }; }
+      case 'run-route': { const hold = await getHold(tx, args.id) || await tx.get(`receipt:${args.id}`); if (hold?.job) return { job: hold.job }; const profile = await tx.get('profile'); const prefix = `${profile.id}:`; assert(args.id.startsWith(prefix), 'not_found', 'Run not found', 404); const parts = args.id.slice(prefix.length).split(':'); const name = parts[0] === '_test' ? parts.slice(0, 2).join(':') : parts[0]; assert(await tx.get(`job-index:${name}`), 'not_found', 'Run not found', 404); return { job: name }; }
       case 'meter-read': {
         const names = args.resource === 'runs' ? (args.job ? [args.job] : (await tx.get('recent-jobs')) || []) : [];
         const receipt = await charge(tx, { id: args.id, amount: price('read', { job_count: names.length }), read_job_count: names.length, kind: 'read', ...await keyBudget(tx, args.key_id) });
@@ -188,8 +189,7 @@ export class AccountDO {
   async alarm() {
     await this.storage.transaction(async tx => {
       const now = Date.now(); let next;
-      for (const hold of (await tx.list({ prefix: 'hold:' })).values()) {
-        if (hold.settled) continue;
+      for (const hold of await listHolds(tx)) {
         if (hold.expires_at <= now) await settle(tx, hold.id, hold.amount, now);
         else next = Math.min(next || Infinity, hold.expires_at);
       }

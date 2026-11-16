@@ -3,12 +3,13 @@ import { PRICES } from '../utils/pricing.js';
 import { assert } from '../utils/errors.js';
 import { accountMoney, accountMetric, updateAccountMetric } from './account-money.js';
 import { appendLedger } from './ledger-history.js';
+import { getHold, listHolds, putHold } from './hold-storage.js';
 /** Validate all money at the boundary; never use floating balances. */
 export function money(value) { assert(Number.isSafeInteger(value) && value >= 0, 'invalid_money', 'Expected nonnegative integer micro-dollars'); return value; }
 /** Read the account's spendable funds inside the same storage transaction. */
 export async function funds(tx) {
-  const { balance_microdollars: balance } = await accountMoney(tx);
-  const holds = [...(await tx.list({ prefix: 'hold:' })).values()].filter(h => !h.settled);
+  const state = await accountMoney(tx); const balance = state.balance_microdollars;
+  const holds = await listHolds(tx, state);
   return { balance_microdollars: balance, held_microdollars: holds.reduce((sum, h) => sum + h.amount, 0), holds };
 }
 // Budget counters share the two account summary writes. Keep reading old counters
@@ -19,7 +20,7 @@ async function budgetSpent(tx, metric, kind, id, period) {
 // Both durable reservations and immediate charges enforce the same funds and caps.
 async function reservation(tx, args, now) {
   money(args.amount); assert(args.amount > 0, 'invalid_money', 'Reservation must be positive');
-  const prior = await tx.get(`hold:${args.id}`) || await tx.get(`receipt:${args.id}`);
+  const prior = await getHold(tx, args.id) || await tx.get(`receipt:${args.id}`);
   if (prior) return { ...prior, duplicate: true };
   const { balance_microdollars: balance, held_microdollars: held, holds } = await funds(tx);
   assert(balance - held >= args.amount, 'insufficient_balance', 'Insufficient balance', 402, { needed_microdollars: args.amount - (balance - held) });
@@ -41,14 +42,14 @@ async function reservation(tx, args, now) {
 export async function reserve(tx, args, now = Date.now()) {
   const hold = await reservation(tx, args, now);
   if (hold.duplicate) return hold;
-  await tx.put(`hold:${args.id}`, hold);
+  await putHold(tx, hold);
   const alarm = await tx.getAlarm();
   if (!alarm || alarm > hold.expires_at) await tx.setAlarm(hold.expires_at);
   return hold;
 }
 /** Settle once, releasing unused credit. Expired holds are charged in full. */
 export async function settle(tx, id, actual, now = Date.now()) {
-  money(actual); const hold = await tx.get(`hold:${id}`) || await tx.get(`receipt:${id}`);
+  money(actual); const hold = await getHold(tx, id) || await tx.get(`receipt:${id}`);
   assert(hold, 'unknown_hold', 'Reservation not found', 404);
   return settleReservation(tx, hold, actual, now);
 }
@@ -66,6 +67,8 @@ async function settleReservation(tx, hold, actual, now, immediate = false) {
   const balance = state.balance_microdollars;
   assert(balance >= amount, 'ledger_invariant', 'Invalid ledger state', 500);
   state.balance_microdollars = balance - amount;
+  const compact = state.holds?.some(item => item.id === id);
+  if (compact) state.holds = state.holds.filter(item => item.id !== id);
   for (const period of [hold.day, hold.month]) {
     const existing = await accountMetric(tx, period, state); const metric = typeof existing === 'number' ? { spent_microdollars: existing } : existing || {};
     const budget_spent = { ...metric.budget_spent };
@@ -86,7 +89,7 @@ async function settleReservation(tx, hold, actual, now, immediate = false) {
   const { execution: _execution, ...receipt } = hold;
   const result = { ...receipt, settled: true, charged: amount, settled_at: now };
   // The permanent receipt is also the reservation tombstone; duplicates cannot spend twice.
-  if (!immediate) await tx.delete(`hold:${id}`);
+  if (!immediate && !compact) await tx.delete(`hold:${id}`);
   await tx.put(`receipt:${id}`, result);
   return result;
 }

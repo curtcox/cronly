@@ -5,6 +5,7 @@ import { assert } from '../utils/errors.js';
 import { price } from '../utils/pricing.js';
 import { keyBudget } from './definitions.js';
 import { funds, reserve, settle } from './ledger.js';
+import { getHold } from './hold-storage.js';
 
 const rotationId = args => `secret-rotation:${args.key_id || 'session'}:${args.id}`;
 
@@ -16,7 +17,7 @@ export async function beginSecretRotation(tx, args, env) {
   if (prior && !args.dry_run) {
     assert(prior.name === args.name, 'idempotency_conflict', 'Idempotency key used for a different request', 409);
     if (prior.result) return { result: prior.result };
-    const hold = await tx.get(`hold:${id}`);
+    const hold = await getHold(tx, id);
     assert(hold && hold.expires_at > Date.now(), 'rotation_expired', 'Rotation expired; retry with a new idempotency key', 409);
     assert(false, 'rotation_in_progress', 'Rotation is already in progress', 409);
   }
@@ -40,7 +41,7 @@ export async function finishSecretRotation(tx, args, env) {
   const rotation = await tx.get(id);
   assert(rotation && rotation.name === args.name, 'not_found', 'Rotation not found', 404);
   if (rotation.result) return rotation.result;
-  const hold = await tx.get(`hold:${id}`);
+  const hold = await getHold(tx, id);
   assert(hold && hold.expires_at > Date.now(), 'rotation_expired', 'Rotation expired; retry with a new idempotency key', 409);
   const current = await tx.get(`def:secrets:${args.name}`);
   let error;

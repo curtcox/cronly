@@ -1,3 +1,4 @@
+import { getHold, putHold } from '../durable-objects/hold-storage.js';
 import { it, expect } from 'vitest';
 import worker from '../index.js';
 import { AccountDO } from '../durable-objects/account-do.js';
@@ -106,8 +107,8 @@ it('refuses a stale target key and expired reservations', async () => {
   args.id = 'expired';
   await rpc(env.ACCOUNTS, 'alice', 'begin-secret-rotation', args);
   const storage = env.ACCOUNTS.get('alice').storage;
-  const key = 'hold:secret-rotation:session:expired';
-  await storage.put(key, { ...await storage.get(key), expires_at: Date.now() - 1 });
+  const id = 'secret-rotation:session:expired';
+  await storage.transaction(async tx => putHold(tx, { ...await getHold(tx, id), expires_at: Date.now() - 1 }));
   await expect(rpc(env.ACCOUNTS, 'alice', 'finish-secret-rotation', { ...args, record })).rejects.toMatchObject({ code: 'rotation_expired' });
   expect(await stored()).toEqual(original);
 });

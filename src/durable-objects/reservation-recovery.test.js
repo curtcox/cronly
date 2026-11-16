@@ -1,3 +1,4 @@
+import { getHold } from './hold-storage.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AccountDO } from './account-do.js';
 import { JobDO } from './job-do.js';
@@ -8,7 +9,7 @@ import { PRICES } from '../utils/pricing.js';
 
 afterEach(() => vi.useRealTimers());
 
-async function setup(failure, cap = PRICES.run + PRICES.hook) {
+async function setup(failure, holdMode, cap = PRICES.run + PRICES.hook) {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
   const messages = [];
   const env = { ENVIRONMENT: 'local', RUN_QUEUE: { send: async body => messages.push(body) }, OUTBOUND_FETCH: vi.fn(async () => new Response('failed', { status: 500 })) };
@@ -16,7 +17,7 @@ async function setup(failure, cap = PRICES.run + PRICES.hook) {
   const account = (op, args) => rpc(env.ACCOUNTS, 'a', op, args);
   await account('init', { account: 'a' }); await account('deposit', { id: 'fund', amount: 10000 });
   await account('mutate', { account: 'a', id: 'defs', operations: [
-    { kind: 'actions', name: 'ping', value: { url: 'https://example.com', headers: { 'X-Event': '{{input.event}}' } } },
+    { kind: 'actions', name: 'ping', value: { url: 'https://example.com', headers: { 'X-Event': '{{input.event}}' }, ...(holdMode === 'standalone' ? { method: 'POST', body: 'x'.repeat(9000) } : {}) } },
     { kind: 'jobs', name: 'j', value: { action: 'ping', cron: null, retries: 1 } }
   ] });
   await account('create-key', { id: 'k', hash: 'hash', request_hash: 'k', name: 'capped', scopes: ['run'], daily_spend_microdollars: cap, expires_at: Date.now() + 86400000 });
@@ -42,15 +43,15 @@ async function setup(failure, cap = PRICES.run + PRICES.hook) {
   await expect(rpc(env.JOBS, 'a:j', 'start', args)).rejects.toThrow();
   fault.mockRestore();
   expect(messages).toHaveLength(0); expect(await job.storage.get('history:r')).toBeUndefined();
-  const hold = await env.ACCOUNTS.get('a').storage.get('hold:r');
+  const hold = await getHold(env.ACCOUNTS.get('a').storage, 'r');
   const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
   env.JOBS.objects.set('a:j', cold);
   return { env, account, messages, job: cold, hold, args };
 }
 
-for (const failure of ['response', 'pending', 'alarm']) {
-  it(`recovers a reserved run after a lost ${failure} with its original deadline, input and key cap`, async () => {
-    const { env, account, messages, hold, args } = await setup(failure);
+for (const holdMode of ['compact', 'standalone']) for (const failure of ['response', 'pending', 'alarm']) {
+  it(`recovers a reserved run after a lost ${failure} (${holdMode}) with its original deadline, input and key cap`, async () => {
+    const { env, account, messages, hold, args } = await setup(failure, holdMode);
     await vi.advanceTimersByTimeAsync(30000);
     const recovered = await rpc(env.JOBS, 'a:j', 'start', { ...args, trigger: 'manual', scheduled_at: new Date().toISOString(), input: { event: 'changed' }, key_id: undefined });
     expect(recovered.run).toMatchObject({ created_at: hold.created_at, expires_at: hold.expires_at, trigger: args.trigger, scheduled_at: args.scheduled_at, key_id: 'k' });
@@ -65,8 +66,8 @@ for (const failure of ['response', 'pending', 'alarm']) {
     expect(ledger.filter(row => row.id === 'r')).toHaveLength(1);
   });
 
-  it(`does not enqueue an expired reservation when recovering a lost ${failure}`, async () => {
-    const { env, account, messages, job, args, hold } = await setup(failure);
+  it(`does not enqueue an expired reservation when recovering a lost ${failure} (${holdMode})`, async () => {
+    const { env, account, messages, job, args, hold } = await setup(failure, holdMode);
     await vi.advanceTimersByTimeAsync(121000);
     await rpc(env.JOBS, 'a:j', 'start', args);
     expect(messages).toHaveLength(0); expect(env.OUTBOUND_FETCH).not.toHaveBeenCalled();
@@ -78,12 +79,12 @@ for (const failure of ['response', 'pending', 'alarm']) {
     expect((await account('list', { prefix: 'ledger:' })).items.filter(row => row.id === 'r')).toHaveLength(1);
   });
 
-  it(`preserves private retry input after recovering a lost ${failure}`, async () => {
-    const { env, account, messages, args } = await setup(failure, 1000);
+  it(`preserves private retry input after recovering a lost ${failure} (${holdMode})`, async () => {
+    const { env, account, messages, args } = await setup(failure, holdMode, 1000);
     await rpc(env.JOBS, 'a:j', 'start', { ...args, input: { event: 'changed' } });
     await consume({ body: messages[0], ack() {} }, env, {});
     expect(messages).toHaveLength(2);
-    const retry = await env.ACCOUNTS.get('a').storage.get('hold:r:retry');
+    const retry = await getHold(env.ACCOUNTS.get('a').storage, 'r:retry');
     expect(retry.execution.input).toEqual(args.input); expect(retry.key_id).toBe('k');
     await consume({ body: messages[1], ack() {} }, env, {});
     expect(env.OUTBOUND_FETCH.mock.calls.map(([request]) => request.headers.get('X-Event'))).toEqual(['original', 'original']);

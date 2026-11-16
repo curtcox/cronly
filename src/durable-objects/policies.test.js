@@ -1,3 +1,4 @@
+import { getHold } from './hold-storage.js';
 import { PRICES } from '../utils/pricing.js';
 import { afterEach, it, expect, vi } from 'vitest';
 import { AccountDO } from './account-do.js';
@@ -165,13 +166,13 @@ it('preserves retry input privately across settlement and a failed completion co
   });
   const args = { id: 'r', result: { status: 'failure' } };
   await expect(job.result(args)).rejects.toThrow('completion failure');
-  expect(await env.ACCOUNTS.get('a').storage.get('hold:r')).toBeUndefined();
+  expect(await getHold(env.ACCOUNTS.get('a').storage, 'r')).toBeUndefined();
   failure.mockRestore();
   const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
   env.JOBS.objects.set('a:j', cold);
   await cold.result(args);
   expect(messages).toHaveLength(2);
-  expect((await env.ACCOUNTS.get('a').storage.get('hold:r:retry')).execution.input).toEqual({ event: 'private-event' });
+  expect((await getHold(env.ACCOUNTS.get('a').storage, 'r:retry')).execution.input).toEqual({ event: 'private-event' });
   expect(await job.storage.get('history:r')).not.toHaveProperty('retry');
   env.OUTBOUND_FETCH = vi.fn(async () => new Response('ok'));
   await consume({ body: messages[1], ack() {} }, env, {});
