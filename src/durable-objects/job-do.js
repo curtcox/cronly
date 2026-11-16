@@ -114,8 +114,12 @@ export class JobDO {
       throw error;
     }
     if (reservation.duplicate && reservation.settled) return { id: args.id, duplicate: true, cost_microdollars: 0 };
-    const run = { id: args.id, job: settings.name, trigger: args.trigger, scheduled_at: args.scheduled_at, created_at: Date.now(), expires_at: Date.now() + 120000, status: 'queued', reserved_microdollars: reservation.amount, attempt: args.attempt || 0, key_id: args.key_id };
-    await this.history(run, false, null, settings.job.retries ? { input: args.input || {} } : undefined);
+    const run = { id: args.id, job: settings.name, status: 'queued', reserved_microdollars: reservation.amount, ...reservation.pending };
+    await this.history(run, false, null, reservation.retry);
+    if (run.expires_at <= Date.now()) {
+      const expired = await this.result({ id: run.id, result: { status: 'expired', error: 'Result was not received before the deadline' } });
+      return { run: expired, cost_microdollars: 0 };
+    }
     // A failed enqueue is retried from the durable pending row, without a second hold.
     await this.arm();
     await this.send(run, settings);

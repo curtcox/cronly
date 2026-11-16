@@ -7,11 +7,22 @@ import { keyBudget } from './definitions.js';
 import { references } from '../executor/templates.js';
 import { price } from '../utils/pricing.js';
 import { COST_POLICY } from '../utils/cost-policy.js';
+
+// Recovery must use the original reservation, even if a response or JobDO write
+// was lost. Return only orchestration data, never the frozen credentials/code.
+function prepared(hold) {
+  const execution = hold.execution;
+  return {
+    id: hold.id, amount: hold.amount, settled: hold.settled, job: execution?.job,
+    pending: { created_at: hold.created_at, expires_at: hold.expires_at, key_id: hold.key_id, trigger: execution?.trigger, scheduled_at: execution?.scheduled_at, attempt: execution?.attempt || 0 },
+    retry: execution?.job.retries ? { input: execution.input || {} } : undefined
+  };
+}
 /** Freeze the action and only the referenced credentials inside the prepaid hold. */
 export async function prepareRun(tx, args, env = {}) {
   assert(args.input && typeof args.input === 'object' && !Array.isArray(args.input) && Object.keys(args.input).length <= 32 && Object.entries(args.input).every(([k, v]) => /^[a-zA-Z0-9_-]{1,64}$/.test(k) && typeof v === 'string' && v.length <= 2048), 'invalid_input', 'Webhook input must be a small object of strings');
   const prior = await tx.get(`hold:${args.id}`) || await tx.get(`receipt:${args.id}`);
-  if (prior) return { id: args.id, duplicate: true, amount: prior.amount, settled: prior.settled };
+  if (prior) return { ...prepared(prior), duplicate: true };
   const job = args.test_action ? { action: args.test_action, enabled: true, overlap: 'allow', retries: 0, budget: {}, cron: null } : await tx.get(`def:jobs:${args.name}`);
   assert(job, 'not_found', 'Job not found', 404); assert(job.enabled, 'job_disabled', 'Job is disabled', 409);
   const action = await tx.get(`def:actions:${job.action}`); assert(action, 'unknown_action', 'Action missing', 409);
@@ -35,11 +46,11 @@ export async function prepareRun(tx, args, env = {}) {
   const amount = price(args.trigger === 'webhook' ? 'hook' : 'run', action);
   if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
   if (args.test_action) await tx.put(`job-index:${args.name}`, { name: args.name, account: args.account, updated_at: Date.now() });
-  const hold = await reserve(tx, { id: args.id, amount, job: args.name, action: job.action, kind: 'run', budget: job.budget, ...await keyBudget(tx, args.key_id), execution: { version: action.type === 'javascript' ? await digest(JSON.stringify([SANDBOX_WRAPPER, action])) : null, action, vars, secrets, job, input: args.input, trigger: args.trigger, scheduled_at: args.scheduled_at }, ttl_ms: 120000 });
+  const hold = await reserve(tx, { id: args.id, amount, job: args.name, action: job.action, kind: 'run', budget: job.budget, ...await keyBudget(tx, args.key_id), execution: { version: action.type === 'javascript' ? await digest(JSON.stringify([SANDBOX_WRAPPER, action])) : null, action, vars, secrets, job, input: args.input, trigger: args.trigger, scheduled_at: args.scheduled_at, attempt: args.attempt || 0 }, ttl_ms: 120000 });
   await tx.put(`last-run:${args.name}`, now);
   const recent = (await tx.get('recent-jobs')) || [];
   if (recent[0] !== args.name) await tx.put('recent-jobs', [args.name, ...recent.filter(name => name !== args.name)].slice(0, 100));
-  return { id: hold.id, amount, job };
+  return prepared(hold);
 }
 /** A queue redelivery cannot re-execute an already claimed external request. */
 export async function claimRun(tx, id) {
