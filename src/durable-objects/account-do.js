@@ -10,6 +10,7 @@ import { beginSecretRotation, finishSecretRotation } from './secret-rotation.js'
 import { accountMoney, accountMetric } from './account-money.js';
 import { listLedger } from './ledger-history.js';
 import { getHold, listHolds, putHold } from './hold-storage.js';
+import { runActivity } from './run-activity.js';
 
 /** Account definitions and money share one transactional, SQLite-backed object. */
 export class AccountDO {
@@ -111,10 +112,10 @@ export class AccountDO {
         for (let offset = 0; offset < 7; offset++) { const period = new Date(Date.now() - offset * 86400000).toISOString().slice(0, 10); const metric = await accountMetric(tx, period, state); for (const [name, count] of Object.entries(metric?.run_count_by_job || {})) counts[name] = (counts[name] || 0) + count; }
         return { counts };
       }
-      case 'read-plan': return { names: (await tx.get('recent-jobs')) || [] };
+      case 'read-plan': return { names: (await runActivity(tx)).map(([name]) => name) };
       case 'run-route': { const hold = await getHold(tx, args.id) || await tx.get(`receipt:${args.id}`); if (hold?.job) return { job: hold.job }; const profile = await tx.get('profile'); const prefix = `${profile.id}:`; assert(args.id.startsWith(prefix), 'not_found', 'Run not found', 404); const parts = args.id.slice(prefix.length).split(':'); const name = parts[0] === '_test' ? parts.slice(0, 2).join(':') : parts[0]; assert(await tx.get(`job-index:${name}`), 'not_found', 'Run not found', 404); return { job: name }; }
       case 'meter-read': {
-        const names = args.resource === 'runs' ? (args.job ? [args.job] : (await tx.get('recent-jobs')) || []) : [];
+        const names = args.resource === 'runs' ? (args.job ? [args.job] : (await runActivity(tx)).map(([name]) => name)) : [];
         const receipt = await charge(tx, { id: args.id, amount: price('read', { job_count: names.length }), read_job_count: names.length, kind: 'read', ...await keyBudget(tx, args.key_id) });
         return { cost_microdollars: receipt.charged, names };
       }

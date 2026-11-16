@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { price, PRICES } from '../src/utils/pricing.js';
 const origin = process.env.CRONLY_ORIGIN || 'http://localhost:8787';
 const user = `acceptance-${crypto.randomUUID()}`;
-async function api(path, method = 'GET', body, idempotency) {
+async function api(path, method = 'GET', body, idempotency, expectedStatus = 200) {
   const response = await fetch(`${origin}${path}`, { method, signal: AbortSignal.timeout(15000), headers: { Authorization: `LocalDev ${user}`, 'Content-Type': 'application/json', ...(idempotency ? { 'Idempotency-Key': idempotency } : {}) }, body: body && JSON.stringify(body) });
-  const data = await response.json(); assert(response.ok, `${path}: ${JSON.stringify(data)}`); return data;
+  const data = await response.json(); assert.equal(response.status, expectedStatus, `${path}: ${JSON.stringify(data)}`); return data;
 }
 assert.equal((await api('/health')).environment, 'local');
 await api('/api/dev/deposit', 'POST', { amount_microdollars: 5000000 }, 'fund');
@@ -24,6 +24,10 @@ for (const [name, action] of Object.entries({
   await api(`/api/actions/${name}`, 'PUT', action); await api(`/api/jobs/${name}`, 'PUT', { action: name, cron: null, retries: name === 'retry' ? 1 : 0 });
   await api(`/api/jobs/${name}/run`, 'POST', name === 'retry' ? { input: { event: 'acceptance-event' } } : {}, `run-${name}`);
 }
+// The shared activity index must retain the HTTP cooldown after switching jobs.
+// Replaying the original id stays free and cannot enqueue a second execution.
+assert.equal((await api('/api/jobs/http/run', 'POST', {}, 'cooldown-http', 429)).code, 'run_rate_limit');
+assert.equal((await api('/api/jobs/http/run', 'POST', {}, 'run-http')).duplicate, true);
 const deadline = Date.now() + 60000; let runs;
 while (Date.now() < deadline) {
   runs = (await api('/api/runs')).items;
@@ -80,4 +84,4 @@ assert.equal((await api('/api/account')).balance_microdollars, account.balance_m
 assert.equal((await api('/api/costs')).total_microdollars, spent);
 await api('/api/dev/deposit', 'POST', { amount_microdollars: 1 }, archiveId(0));
 assert.deepEqual((await api('/api/transactions')).items, archived);
-console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, redaction, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
+console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, cross-job cooldowns and duplicate runs, redaction, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');

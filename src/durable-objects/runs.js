@@ -8,6 +8,7 @@ import { references } from '../executor/templates.js';
 import { price } from '../utils/pricing.js';
 import { COST_POLICY } from '../utils/cost-policy.js';
 import { getHold, listHolds, putHold } from './hold-storage.js';
+import { runActivity, lastRun, recordRun } from './run-activity.js';
 
 // Recovery must use the original reservation, even if a response or JobDO write
 // was lost. Return only orchestration data, never the frozen credentials/code.
@@ -31,7 +32,7 @@ export async function prepareRun(tx, args, env = {}) {
   const holds = await listHolds(tx);
   assert(holds.filter(h => h.kind === 'run').length < COST_POLICY.concurrency, 'concurrency_limit', 'Maximum concurrent account runs reached', 429);
   if (job.overlap === 'skip') assert(!holds.some(h => h.job === args.name), 'overlap', 'Previous run is unfinished', 409);
-  const now = Date.now(); const last = await tx.get(`last-run:${args.name}`);
+  const now = Date.now(); const activity = await runActivity(tx); const last = await lastRun(tx, args.name, activity);
   if (!args.retry) assert(!last || now - last >= 60000, 'run_rate_limit', 'Maximum one run per minute per job', 429);
   const vars = {}; const secrets = {};
   if (action.type === 'javascript') {
@@ -48,9 +49,7 @@ export async function prepareRun(tx, args, env = {}) {
   if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
   if (args.test_action) await tx.put(`job-index:${args.name}`, { name: args.name, account: args.account, updated_at: Date.now() });
   const hold = await reserve(tx, { id: args.id, amount, job: args.name, action: job.action, kind: 'run', budget: job.budget, ...await keyBudget(tx, args.key_id), execution: { version: action.type === 'javascript' ? await digest(JSON.stringify([SANDBOX_WRAPPER, action])) : null, action, vars, secrets, job, input: args.input, trigger: args.trigger, scheduled_at: args.scheduled_at, attempt: args.attempt || 0 }, ttl_ms: 120000 });
-  await tx.put(`last-run:${args.name}`, now);
-  const recent = (await tx.get('recent-jobs')) || [];
-  if (recent[0] !== args.name) await tx.put('recent-jobs', [args.name, ...recent.filter(name => name !== args.name)].slice(0, 100));
+  await recordRun(tx, args.name, now, activity);
   return prepared(hold);
 }
 /** A queue redelivery cannot re-execute an already claimed external request. */

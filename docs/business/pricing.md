@@ -154,6 +154,15 @@ base HTTP/JS run price from 89 to 87 µ$ while preserving the approved margin. A
 reserved runs retain their original maximum. Further worst-case write reductions
 remain S4 work.
 
+Run cooldown timestamps now share the recent-job index row. Switching between jobs
+updates one row instead of separate cooldown and index rows; repeatedly running the
+same job still needs one write. The index retains at most 100 names, including
+deleted jobs and action tests. Evicted timestamps fall back to standalone cooldown
+rows so churn cannot bypass the one-run-per-minute limit. Original name arrays and
+standalone timestamps remain readable; reservations and activity commit atomically.
+Eviction can still need two writes, so the conservative 37-write bound and the
+87 µ$ base price are unchanged.
+
 ## Verified provider sources
 
 - [Workers](https://developers.cloudflare.com/workers/platform/pricing/)
