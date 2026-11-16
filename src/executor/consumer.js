@@ -15,7 +15,10 @@ export async function consume(message, env, ctx) {
     }
     throw error;
   }
-  if (execution.duplicate) { message.ack(); return; }
+  if (execution.duplicate) {
+    await rpc(env.JOBS, `${account}:${name}`, 'recover-result', { id });
+    message.ack(); return;
+  }
   let result;
   try {
     if (env.SAFETY && (await rpc(env.SAFETY, 'global', 'status')).brake) {

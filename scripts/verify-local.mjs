@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { price, PRICES } from '../src/utils/pricing.js';
 const origin = process.env.CRONLY_ORIGIN || 'http://localhost:8787';
 const user = `acceptance-${crypto.randomUUID()}`;
 async function api(path, method = 'GET', body, idempotency) {
@@ -15,18 +16,19 @@ for (const [name, action] of Object.entries({
   http: { url: 'https://example.com' },
   js: { type: 'javascript', source: 'export default async ctx => { console.log(ctx.secrets.token); return { ok: true }; }', cpu_ms: 100, subrequests: 0 },
   blocked: { type: 'javascript', source: 'export default async () => { await fetch("https://example.com"); }', cpu_ms: 100, subrequests: 0 },
-  gateway: { type: 'javascript', source: 'export default async ctx => { const result = await ctx.fetch("https://example.com"); return { status: result.status }; }', cpu_ms: 100, subrequests: 1 }
+  gateway: { type: 'javascript', source: 'export default async ctx => { const result = await ctx.fetch("https://example.com"); return { status: result.status }; }', cpu_ms: 100, subrequests: 1 },
+  retry: { type: 'javascript', source: 'export default async ctx => { if (!ctx.run.id.endsWith(":retry")) throw new Error("retry"); return { event: ctx.input.event }; }', cpu_ms: 100, subrequests: 0 }
 })) {
-  await api(`/api/actions/${name}`, 'PUT', action); await api(`/api/jobs/${name}`, 'PUT', { action: name, cron: null });
-  await api(`/api/jobs/${name}/run`, 'POST', {}, `run-${name}`);
+  await api(`/api/actions/${name}`, 'PUT', action); await api(`/api/jobs/${name}`, 'PUT', { action: name, cron: null, retries: name === 'retry' ? 1 : 0 });
+  await api(`/api/jobs/${name}/run`, 'POST', name === 'retry' ? { input: { event: 'acceptance-event' } } : {}, `run-${name}`);
 }
 const deadline = Date.now() + 60000; let runs;
 while (Date.now() < deadline) {
   runs = (await api('/api/runs')).items;
-  if (runs.length === 4 && runs.every(r => ['success', 'failure'].includes(r.status))) break;
+  if (runs.length === 6 && runs.every(r => ['success', 'failure'].includes(r.status))) break;
   await new Promise(resolve => setTimeout(resolve, 1000));
 }
-assert.equal(runs.length, 4);
+assert.equal(runs.length, 6);
 const details = await Promise.all(runs.map(run => api(`/api/runs/${encodeURIComponent(run.id)}`)));
 assert(!JSON.stringify(details).includes('acceptance-secret'));
 assert(details.find(result => result.run.job === 'js').run.console.includes('«secret:token»'));
@@ -34,5 +36,12 @@ assert(details.find(result => result.run.job === 'gateway').run.return_value.inc
 assert.equal(details.find(result => result.run.job === 'gateway').run.subrequests, 1);
 for (const name of ['http', 'js', 'gateway']) assert.equal(runs.find(r => r.job === name).status, 'success', `${name} did not succeed`);
 for (const name of ['blocked']) assert.equal(runs.find(r => r.job === name).status, 'failure', `${name} escaped sandbox limits`);
+const retryRuns = details.filter(result => result.run.job === 'retry').map(result => result.run);
+assert.equal(retryRuns.length, 2);
+assert.equal(retryRuns.find(run => !run.id.endsWith(':retry')).status, 'failure');
+assert.equal(retryRuns.find(run => run.id.endsWith(':retry')).status, 'success');
+assert(retryRuns.find(run => run.status === 'success').return_value.includes('acceptance-event'));
+assert.equal(retryRuns.reduce((sum, run) => sum + run.cost_microdollars, 0), 2 * price('run', { type: 'javascript', cpu_ms: 100, subrequests: 0 }) - PRICES.jsActivation);
+assert(retryRuns.every(run => !Object.hasOwn(run, 'retry') && !Object.hasOwn(run, 'completion')));
 assert.equal((await api('/api/account')).held_microdollars, 0);
-console.log('Local acceptance passed: deposits, dry runs, HTTP, JS, redaction, native network denial, and gateway. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
+console.log('Local acceptance passed: deposits, dry runs, HTTP, JS, redaction, native network denial, gateway, and separately charged retries with preserved input. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');

@@ -143,7 +143,7 @@ it('rolls back the completed log and index together and retries settlement once'
   });
   const args = { id: 'r', result: { status: 'success', response_body: 'ok' } };
   await expect(job.result(args)).rejects.toThrow('index failure');
-  expect(await job.storage.get('run:r')).toBeUndefined();
+  expect(await job.storage.get('run:r')).toMatchObject({ status: 'queued', completion: args.result });
   expect((await job.summaries())[0].status).toBe('queued');
   spy.mockRestore();
   await job.result(args);
@@ -179,6 +179,21 @@ it('preserves retry input privately across settlement and a failed completion co
   expect((await call('account')).held_microdollars).toBe(0);
 });
 
+for (const cap of ['job', 'key']) {
+  it(`clears an unfunded retry outbox when its ${cap} budget refuses the next attempt`, async () => {
+    const { env, job, messages, call } = await setup({ retries: 1, ...(cap === 'job' ? { budget: { day: PRICES.run } } : {}) });
+    if (cap === 'key') await call('create-key', { id: 'k', hash: 'hash', request_hash: 'k', name: 'capped', scopes: ['run'], daily_spend_microdollars: PRICES.run, expires_at: Date.now() + 86400000 });
+    await rpc(env.JOBS, 'a:j', 'start', { id: 'r', input: {}, trigger: 'manual', ...(cap === 'key' ? { key_id: 'k' } : {}) });
+    await consume({ body: messages[0], ack() {} }, env, {});
+    expect(messages).toHaveLength(1);
+    expect(await job.storage.get('history:r')).not.toHaveProperty('retry');
+    expect((await job.storage.get('settings')).paused).toBe(cap === 'job' ? 'budget_day' : null);
+    expect((await call('account')).held_microdollars).toBe(0);
+    await rpc(env.JOBS, 'a:j', 'recover-result', { id: 'r' });
+    expect(messages).toHaveLength(1);
+  });
+}
+
 it('skips unchanged completion settings and commits a changed outcome with its log', async () => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
   const { env, job, call } = await setup();
@@ -199,7 +214,7 @@ it('skips unchanged completion settings and commits a changed outcome with its l
   });
   const args = { id: 'third', result: { status: 'failure' } };
   await expect(job.result(args)).rejects.toThrow('settings failure');
-  expect(await job.storage.get('run:third')).toBeUndefined();
+  expect(await job.storage.get('run:third')).toMatchObject({ status: 'queued', completion: args.result });
   expect((await job.summaries()).find(r => r.id === 'third').status).toBe('queued');
   expect((await job.storage.get('settings')).last_outcome).toBe('success');
   failure.mockRestore();

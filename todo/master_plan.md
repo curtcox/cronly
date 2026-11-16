@@ -146,7 +146,11 @@ Runs start within a few seconds of the scheduled minute; the docs say so plainly
 5. Executor runs the action and posts the result (status, timing, excerpts, CPU used,
    subrequests) to the JobDO.
 6. JobDO stores the run record and asks AccountDO to **settle**: charge actual cost (never more
-   than the hold), release the rest, append a ledger row.
+   than the hold), release the rest, append a ledger row. The observed result is durable
+   before settlement; Queue redelivery or the pending alarm can finish a staged completion
+   after an outage without repeating external work. Configured retries use a private durable
+   outbox with the original input and key cap, a deterministic child run id and a separate
+   reservation. Budget refusals end that retry; transient dispatch failures remain recoverable.
 7. A hold older than the maximum run time + margin is settled at the full held amount by an
    AccountDO alarm (the run's result was lost; we did the work, or may have).
 

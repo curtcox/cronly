@@ -1,11 +1,12 @@
 import { PRICES } from '../utils/pricing.js';
-import { it, expect, vi } from 'vitest';
+import { afterEach, it, expect, vi } from 'vitest';
 import worker from '../index.js';
 import { AccountDO } from '../durable-objects/account-do.js';
 import { JobDO } from '../durable-objects/job-do.js';
 import { namespace } from '../../test-utils/storage.js';
 import { rpc } from '../utils/rpc.js';
 import { consume } from './consumer.js';
+afterEach(() => vi.useRealTimers());
 async function setup(balance = 2000) {
   const messages = [];
   const env = { ENVIRONMENT: 'local', SECRETS_MASTER_KEY: 'test', RUN_QUEUE: { send: async body => messages.push(body) }, OUTBOUND_FETCH: vi.fn(async () => new Response('secret-token', { status: 200 })) };
@@ -117,4 +118,95 @@ it('acknowledges an unknown expired delivery without fabricating a run', async (
   expect(ack).toHaveBeenCalledOnce();
   expect(env.OUTBOUND_FETCH).not.toHaveBeenCalled();
   expect((await rpc(env.JOBS, 'a:pinger', 'runs')).items).toEqual([]);
+});
+
+for (const failureAt of ['settle', 'completion']) {
+  it(`recovers a staged outcome after ${failureAt} fails without repeating the outbound request`, async () => {
+    const { api, messages, env } = await setup();
+    await api('/api/jobs/pinger/run', 'POST', {});
+    const job = env.JOBS.get('a:pinger'); const account = env.ACCOUNTS.get('a');
+    const dispatch = account.dispatch.bind(account); const put = job.storage.put.bind(job.storage);
+    const fault = failureAt === 'settle' ? vi.spyOn(account, 'dispatch').mockImplementation(async (tx, args) => {
+      if (args.op === 'settle') throw new Error('settlement unavailable');
+      return dispatch(tx, args);
+    }) : vi.spyOn(job.storage, 'put').mockImplementation(async (key, value) => {
+      if (key.startsWith('history:') && value.status === 'success') throw new Error('completion unavailable');
+      return put(key, value);
+    });
+    const ack = vi.fn(); const message = { body: messages[0], ack };
+    const before = (await api('/api/account')).balance_microdollars;
+    await expect(consume(message, env, {})).rejects.toMatchObject({ status: 500 });
+    expect(ack).not.toHaveBeenCalled();
+    const pending = await rpc(env.JOBS, 'a:pinger', 'run', { id: message.body.id });
+    expect(pending.status).toBe('queued'); expect(pending).not.toHaveProperty('completion');
+    fault.mockRestore();
+    const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
+    env.JOBS.objects.set('a:pinger', cold);
+    await consume(message, env, {}); await consume(message, env, {});
+    expect(ack).toHaveBeenCalledTimes(2); expect(env.OUTBOUND_FETCH).toHaveBeenCalledOnce();
+    expect(await rpc(env.JOBS, 'a:pinger', 'run', { id: message.body.id })).toMatchObject({ status: 'success', cost_microdollars: PRICES.run });
+    expect(await api('/api/account')).toMatchObject({ balance_microdollars: before - PRICES.run, held_microdollars: 0 });
+  });
+}
+
+for (const failureAt of ['dispatch', 'cleanup']) {
+  it(`recovers retry ${failureAt} after restart with the original input and one charge per attempt`, async () => {
+    const { api, messages, env } = await setup(10000);
+    await api('/api/actions/ping', 'PUT', { url: 'https://example.com', headers: { 'X-Event': '{{input.event}}' } });
+    await api('/api/jobs/pinger', 'PUT', { action: 'ping', cron: null, retries: 1 });
+    env.OUTBOUND_FETCH.mockImplementation(async () => new Response('failed', { status: 500 }));
+    await api('/api/jobs/pinger/run', 'POST', { input: { event: 'original-event' } });
+    const job = env.JOBS.get('a:pinger'); const start = job.start.bind(job); const put = job.storage.put.bind(job.storage);
+    const fault = failureAt === 'dispatch' ? vi.spyOn(job, 'start').mockImplementation(async args => {
+      if (args.retry) throw new Error('retry dispatch unavailable');
+      return start(args);
+    }) : vi.spyOn(job.storage, 'put').mockImplementation(async (key, value) => {
+      if (key === `history:${messages[0].id}` && value.status === 'failure' && !value.retry) throw new Error('retry cleanup unavailable');
+      return put(key, value);
+    });
+    const ack = vi.fn(); const message = { body: messages[0], ack };
+    const before = (await api('/api/account')).balance_microdollars;
+    await expect(consume(message, env, {})).rejects.toMatchObject({ status: 500 });
+    expect(ack).not.toHaveBeenCalled();
+    const pendingRetry = await job.storage.get(`history:${message.body.id}`);
+    expect(pendingRetry.retry).toMatchObject({ dispatch: true, input: { event: 'original-event' } });
+    for (const options of [{}, { summary: true }]) {
+      const runs = await rpc(env.JOBS, 'a:pinger', 'runs', options);
+      expect(runs.items.every(run => !Object.hasOwn(run, 'retry') && !Object.hasOwn(run, 'completion'))).toBe(true);
+    }
+    fault.mockRestore();
+    const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
+    env.JOBS.objects.set('a:pinger', cold);
+    await consume(message, env, {}); await consume(message, env, {});
+    expect(messages).toHaveLength(2);
+    await consume({ body: messages[1], ack() {} }, env, {});
+    await consume(message, env, {});
+    expect(env.OUTBOUND_FETCH).toHaveBeenCalledTimes(2);
+    expect(env.OUTBOUND_FETCH.mock.calls[1][0].headers.get('X-Event')).toBe('original-event');
+    expect((await job.storage.get(`history:${message.body.id}`)).retry).toBeUndefined();
+    expect(await api('/api/account')).toMatchObject({ balance_microdollars: before - 2 * PRICES.run, held_microdollars: 0 });
+  });
+}
+
+it('uses the pending alarm to recover a staged failure and its retry without Queue redelivery', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
+  const { api, messages, env } = await setup(10000);
+  await api('/api/jobs/pinger', 'PUT', { action: 'ping', cron: null, retries: 1 });
+  env.OUTBOUND_FETCH.mockImplementation(async () => new Response('failed', { status: 500 }));
+  await api('/api/jobs/pinger/run', 'POST', {});
+  const job = env.JOBS.get('a:pinger'); const put = job.storage.put.bind(job.storage);
+  const fault = vi.spyOn(job.storage, 'put').mockImplementation(async (key, value) => {
+    if (key.startsWith('history:') && value.status === 'failure') throw new Error('completion unavailable');
+    return put(key, value);
+  });
+  await expect(consume({ body: messages[0], ack() {} }, env, {})).rejects.toMatchObject({ status: 500 });
+  fault.mockRestore();
+  const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
+  env.JOBS.objects.set('a:pinger', cold);
+  await vi.advanceTimersByTimeAsync(121000); await cold.alarm();
+  expect(messages).toHaveLength(2);
+  expect(await rpc(env.JOBS, 'a:pinger', 'run', { id: messages[0].id })).toMatchObject({ status: 'failure' });
+  await consume({ body: messages[1], ack() {} }, env, {});
+  expect(env.OUTBOUND_FETCH).toHaveBeenCalledTimes(2);
+  expect((await api('/api/account')).held_microdollars).toBe(0);
 });

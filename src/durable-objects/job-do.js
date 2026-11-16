@@ -49,7 +49,8 @@ export class JobDO {
       case 'result': return this.result(args);
       case 'recover-result': {
         const run = await this.readRun(args.id);
-        if (run && ['success', 'failure', 'expired'].includes(run.status)) return this.result({ id: args.id });
+        const staged = await this.storage.get(`run:${args.id}`);
+        if (run && (staged?.completion || ['success', 'failure', 'expired'].includes(run.status))) return this.result({ id: args.id });
         return {};
       }
       case 'wake': {
@@ -72,6 +73,7 @@ export class JobDO {
     const summaries = (await this.summaries());
     const pending = await Promise.all(summaries.filter(r => r.status === 'queued' || r.status === 'running').map(r => this.record(r)));
     const timers = pending.map(r => r.enqueued ? r.expires_at : Date.now() + 1000);
+    if (summaries.some(r => r.retry?.dispatch)) timers.push(Date.now() + 1000);
     if (settings?.job?.enabled && !settings.paused && settings.next_fire) timers.push(settings.next_fire);
     if (settings?.resume_at) timers.push(settings.resume_at);
     // Once disabled, old logs get one final cleanup alarm, then hibernate indefinitely.
@@ -130,27 +132,45 @@ export class JobDO {
     if (run.status === 'success' || run.status === 'failure' || run.status === 'expired') {
       // Repair publication without reloading retained history on every redelivery.
       // The pending run's existing alarm still guarantees pruning and rearming.
-      await this.publish(settings);
+      try { await this.publish(settings); }
+      finally { await this.dispatchRetry(args.id); }
       return { duplicate: true };
     }
+    const staged = await this.storage.get(`run:${args.id}`);
+    const outcome = staged?.completion || args.result;
+    assert(outcome, 'missing_result', 'Run result is missing', 409);
+    // Persist the observed result before settlement can remove its execution hold.
+    // Redelivery and the existing pending alarm can now finish the same outcome.
+    if (!staged?.completion) await this.storage.put(`run:${args.id}`, { ...run, completion: outcome });
     // Keep new runs' retry input with the pending outbox: settlement removes the
     // account's execution snapshot before this object's completion can commit.
-    const retryData = args.result.status === 'failure' && run.attempt < (settings.job?.retries || 0) ? (await this.storage.get(`history:${args.id}`))?.retry || await rpc(this.env.ACCOUNTS, settings.account, 'retry-data', { id: args.id }) : {};
-    const receipt = await rpc(this.env.ACCOUNTS, settings.account, 'settle', { id: args.id, actual: args.result.charge_microdollars ?? run.reserved_microdollars });
-    const result = { ...run, ...args.result, id: run.id, job: run.job, cost_microdollars: receipt.charged, subrequests: receipt.gateway_count ?? args.result.subrequests ?? 0, finished_at: Date.now() };
+    const shouldRetry = outcome.status === 'failure' && run.attempt < (settings.job?.retries || 0);
+    const retryData = shouldRetry ? (await this.storage.get(`history:${args.id}`))?.retry || await rpc(this.env.ACCOUNTS, settings.account, 'retry-data', { id: args.id }) : {};
+    const receipt = await rpc(this.env.ACCOUNTS, settings.account, 'settle', { id: args.id, actual: outcome.charge_microdollars ?? run.reserved_microdollars });
+    const result = { ...run, ...outcome, id: run.id, job: run.job, cost_microdollars: receipt.charged, subrequests: receipt.gateway_count ?? outcome.subrequests ?? 0, finished_at: Date.now() };
     delete result.input; delete result.key_id;
     const changed = settings.last_outcome !== result.status;
     settings.last_outcome = result.status;
-    await this.history(result, true, changed ? settings : null);
+    const retry = shouldRetry ? { dispatch: true, input: retryData.input || {}, key_id: run.key_id, attempt: run.attempt + 1, trigger: run.trigger, scheduled_at: run.scheduled_at } : undefined;
+    await this.history(result, true, changed ? settings : null, retry);
     try { await this.publish(settings); }
     finally {
-      // A reporting outage must not suppress an otherwise prepaid configured retry.
-      if (result.status === 'failure' && run.attempt < (settings.job?.retries || 0)) {
-        try { await this.start({ id: `${args.id}:retry`, trigger: run.trigger, scheduled_at: run.scheduled_at, input: retryData.input || {}, key_id: run.key_id, retry: true, attempt: run.attempt + 1 }); }
-        catch { /* Refusal has paused the job or capped the retry; never retry unfunded work. */ }
-      }
+      await this.dispatchRetry(args.id);
     }
     await this.prune(); await this.arm(); return result;
+  }
+  async dispatchRetry(id) {
+    const summary = await this.storage.get(`history:${id}`);
+    if (!summary?.retry?.dispatch) return;
+    const { retry, ...completed } = summary;
+    try { await this.start({ ...retry, id: `${id}:retry`, retry: true }); }
+    catch (error) {
+      // Refusals end this retry. Infrastructure failures retain the outbox for
+      // Queue redelivery or the pending run's already-funded recovery alarm.
+      if (![402, 403, 404, 409, 429].includes(error.status) && !['cost_brake', 'sandbox_acceptance_required'].includes(error.code)) throw error;
+    }
+    await this.storage.put(`history:${id}`, completed);
+    if (this.historyCache) this.historyCache = this.historyCache.map(r => r.id === id ? completed : r);
   }
   async summaries() {
     if (!this.historyCache) this.historyCache = [...(await this.storage.list({ prefix: 'history:' })).values()];
@@ -163,7 +183,9 @@ export class JobDO {
   async record(summary) {
     const { pending, retry: _retry, ...publicSummary } = summary;
     // Older pending records kept their full metadata in a separate run row.
-    return pending ? { ...publicSummary, ...pending } : (await this.storage.get(`run:${summary.id}`)) || publicSummary;
+    if (pending) return { ...publicSummary, ...pending };
+    const { completion: _completion, ...body } = (await this.storage.get(`run:${summary.id}`)) || publicSummary;
+    return body;
   }
   async history(run, full = false, settings = null, retry) {
     const { id, job, status, created_at, trigger, scheduled_at, finished_at, cost_microdollars, http_status, reason } = run;
@@ -197,6 +219,7 @@ export class JobDO {
         if (run.expires_at <= Date.now()) await this.result({ id: run.id, result: { status: 'expired', error: 'Result was not received before the deadline' } });
         else if (!run.enqueued) await this.send(run, settings);
       }
+      for (const summary of await this.summaries()) if (summary.retry?.dispatch) await this.dispatchRetry(summary.id);
       // Expiry reporting can update the outcome or pause a refused retry.
       settings = await this.storage.get('settings');
       if (settings.resume_at && settings.resume_at <= Date.now()) { settings.paused = null; settings.resume_at = null; await this.storage.put('settings', settings); }

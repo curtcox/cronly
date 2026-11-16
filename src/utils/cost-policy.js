@@ -6,8 +6,8 @@ export const COST_POLICY = Object.freeze({
   revenueKept: 0.92, minimumMargin: 1.5, newAccountDepositCapCents: 2000,
   maxJobs: 100, newAccountMaxJobs: 10, concurrency: 10,
   destinationRequestsPerMinute: 60, projectionBrakeCents: 5000,
-  // Includes redirects, test-job setup, alarms, pruning and three queue redeliveries.
-  runRowWrites: 33, runDoRequests: 30, runWorkerRequests: 5
+  // Includes redirects, test-job setup, alarms, pruning, refused retries and redelivery.
+  runRowWrites: 38, runDoRequests: 30, runWorkerRequests: 5
 });
 /** Gross up the credit to itemize payment costs, ported from hashbin. */
 export function grossUp(creditCents) {

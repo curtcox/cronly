@@ -11,12 +11,12 @@ constants as the API; historical numbers in the master plan are superseded here.
 
 | Operation | Price | Estimated worst-case marginal cost |
 |---|---|---|
-| HTTP run | 80 µ$ | ceil(policy run bound), currently 49 µ$ |
+| HTTP run | 89 µ$ | ceil(policy run bound), currently 54 µ$ |
 | Webhook run | HTTP/JS price + 5 µ$ | run bound + 2 µ$ |
 | Change: action, variable, secret (including key rotation), job, key, trigger | 100 µ$ | 20 µ$ |
-| API-key read | 20 µ$ base + 2 µ$ per job scanned for aggregate history | 12 µ$ base + 1.2 µ$/job |
+| API-key read | 21 µ$ base + 2 µ$ per job scanned for aggregate history | ceil(12 µ$ base + 1.2 µ$/job) |
 | Web session reads, cron explain, quotes, mutation dry runs | Free, rate-limited | Bounded fixed operating cost |
-| JavaScript run | 80 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
+| JavaScript run | 89 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
 | JS daily activation | 3,300 µ$ on first invocation of each action version per UTC day | 2,000 µ$ provider activation |
 | Prose | ceil(1.64 × actual model-token cost) + 500 µ$ | actual tokens + bookkeeping |
 
@@ -26,7 +26,7 @@ configuration contribute to the content hash. CPU is billed at the configured li
 until per-invocation measured CPU is available (S2). Retries are separately reserved
 and charged as runs. Queue redelivery never repeats a claimed outbound operation.
 
-A regular hourly HTTP job is about $0.0576 per 30 days; a minutely job is $3.456. These
+A regular hourly HTTP job is about $0.06408 per 30 days; a minutely job is $3.8448. These
 are run charges only. Changes, API polling, prose and JS activation are additional.
 
 ## Units and deposits
@@ -49,7 +49,7 @@ reviewed Terms and applicable law.
 
 Rates live only in `src/utils/cost-policy.js`; prices only in `src/utils/pricing.js`;
 model rates only in `src/utils/llm-policy.js`. Included allowances are ignored.
-The HTTP bound includes 33 row writes, 30 DO requests, five Worker invocations and
+The HTTP bound includes 38 row writes, 30 DO requests, five Worker invocations and
 3,000 compact-index row reads, six Queue operations, CPU,
 awake time and 16 KB retained logs; orchestration caches compact summaries instead of loading log bodies. Read and change bounds include actual ledger,
 key-budget, audit and rate-counter bookkeeping rather than just one request.
@@ -70,14 +70,28 @@ includes one ingress request and four separately billed consumer batches, withou
 assuming messages share a batch. Cloudflare documents [consumer request/CPU billing](https://developers.cloudflare.com/queues/configuration/consumer-concurrency/)
 separately from [Queue operation charges](https://developers.cloudflare.com/queues/platform/pricing/).
 
+The audit also injects failed settlement, completion writes, retry dispatch and retry
+outbox cleanup, plus the pause when a retry exceeds its budget. Results are staged
+durably before settlement; recovery completes the same outcome and charges once.
+A failed run's retry context stays private until its
+deterministic child is reserved/enqueued or refused by its job/key budget. The same
+38-write/30-DO-request/five-invocation allowance covers these tested paths; separately
+billed retries each contribute their own allowance. Refused retries have no separate
+charge, so the paid parent includes their pause/log/cleanup overhead. The audit raises
+the 80 µ$ base to 89 µ$ to retain the approved floor after rounding costs up.
+
 This corrects the earlier 24-write/12-request allowance, which omitted some of that
 bookkeeping. The prior 60 µ$ run price fails the audited floor. Compact pending-run records
 removed one write per run and initially reduced the corrected 80 µ$ default to 78 µ$.
 The subsequent redelivery audit includes recovery RPCs and all consumer invocations,
-so the current default is 80 µ$ to retain the floor. Persisted job quotes follow the current price;
+which required 80 µ$. Staged-result recovery and the previously uncounted retry-refusal
+path now require 89 µ$. Persisted job quotes follow the current price;
 already-held runs settle within their original maximum.
 
-Tests assert `price × 0.92 >= 1.5 × worstCaseCost` for every operation and JS extremes.
+Tests assert `price × 0.92 >= 1.5 × ceil(worstCaseCost)` for every operation and JS extremes.
+The floor rounds cost up to integer micro-dollars just as settlement estimates do.
+Read coverage checks every job count from zero to 100: the old 20 µ$ base missed the
+rounded floor at small counts, so it is now 21 µ$ plus the unchanged 2 µ$/job.
 Prose markup is 1.64 because `1.64 × 0.92 >= 1.5`; 1.5 itself fails. The additive
 500 µ$ covers non-model orchestration. The pre-call hold uses bounded input bytes,
 maximum output tokens, maximum cache-write rates and bounded read-only tool turns.
