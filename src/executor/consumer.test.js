@@ -48,3 +48,14 @@ it('freezes definitions at reservation and blocks concurrent overlap', async () 
   await consume({ body: messages[0], ack() {} }, env, {});
   expect(env.OUTBOUND_FETCH.mock.calls[0][0].url).toBe('https://example.com/');
 });
+it('executes an old-key snapshot after the active key and stored secret change', async () => {
+  const { api, messages, env } = await setup();
+  await api('/api/jobs/pinger/run', 'POST', {});
+  env.SECRETS_KEYRING = JSON.stringify({ active: 'v2', keys: { v1: 'test', v2: 'new-master' } });
+  await api('/api/secrets/token', 'PUT', { value: 'replacement-token' });
+  await consume({ body: messages[0], ack() {} }, env, {});
+  expect(env.OUTBOUND_FETCH.mock.calls[0][0].headers.get('Authorization')).toBe('Bearer secret-token');
+  const runs = await rpc(env.JOBS, 'a:pinger', 'runs');
+  expect(runs.items[0].status).toBe('success');
+  expect(JSON.stringify(runs)).not.toContain('secret-token');
+});

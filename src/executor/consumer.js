@@ -15,7 +15,7 @@ export async function consume(message, env, ctx) {
       await rpc(env.JOBS, `${account}:${name}`, 'result', { id, result: { status: 'failure', error: 'Paused by cost safety brake', charge_microdollars: 0 } }); message.ack(); return;
     }
     const secrets = {};
-    for (const [name, record] of Object.entries(execution.secrets)) secrets[name] = await decryptSecret(env.SECRETS_MASTER_KEY, account, name, record);
+    for (const [name, record] of Object.entries(execution.secrets)) secrets[name] = await decryptSecret(env, account, name, record);
     const context = { var: execution.vars, secret: secrets, input: execution.input, run: { id, scheduled_at: execution.scheduled_at, trigger: execution.trigger }, job: { name }, account: { id: account } };
     if (env.COST_SAFETY_HARD_STOP === 'true') throw new Error('brake');
     if (execution.action.type === 'javascript') {

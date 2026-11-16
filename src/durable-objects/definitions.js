@@ -37,7 +37,7 @@ export async function mutate(tx, args, env) {
       delete config[kind][name];
     } else {
       const normalized = normalize(kind, value);
-      config[kind][name] = kind === 'secrets' ? await encryptSecret(env.SECRETS_MASTER_KEY, args.account, name, normalized) : normalized;
+      config[kind][name] = kind === 'secrets' ? await encryptSecret(env, args.account, name, normalized) : normalized;
     }
     changes.push({ kind, name, operation: deleting ? 'delete' : 'put' });
   }

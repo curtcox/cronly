@@ -3,7 +3,7 @@
 **This file is the single source of truth for project status.** If another document
 disagrees with it, this file wins and the other document is stale.
 
-- **Last audited:** 2026-11-15 (code implemented; live acceptance pending)
+- **Last audited:** 2026-11-16 (code implemented; live acceptance pending)
 - **Production:** nothing deployed. `cronly.org` is not yet pointed at Cloudflare.
 - **Overall:** Code implemented and locally verified on main; production/credential/legal acceptance remains. Design is in [`todo/master_plan.md`](todo/master_plan.md); pricing in
   [`docs/business/pricing.md`](docs/business/pricing.md).
@@ -70,7 +70,7 @@ disagrees with it, this file wins and the other document is stale.
 
 | ID | Item | Owner | Status | Notes / reference |
 |----|------|-------|--------|-------------------|
-| S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ⬜ | §3.3. |
+| S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | 🚧 | Versioned, authenticated ciphertext and atomic keyring configuration implemented; legacy records and queued snapshots remain readable. Held re-encryption and operator guide in progress. §3.3. |
 | S2 | Charge measured JS CPU instead of the configured limit | code | ⬜ | §3.4; needs per-invocation CPU data. |
 | S3 | Recalibrate prices from a month of real Cloudflare and Anthropic bills | ops/code | ⬜ | `docs/business/pricing.md`. |
 | S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | ⬜ | pricing.md "Ways to lower the cost". |
