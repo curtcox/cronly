@@ -6,6 +6,7 @@ import { rpc } from '../utils/rpc.js';
 import { price } from '../utils/pricing.js';
 import { parseScopes } from '../auth/scopes.js';
 import { funds, reserve, settle, deposit } from './ledger.js';
+import { beginSecretRotation, finishSecretRotation } from './secret-rotation.js';
 
 /** Account definitions and money share one transactional, SQLite-backed object. */
 export class AccountDO {
@@ -61,6 +62,8 @@ export class AccountDO {
       case 'claim-run': return claimRun(tx, args.id);
       case 'config': return loadConfig(tx, args.public_view !== false);
       case 'mutate': return mutate(tx, args, this.env);
+      case 'begin-secret-rotation': return beginSecretRotation(tx, args, this.env);
+      case 'finish-secret-rotation': return finishSecretRotation(tx, args, this.env);
       case 'begin-prose': {
         const prior = await tx.get(`prose:${args.id}`);
         if (prior) { assert(prior.request_hash === args.request_hash, 'idempotency_conflict', 'Idempotency key reused', 409); return { duplicate: true, response: prior.response }; }

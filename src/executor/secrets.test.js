@@ -26,7 +26,8 @@ it('authenticates the account, name and key version and uses fresh nonces', asyn
   const sameKeys = { SECRETS_KEYRING: JSON.stringify({ active: 'v2', keys: { v1: 'new-master', v2: 'new-master' } }) };
   await expect(decryptSecret(sameKeys, 'alice', 'token', { ...first, key_version: 'v1' })).rejects.toThrow();
   await expect(decryptSecret(ring(), 'alice', 'token', { ...first, version: 3 })).rejects.toMatchObject({ code: 'invalid_secret_record' });
-  expect(JSON.stringify(secretMetadata(first))).not.toMatch(/ciphertext|private-value|key_version|iv/);
+  expect(secretMetadata(first).key_version).toBe('v2');
+  expect(JSON.stringify(secretMetadata(first))).not.toMatch(/ciphertext|private-value|iv/);
 });
 
 it('fails closed on missing or malformed keys without exposing configuration', async () => {

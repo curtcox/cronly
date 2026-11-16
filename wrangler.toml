@@ -16,8 +16,10 @@ APP_ORIGIN = "https://cronly.org"
 
 # Required secrets, uploaded by CI before deployment:
 # CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY, CLERK_WEBHOOK_SECRET,
-# STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, SECRETS_MASTER_KEY,
+# STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
 # TOKEN_SIGNING_KEY, ANTHROPIC_API_KEY
+# SECRETS_MASTER_KEY or SECRETS_KEYRING (atomic JSON: {"active":"v2","keys":{...}}).
+# Keep previous keys until all accounts and in-flight snapshots have migrated; docs/ops/secret-rotation.md.
 # Optional: CLOUDFLARE_ANALYTICS_TOKEN, CLOUDFLARE_ACCOUNT_ID, ALERT_WEBHOOK_URL
 # LAUNCH_APPROVED=true only after Terms/Privacy and invite-only setup are approved.
 # Required for live runs: COST_SAFETY_DO_NAMESPACES (comma-separated cronly namespace IDs).

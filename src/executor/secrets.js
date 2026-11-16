@@ -26,7 +26,7 @@ export async function decryptSecret(env, account, name, record) {
   return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unbase64url(record.iv), additionalData }, await key(master, account, legacy ? 'cronly:secrets:v1' : 'cronly:secrets:v2'), unbase64url(record.ciphertext)));
 }
 /** Strip ciphertext and IV from every public secret response. */
-export function secretMetadata(record) { return { fingerprint: record.fingerprint, updated_at: record.updated_at, version: record.version }; }
+export function secretMetadata(record) { return { fingerprint: record.fingerprint, updated_at: record.updated_at, version: record.version, key_version: record.key_version || 'v1' }; }
 /** Redact raw, URL-encoded and base64 secret representations before storage. */
 export function redact(text, secrets) {
   let result = String(text);

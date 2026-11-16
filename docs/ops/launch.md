@@ -20,7 +20,8 @@ and Cloudflare account, with a separate Clerk application and Stripe product, as
    the owner/legal reviewer before launch. Refunds are owner-operated through Stripe.
 4. Generate independent 32-byte-or-longer random TOKEN_SIGNING_KEY and
    SECRETS_MASTER_KEY through a secret manager. Keep master-key backups securely;
-   key rotation is S1, and replacing the master without migration loses access to secrets.
+   follow [secret-key rotation](secret-rotation.md) when replacing a master. Versioned
+   `SECRETS_KEYRING` can replace the legacy binding; never overwrite a key still in use.
 5. Put the required secrets listed in wrangler.toml into GitHub's production environment.
    Add CLOUDFLARE_API_TOKEN with scoped deployment permissions and
    CLOUDFLARE_ACCOUNT_ID. Add the read-only analytics token separately. No .dev.vars

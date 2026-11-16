@@ -13,7 +13,7 @@ constants as the API; historical numbers in the master plan are superseded here.
 |---|---|---|
 | HTTP run | 60 µ$ | ceil(policy run bound), currently 36 µ$ |
 | Webhook run | HTTP/JS price + 5 µ$ | run bound + 1 µ$ |
-| Change: action, variable, secret, job, key, trigger | 100 µ$ | 20 µ$ |
+| Change: action, variable, secret (including key rotation), job, key, trigger | 100 µ$ | 20 µ$ |
 | API-key read | 20 µ$ base + 2 µ$ per job scanned for aggregate history | 12 µ$ base + 1.2 µ$/job |
 | Web session reads, cron explain, quotes, mutation dry runs | Free, rate-limited | Bounded fixed operating cost |
 | JavaScript run | 60 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |

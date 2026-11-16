@@ -70,7 +70,7 @@ disagrees with it, this file wins and the other document is stale.
 
 | ID | Item | Owner | Status | Notes / reference |
 |----|------|-------|--------|-------------------|
-| S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | 🚧 | Versioned, authenticated ciphertext and atomic keyring configuration implemented; legacy records and queued snapshots remain readable. Held re-encryption and operator guide in progress. §3.3. |
+| S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ✅ | Atomic versioned keyring, legacy reads, held per-secret re-encryption, edit/delete conflict protection, audit, scoped CLI and CI wiring verified. Persisted local Worker migrated v1 → v2 and executed a redacted JS run with v1 retired. [Operator procedure](docs/ops/secret-rotation.md). §3.3. |
 | S2 | Charge measured JS CPU instead of the configured limit | code | ⬜ | §3.4; needs per-invocation CPU data. |
 | S3 | Recalibrate prices from a month of real Cloudflare and Anthropic bills | ops/code | ⬜ | `docs/business/pricing.md`. |
 | S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | ⬜ | pricing.md "Ways to lower the cost". |
@@ -99,3 +99,16 @@ API reads are 20 µ$ plus 2 µ$ per job scanned for aggregate history. Histories
 compact summaries globally and full per-job pages (100 records) to bound memory and
 cost. Monthly projections handle calendar resets; webhook forecasts use seven UTC
 calendar days of billed counts rather than sampling retained logs.
+
+## S1 acceptance — 2026-11-16
+
+- Lint and 50 unit/integration tests pass, including legacy ciphertext reads,
+  key-version tampering, scoped/capped rotation, idempotency, concurrent edit/delete
+  conflicts, failed decryption refunds and old-key queued snapshots.
+- All three browser regression flows and the production Worker dry-run build pass.
+- Real local Worker with persisted SQLite storage: wrote a v1 secret, switched active
+  key to v2, quoted and re-encrypted through the scoped CLI at exactly 100 µ$ plus
+  ordinary reads, retired v1 from the keyring, and successfully executed a queued JS
+  action using the rotated secret with redacted logs and no remaining hold.
+- No production keys were provisioned, rotated or removed. Live launch acceptance
+  and legal entity/contact/jurisdiction inputs remain owner steps under L9–L14.

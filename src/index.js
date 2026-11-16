@@ -9,6 +9,7 @@ import { reports } from './api/reporting.js';
 import { hook, triggers } from './auth/triggers.js';
 import { runJob, toggleJob, testAction } from './api/jobs.js';
 import { consume } from './executor/consumer.js';
+import { rotateSecret } from './executor/rotate-secret.js';
 import { definitions, keys } from './api/definitions.js';
 import { clerkWebhook } from './auth/clerk-webhook.js';
 import { checkout, stripeWebhook } from './api/payments.js';
@@ -49,6 +50,7 @@ export const API_ROUTES = [
   ...['pause', 'resume'].map(op => ({ method: 'POST', path: `/api/jobs/:name/${op}`, access: 'change', handler: `${op}-job` })),
   { method: 'POST', path: '/api/actions/:name/test', access: 'run', handler: 'test-action' },
   { method: 'POST', path: '/api/jobs/:name/run', access: 'run', handler: 'run-job' },
+  { method: 'POST', path: '/api/secrets/:name/rotate', access: 'secrets:write', handler: 'rotate-secret' },
   { method: 'GET', path: '/api/keys', access: SESSION, handler: 'keys' },
   { method: 'POST', path: '/api/keys', access: SESSION, handler: 'keys' },
   { method: 'DELETE', path: '/api/keys/:id', access: SESSION, handler: 'keys' },
@@ -78,6 +80,7 @@ async function handle(route, request, env, auth) {
     case 'pause-job': case 'resume-job': return toggleJob(route, request, env, auth);
     case 'test-action': return testAction(route, request, env, auth);
     case 'run-job': return runJob(route, request, env, auth);
+    case 'rotate-secret': return rotateSecret(request, env, auth, route.params.name);
     case 'definitions': return definitions(route, request, env, auth);
     case 'keys': return keys(route, request, env, auth);
     case 'clerk-webhook': return clerkWebhook(request, env);

@@ -165,10 +165,13 @@ On-demand runs (UI, API, webhook) enter at step 2 with a fresh run id.
 - Encrypted with AES-256-GCM. Key per account derived with HKDF from a Worker secret
   (`SECRETS_MASTER_KEY`) and the account id. Ciphertext lives in AccountDO.
 - Write-only: the API returns name, created/updated time and a fingerprint, never the value.
-- Decrypted only inside the executor for the run that needs it.
+- Decrypted only inside the executor for the run that needs it or a separately reserved
+  key-rotation operation.
 - Redaction: before anything is logged, every secret value used by the run (and its URL- and
   base64-encoded forms) is replaced with `«secret:NAME»`.
-- Key rotation is a STATUS item (re-encrypt under a new master key version), not launch.
+- Key rotation is S1 (re-encrypt under a new master key version), not launch. The
+  implementation uses an atomic `SECRETS_KEYRING` binding and a separately held,
+  `secrets:write`-scoped rotation endpoint. See [operator procedure](../docs/ops/secret-rotation.md).
 
 ### 3.4 JavaScript sandbox
 

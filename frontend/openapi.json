@@ -2128,6 +2128,95 @@
         }
       }
     },
+    "/api/secrets/{name}/rotate": {
+      "post": {
+        "operationId": "post__api_secrets__name_rotate",
+        "summary": "rotate-secret",
+        "x-access": "secrets:write",
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "ClerkSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "1"
+              ]
+            },
+            "description": "Validate and quote without applying or charging."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful result; money is integer micro-dollars.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credential"
+          },
+          "402": {
+            "description": "Insufficient balance or budget"
+          },
+          "403": {
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "description": "Stale proposal, overlap or idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/keys": {
       "get": {
         "operationId": "get__api_keys",
