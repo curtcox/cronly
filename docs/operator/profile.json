@@ -1,0 +1,19 @@
+{
+  "source": {
+    "repository": null,
+    "revision": null
+  },
+  "profile": {
+    "schema_version": 1,
+    "operator": {
+      "legal_name": null,
+      "postal_address": null,
+      "governing_jurisdiction": null,
+      "dispute_venue": null
+    },
+    "apps": {
+      "hashbin.org": { "support_email": null, "privacy_email": null },
+      "cronly.org": { "support_email": null, "privacy_email": null }
+    }
+  }
+}

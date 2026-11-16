@@ -46,7 +46,7 @@ disagrees with it, this file wins and the other document is stale.
 | D4 | Minimum deposit | owner | ✅ | Owner approved 2026-11-15: $5, card payment cost itemized on top (hashbin L20 wording). |
 | D5 | API reads billed (20 µ$ after implementation audit), web UI reads free and rate-limited | owner | ✅ | Owner approved billed reads and upward floor corrections 2026-11-15; ledger write costs require a 20 µ$ base plus a 2 µ$/job aggregate-history allowance rather than the 1 µ$ planning estimate; keeps "no account costs more than it paid" true for scripted polling. |
 | D6 | Starting prices in `docs/business/pricing.md` (25 µ$/run, 100 µ$/change, prose 1.5× + 500 µ$) | owner | ✅ | Owner approved 2026-11-15: accept, adjusting upward to pass floors; recalibrate after a month of production cost data (S3). |
-| D7 | Shared source for operator identity across hashbin, cronly and future apps | code/owner | ❓ | Owner requested shared entity/jurisdiction with per-app contacts on 2026-11-16. Recommend a dedicated versioned profile repo; location and actual entity details pending. Current hashbin main still has placeholders and L21 formation pending. [Adoption plan](todo/shared_operator_profile.md). |
+| D7 | Shared source for operator identity across hashbin, cronly and future apps | code/owner | 🟨 | Owner requested shared entity/jurisdiction with per-app contacts and approved placeholders on 2026-11-16. Offline snapshot, escaped legal-page rendering, drift tests and launch completeness check implemented. Shared repo selection, confirmed facts and hashbin adoption remain deferred. [Adoption plan](todo/shared_operator_profile.md); [snapshot procedure](docs/operator/README.md). |
 
 ## Launch blockers
 
@@ -64,7 +64,7 @@ disagrees with it, this file wins and the other document is stale.
 | L10 | JavaScript actions: sandbox, outbound gateway, CPU/subrequest limits and pricing, editor | code/ops | 🟨 | Content-addressed Worker Loader, blocked native networking, counted gateway, daily activation settlement and editor implemented; real local JS succeeds. Live CPU-limit acceptance required. §2.2, §3.4. Needs D2. |
 | L11 | Agent surface: OpenAPI + drift test, `llms.txt`, agent docs, MCP server, `/api/config`, browser snippet | code | ✅ | Atomic config with conflict checks, OpenAPI drift test, scoped MCP protocol tests, llms.txt/agent docs and immutable SHA-384 SRI trigger SDK verified. §4.4, §4.5. |
 | L12 | Abuse and cost safety: limits, destination rules, rate-limit rules, daily cost reconciliation and brake, invite-only sign-up | code/ops | 🟨 | Account/job/destination caps, native ingress limiter, destination checks, conservative daily analytics reconciliation and stale-report brake implemented. Live schema/WAF/billing alerts and Clerk Restricted mode remain owner steps. §8. |
-| L13 | Terms of Service and Privacy Policy (acceptable use, refunds, suspension) | legal | 🟨 | Service-specific drafts prepared; owner directed shared entity/jurisdiction with hashbin and separate contacts. Checked current hashbin main 2026-11-16: identity/jurisdiction still placeholders; LLC formation is L21 pending. Shared source tracked in D7; actual facts, cronly contacts and policy approval remain. Checkout is gated by launch approval. |
+| L13 | Terms of Service and Privacy Policy (acceptable use, refunds, suspension) | legal | 🟨 | Service-specific drafts prepared; owner directed shared entity/jurisdiction with hashbin and separate contacts, approving placeholders for now. Offline profile renders escaped facts into both drafts with drift checks; approved-launch deploys require complete pinned facts. Actual facts, cronly contacts and policy approval remain. Checkout is gated by launch approval. |
 | L14 | Production: cronly.org DNS and custom domain, live Clerk and Stripe, secrets, end-to-end test with a real deposit, `verify:production` | ops | 🟨 | Custom-domain config, guarded CI deploy, secret upload, production verifier and live sandbox acceptance script prepared; provision credentials/DNS and perform real deposit/live acceptance per docs/ops/launch.md. §10.13. |
 
 ## Soon after launch
@@ -164,3 +164,17 @@ calendar days of billed counts rather than sampling retained logs.
 - Lint, 70 unit/integration tests, all three browser flows and the production dry-run
   build pass. The worst-case write bound and 78 µ$ price
   are unchanged because a changed outcome still needs its settings write.
+
+## D7/L13 placeholder profile acceptance — 2026-11-16
+
+- Owner approved placeholders while the shared profile repository and actual facts
+  remain unavailable. Public facts and source provenance are explicit nulls in an
+  offline snapshot, rendered as visible placeholders in Terms and Privacy.
+- Escaped generation and offline drift checks preserve draft notices, policy text,
+  legal-review notes and effective-date placeholders. Contacts remain app-specific.
+- Approved-launch deployments require complete cronly facts and pinned provenance;
+  prelaunch deployments and local development can retain the placeholder snapshot.
+- Shared-source selection/sync, hashbin adoption, confirmed public facts and policy
+  approval remain outstanding. No hashbin files or live services were changed.
+- Lint, 73 unit/integration tests, all three browser flows and the production dry-run
+  build pass, including escaping, schema/provenance checks and incomplete-launch refusal.

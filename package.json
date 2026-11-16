@@ -18,6 +18,8 @@
     "test:local": "node scripts/verify-local.mjs",
     "test:sandbox:live": "node scripts/verify-sandbox-live.mjs",
     "docs:generate": "node scripts/generate-openapi.mjs && node scripts/sdk-integrity.mjs",
+    "legal:generate": "node scripts/operator-profile.mjs",
+    "legal:check": "node scripts/operator-profile.mjs --check",
     "eval:prose": "node scripts/eval-prose.mjs",
     "secrets:rotate": "node scripts/rotate-secrets.mjs"
   },

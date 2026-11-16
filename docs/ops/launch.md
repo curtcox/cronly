@@ -65,7 +65,10 @@ and Cloudflare account, with a separate Clerk application and Stripe product, as
   manager: `CRONLY_EVAL_CONFIRMED=1 npm run eval:prose`. Inspect ambiguous and DST cases,
   accuracy, tokens and spend, then decide D3. Opus remains the approved initial default.
 - Complete entity/contact/jurisdiction placeholders and obtain legal approval of Terms
-  and Privacy. Replace draft markers with effective dates before public availability.
+  and Privacy. Follow the [operator snapshot procedure](../operator/README.md), run
+  `npm run legal:generate` and `npm run legal:check`, and pin the shared source revision.
+  Approved-launch deploys also require `node scripts/operator-profile.mjs --require-complete`.
+  Replace draft markers with effective dates before public availability.
 - Record evidence and deployment SHA in STATUS.md, then enable automatic deploys if desired.
 
 A global emergency stop is Worker variable COST_SAFETY_HARD_STOP=true. It is checked by

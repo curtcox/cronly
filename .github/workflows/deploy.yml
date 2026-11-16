@@ -38,6 +38,8 @@ jobs:
       - run: npm test
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+      - run: node scripts/operator-profile.mjs --require-complete
+        if: vars.CRONLY_LAUNCH_APPROVED == 'true'
       - run: node scripts/check-deployment-secrets.mjs
       - run: node scripts/deploy-worker.mjs
       - run: node scripts/push-worker-secrets.mjs
