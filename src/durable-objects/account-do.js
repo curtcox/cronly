@@ -29,6 +29,17 @@ export class AccountDO {
       }
       case 'account': { const { holds, ...balance } = await funds(tx); return { ...await tx.get('profile'), ...balance, holds: holds.map(({ id, amount, expires_at }) => ({ id, amount, expires_at })) }; }
       case 'reserve': return reserve(tx, { ...args, ...await keyBudget(tx, args.key_id) });
+      case 'gateway-request': {
+        const hold = await tx.get(`hold:${args.id}`);
+        assert(hold?.claimed && hold.expires_at > Date.now() && hold.execution?.action?.type === 'javascript', 'invalid_capability', 'Run is not active', 403);
+        const count = hold.gateway_count || 0;
+        assert(count < hold.execution.action.subrequests, 'subrequest_limit', 'Subrequest limit reached', 429);
+        let rate = await tx.get(`rate:destination:${args.host}`); const now = Date.now();
+        if (!rate || rate.reset <= now) rate = { count: 0, reset: now + 60000 };
+        assert(rate.count < 60, 'destination_rate_limit', 'Destination rate exceeded', 429);
+        await tx.put(`rate:destination:${args.host}`, { ...rate, count: rate.count + 1 });
+        await tx.put(`hold:${args.id}`, { ...hold, gateway_count: count + 1 }); return { subrequests: count + 1 };
+      }
       case 'prepare-run': return prepareRun(tx, args);
       case 'claim-run': return claimRun(tx, args.id);
       case 'config': return loadConfig(tx, args.public_view !== false);

@@ -57,6 +57,52 @@
         }
       }
     },
+    "/api/public/config": {
+      "get": {
+        "operationId": "get__api_public_config",
+        "summary": "public-config",
+        "x-access": "public",
+        "security": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful result; money is integer micro-dollars.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credential"
+          },
+          "402": {
+            "description": "Insufficient balance or budget"
+          },
+          "403": {
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "description": "Stale proposal, overlap or idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "operationId": "get__health",

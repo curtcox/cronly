@@ -41,7 +41,7 @@ disagrees with it, this file wins and the other document is stale.
 | ID | Decision | Owner | Status | Recommendation |
 |----|----------|-------|--------|----------------|
 | D1 | Operating entity: run cronly inside the same LLC (and Cloudflare, Stripe, Clerk accounts) as hashbin, or separately? | legal/ops | ✅ | Owner approved 2026-11-15: same LLC, separate Stripe product and Clerk application, same Cloudflare account (Workers Paid plan is then already paid). |
-| D2 | JavaScript sandbox: Workers for Platforms or Dynamic Worker Loader | code/ops | ❓ | Worker Loader if GA with enforced CPU limits; else WfP (+$25/month fixed). Master plan §3.4. Decide at the start of L10. |
+| D2 | JavaScript sandbox: Workers for Platforms or Dynamic Worker Loader | code/ops | ✅ | Worker Loader selected: current documented native CPU/subrequest limits and stable Wrangler binding; daily activation pricing included. Live enforcement acceptance remains L10. Master plan §3.4. Decide at the start of L10. |
 | D3 | Prose model: `claude-opus-5-5` (≈1.4¢ per translation) or `claude-haiku-5-5` (≈0.1¢) | owner | ❓ | Build with Opus 5.5 at low effort; run the L9 eval on both and pick per endpoint. One constant in `src/utils/llm-policy.js`. |
 | D4 | Minimum deposit | owner | ✅ | Owner approved 2026-11-15: $5, card payment cost itemized on top (hashbin L20 wording). |
 | D5 | API reads billed at 1 µ$ each, web UI reads free and rate-limited | owner | ✅ | Owner approved 2026-11-15: yes; keeps "no account costs more than it paid" true for scripted polling. |
@@ -58,9 +58,9 @@ disagrees with it, this file wins and the other document is stale.
 | L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | 🚧 | HTTP path verified in real local Worker/Queue; deterministic IDs, holds and redaction tested. Final policy/recovery audit underway. §3, §3.1, §2.3. |
 | L6 | Runs, costs, upcoming, projection APIs; retention pruning | code | 🚧 | Retained runs, NDJSON, costs, bounded upcoming and schedule projections implemented; final pagination/retention audit underway. §4.3, §6, §7. |
 | L7 | Triggers: run now, trigger tokens, `/hook/*`, per-token rate limits, CORS, `{{input.*}}` | code | ✅ | Manual runs, signed job-only tokens, revocation, token limits, input validation and hook-only CORS tested. §4.1. |
-| L8 | Web UI with balance + runway header on every signed-in page; Playwright tests | code | ⬜ | §5. |
+| L8 | Web UI with balance + runway header on every signed-in page; Playwright tests | code | 🚧 | Vanilla workspace, logo, editors, review dialogs, balance/runway, runs/costs/Ask/account implemented; Playwright mobile and quote/escape/cron flows pass. Final completeness audit next. §5. |
 | L9 | Prose: free cron explain; Claude to-cron, ask, change proposals + apply; holds and billing; to-cron eval | code/ops | 🚧 | Structured Anthropic client, held conversations, read-only tools and separate stale-checked proposals implemented/tested with mock provider; live eval pending. §3.5. Needs D3 and an Anthropic API key (ops). |
-| L10 | JavaScript actions: sandbox, outbound gateway, CPU/subrequest limits and pricing, editor | code/ops | ⬜ | §2.2, §3.4. Needs D2. |
+| L10 | JavaScript actions: sandbox, outbound gateway, CPU/subrequest limits and pricing, editor | code/ops | 🟨 | Content-addressed Worker Loader, blocked native networking, counted gateway, daily activation settlement and editor implemented; real local JS succeeds. Live CPU-limit acceptance required. §2.2, §3.4. Needs D2. |
 | L11 | Agent surface: OpenAPI + drift test, `llms.txt`, agent docs, MCP server, `/api/config`, browser snippet | code | 🚧 | Atomic config diff, generated OpenAPI with drift test, stateless scoped MCP implemented; docs/SDK and protocol tests next. §4.4, §4.5. |
 | L12 | Abuse and cost safety: limits, destination rules, rate-limit rules, daily cost reconciliation and brake, invite-only sign-up | code/ops | ⬜ | §8. |
 | L13 | Terms of Service and Privacy Policy (acceptable use, refunds, suspension) | legal | ⬜ | Start from hashbin's drafts. Needs D1. |

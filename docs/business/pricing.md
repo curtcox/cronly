@@ -152,3 +152,10 @@ Verified provider sources:
 
 Dynamic Workers now charge for each distinct worker used per day. L10 must cover
 that charge rather than relying on the included allowance.
+
+JS implementation: 30 µ$ base + ceil(0.05 × CPU-ms limit) + 5 µ$ per allowed
+subrequest, plus 3,300 µ$ on the first invocation of an action version per UTC day.
+Every invocation holds that activation maximum; later invocations release it.
+The gateway's extra ledger/rate-limit writes are included in the subrequest price.
+Native CPU limits are configured but require live Cloudflare acceptance: local
+limits are not enforced (https://developers.cloudflare.com/workers/wrangler/configuration/).

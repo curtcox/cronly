@@ -1,3 +1,6 @@
+import { digest } from '../auth/crypto.js';
+import { SANDBOX_WRAPPER } from '../executor/javascript.js';
+import { PRICES } from '../utils/pricing.js';
 import { assert } from '../utils/errors.js';
 import { reserve } from './ledger.js';
 import { keyBudget } from './definitions.js';
@@ -29,7 +32,7 @@ export async function prepareRun(tx, args) {
     }
   }
   const amount = price(args.trigger === 'webhook' ? 'hook' : 'run', action);
-  const hold = await reserve(tx, { id: args.id, amount, job: args.name, action: job.action, kind: 'run', budget: job.budget, ...await keyBudget(tx, args.key_id), execution: { action, vars, secrets, job, input: args.input, trigger: args.trigger, scheduled_at: args.scheduled_at }, ttl_ms: 120000 });
+  const hold = await reserve(tx, { id: args.id, amount, job: args.name, action: job.action, kind: 'run', budget: job.budget, ...await keyBudget(tx, args.key_id), execution: { version: action.type === 'javascript' ? await digest(JSON.stringify([SANDBOX_WRAPPER, action])) : null, action, vars, secrets, job, input: args.input, trigger: args.trigger, scheduled_at: args.scheduled_at }, ttl_ms: 120000 });
   await tx.put(`last-run:${args.name}`, now);
   return { id: hold.id, amount, job };
 }
@@ -38,6 +41,12 @@ export async function claimRun(tx, id) {
   const hold = await tx.get(`hold:${id}`);
   assert(hold && hold.expires_at > Date.now(), 'expired_run', 'Run hold expired', 409);
   if (hold.claimed) return { duplicate: true };
-  await tx.put(`hold:${id}`, { ...hold, claimed: true });
-  return { ...hold.execution, amount: hold.amount };
+  let actual_price = hold.amount;
+  if (hold.execution.action.type === 'javascript') {
+    const activationKey = `activation:${hold.execution.version}:${hold.day}`;
+    if (await tx.get(activationKey)) actual_price -= PRICES.jsActivation;
+    else await tx.put(activationKey, { created_at: Date.now() });
+  }
+  await tx.put(`hold:${id}`, { ...hold, claimed: true, actual_price });
+  return { ...hold.execution, amount: hold.amount, actual_price };
 }

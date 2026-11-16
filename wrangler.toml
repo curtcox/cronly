@@ -1,5 +1,5 @@
 name = "cronly"
-main = "src/index.js"
+main = "src/platform.js"
 compatibility_date = "2026-10-30"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
@@ -47,3 +47,6 @@ crons = ["0 2 * * *"]
 
 [limits]
 cpu_ms = 50
+
+[[worker_loaders]]
+binding = "LOADER"

@@ -13,15 +13,17 @@ import { checkout, stripeWebhook } from './api/payments.js';
 import { explainCron } from './services/cron.js';
 import { PUBLIC, SESSION, canAccess } from './auth/scopes.js';
 import { authenticate } from './auth/middleware.js';
+import { money } from './durable-objects/ledger.js';
 import { errorResponse, assert, readJson } from './utils/errors.js';
 import { rpc } from './utils/rpc.js';
-import { price } from './utils/pricing.js';
+import { price, PRICES } from './utils/pricing.js';
 export { AccountDO } from './durable-objects/account-do.js';
 export { JobDO } from './durable-objects/job-do.js';
 
 // Routes are the sole dispatch source: an undeclared endpoint cannot execute.
 export const API_ROUTES = [
   { method: 'GET', path: '/openapi.json', access: PUBLIC, handler: 'openapi' },
+  { method: 'GET', path: '/api/public/config', access: PUBLIC, handler: 'public-config' },
   { method: 'GET', path: '/health', access: PUBLIC, handler: 'health' },
   ...['upcoming', 'projection', 'costs', 'runs'].map(handler => ({ method: 'GET', path: `/api/${handler}`, access: 'read', handler })),
   { method: 'GET', path: '/api/runs/:id', access: 'read', handler: 'run-detail' },
@@ -80,6 +82,7 @@ async function handle(route, request, env, auth) {
     case 'audit': return rpc(env.ACCOUNTS, auth.account, 'list', { prefix: 'audit:', reverse: true });
     case 'cron-explain': { const body = await readJson(request); return { ...explainCron(body.cron, body.timezone), cost_microdollars: 0 }; }
     case 'openapi': return openapi(API_ROUTES);
+    case 'public-config': return { local: env.ENVIRONMENT === 'local', clerk_publishable_key: env.CLERK_PUBLISHABLE_KEY || null, prices: PRICES };
     case 'health': return { status: 'ok', environment: env.ENVIRONMENT, git_sha: env.GIT_SHA || 'local' };
     case 'quote': {
       const op = url.searchParams.get('op'); assert(['run', 'hook', 'change', 'read', 'prose'].includes(op), 'invalid_operation', 'Unknown operation');
@@ -93,7 +96,8 @@ async function handle(route, request, env, auth) {
     case 'account': return rpc(env.ACCOUNTS, auth.account, 'account');
     case 'dev-deposit': {
       assert(env.ENVIRONMENT === 'local', 'not_found', 'Not found', 404);
-      const body = await readJson(request);
+      const body = await readJson(request); money(body.amount_microdollars);
+      if (dryRun) return { quote_microdollars: 0, cost_microdollars: 0, development_credit_microdollars: body.amount_microdollars };
       return rpc(env.ACCOUNTS, auth.account, 'dev-deposit', { id: request.headers.get('Idempotency-Key') || crypto.randomUUID(), amount: body.amount_microdollars });
     }
   }

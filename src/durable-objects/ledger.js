@@ -36,7 +36,7 @@ export async function settle(tx, id, actual, now = Date.now()) {
   money(actual); const hold = await tx.get(`hold:${id}`) || await tx.get(`receipt:${id}`);
   assert(hold, 'unknown_hold', 'Reservation not found', 404);
   if (hold.settled) return hold;
-  const amount = Math.min(hold.amount, actual);
+  const amount = Math.min(hold.amount, actual, hold.actual_price ?? Infinity);
   const balance = (await tx.get('balance')) || 0;
   assert(balance >= amount, 'ledger_invariant', 'Invalid ledger state', 500);
   await tx.put('balance', balance - amount);
