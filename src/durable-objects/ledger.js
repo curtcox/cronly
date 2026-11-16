@@ -10,7 +10,7 @@ export async function funds(tx) {
 /** Reserve before any external work; budgets include every outstanding hold. */
 export async function reserve(tx, args, now = Date.now()) {
   money(args.amount); assert(args.amount > 0, 'invalid_money', 'Reservation must be positive');
-  const prior = await tx.get(`hold:${args.id}`);
+  const prior = await tx.get(`hold:${args.id}`) || await tx.get(`receipt:${args.id}`);
   if (prior) return { ...prior, duplicate: true };
   const { balance_microdollars: balance, held_microdollars: held, holds } = await funds(tx);
   assert(balance - held >= args.amount, 'insufficient_balance', 'Insufficient balance', 402, { needed_microdollars: args.amount - (balance - held) });
@@ -33,7 +33,7 @@ export async function reserve(tx, args, now = Date.now()) {
 }
 /** Settle once, releasing unused credit. Expired holds are charged in full. */
 export async function settle(tx, id, actual, now = Date.now()) {
-  money(actual); const hold = await tx.get(`hold:${id}`);
+  money(actual); const hold = await tx.get(`hold:${id}`) || await tx.get(`receipt:${id}`);
   assert(hold, 'unknown_hold', 'Reservation not found', 404);
   if (hold.settled) return hold;
   const amount = Math.min(hold.amount, actual);
@@ -47,9 +47,11 @@ export async function settle(tx, id, actual, now = Date.now()) {
       await tx.put(key, ((await tx.get(key)) || 0) + amount);
     }
   }
-  const result = { ...hold, settled: true, charged: amount, settled_at: now };
+  const { execution: _execution, ...receipt } = hold;
+  const result = { ...receipt, settled: true, charged: amount, settled_at: now };
   // The permanent receipt is also the reservation tombstone; duplicates cannot spend twice.
-  await tx.put(`hold:${id}`, result);
+  await tx.delete(`hold:${id}`);
+  await tx.put(`receipt:${id}`, result);
   await tx.put(`ledger:${String(now).padStart(13, '0')}:${id}`, { id, amount_microdollars: -amount, kind: hold.kind, job: hold.job, action: hold.action, created_at: now });
   return result;
 }

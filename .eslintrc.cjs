@@ -3,5 +3,5 @@ module.exports = {
   parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
   extends: ['eslint:recommended'],
   globals: { crypto: 'readonly', structuredClone: 'readonly' },
-  rules: { 'no-constant-condition': ['error', { checkLoops: false }], 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
+  rules: { 'no-constant-condition': ['error', { checkLoops: false }], 'no-unused-vars': ['error', { varsIgnorePattern: '^_', argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
 };

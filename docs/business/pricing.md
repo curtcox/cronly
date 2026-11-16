@@ -134,3 +134,21 @@ rises linearly with runs.
 `price × revenueKept ≥ 1.5 × worstCaseCost(operation)` using only `cost-policy.js` constants,
 and that every price and hold is a positive integer. Changing a rate or a price without
 keeping the inequality fails the build.
+
+## Implementation audit (2026-11-15)
+
+Owner accepted D4–D6. The HTTP base is **30 µ$** to include queue redelivery and
+bookkeeping allowances; prose uses **1.64× token cost + 500 µ$**, because 1.5×
+after a 0.92 revenue factor fails the required floor. Earlier tables are the original
+planning estimates; the constants in `src/utils/pricing.js` are authoritative.
+
+Verified provider sources:
+- https://developers.cloudflare.com/workers/platform/pricing/
+- https://developers.cloudflare.com/durable-objects/platform/pricing/
+- https://developers.cloudflare.com/queues/platform/pricing/
+- https://developers.cloudflare.com/dynamic-workers/pricing/
+- https://platform.claude.com/docs/en/about-claude/pricing
+- https://stripe.com/pricing
+
+Dynamic Workers now charge for each distinct worker used per day. L10 must cover
+that charge rather than relying on the included allowance.

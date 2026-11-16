@@ -52,10 +52,10 @@ disagrees with it, this file wins and the other document is stale.
 | ID | Item | Owner | Status | Notes / reference |
 |----|------|-------|--------|-------------------|
 | L1 | Scaffold: wrangler (prod + local), Vitest, ESLint, `dev:local`, CI, `/health` | code | ✅ | Wrangler prod/local, pinned dependencies, lint, CI, health and gated LocalDev/deposits verified. Master plan §10.1. Copy hashbin's local mode and CI shape. |
-| L2 | Accounts and auth: Clerk sessions, Clerk webhook → AccountDO, API keys with scopes and daily spend caps, `API_ROUTES` access test | code | 🚧 | Scope gate and Clerk/LocalDev authentication ported; key management/webhook next. §4.1. Port hashbin `src/auth/`. |
-| L3 | Money: µ$ ledger, reserve/settle/expire holds, Stripe deposits, history, `cost-policy.js`, `pricing.js`, price-floor tests, `/api/quote` | code | 🚧 | Transactional ledger/holds and cost floors tested; Stripe integration next. §6, `docs/business/pricing.md`. Needs D4, D6. |
-| L4 | Definitions: variables, secrets (AES-GCM, write-only), HTTP actions, templates, change billing, audit log, dry run, idempotency | code | ⬜ | §2, §3.3, §4.2. |
-| L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | ⬜ | §3, §3.1, §2.3. |
+| L2 | Accounts and auth: Clerk sessions, Clerk webhook → AccountDO, API keys with scopes and daily spend caps, `API_ROUTES` access test | code | ✅ | Clerk/LocalDev auth, signed hashed scoped keys, revocation, daily caps and Clerk webhook; access coverage tests. §4.1. Port hashbin `src/auth/`. |
+| L3 | Money: µ$ ledger, reserve/settle/expire holds, Stripe deposits, history, `cost-policy.js`, `pricing.js`, price-floor tests, `/api/quote` | code | 🟨 | Transactional ledger/holds, signed Stripe webhook, itemized Checkout and quotes tested; real deposit remains L14. §6, `docs/business/pricing.md`. Needs D4, D6. |
+| L4 | Definitions: variables, secrets (AES-GCM, write-only), HTTP actions, templates, change billing, audit log, dry run, idempotency | code | ✅ | Atomic billed CRUD, reference checks, AES-GCM write-only secrets, dry runs, audit and idempotency tested. §2, §3.3, §4.2. |
+| L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | 🚧 | JobDO alarms, prepaid queue path, HTTP executor and redaction implemented; policy/retention tests underway. §3, §3.1, §2.3. |
 | L6 | Runs, costs, upcoming, projection APIs; retention pruning | code | ⬜ | §4.3, §6, §7. |
 | L7 | Triggers: run now, trigger tokens, `/hook/*`, per-token rate limits, CORS, `{{input.*}}` | code | ⬜ | §4.1. |
 | L8 | Web UI with balance + runway header on every signed-in page; Playwright tests | code | ⬜ | §5. |
