@@ -80,7 +80,8 @@ The audit also injects failed settlement, completion writes, retry dispatch and 
 outbox cleanup, plus the pause when a retry exceeds its budget. Results are staged
 durably before settlement; recovery completes the same outcome and charges once.
 A failed run's retry context stays private until its
-deterministic child is reserved/enqueued or refused by its job/key budget. The same
+deterministic child is reserved/enqueued or refused by its job/key budget. The 72 checks repeat these paths with compact summaries, UTC day/month rollovers
+and oversized standalone summaries. The same
 38-write/30-DO-request/five-invocation allowance covers these tested paths; separately
 billed retries each contribute their own allowance. Refused retries have no separate
 charge, so the paid parent includes their pause/log/cleanup overhead. The audit raises

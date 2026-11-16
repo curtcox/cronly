@@ -74,7 +74,7 @@ disagrees with it, this file wins and the other document is stale.
 | S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ✅ | Atomic versioned keyring, legacy reads, held per-secret re-encryption, edit/delete conflict protection, audit, scoped CLI and CI wiring verified. Persisted local Worker migrated v1 → v2 and executed a redacted JS run with v1 retired. [Operator procedure](docs/ops/secret-rotation.md). §3.3. |
 | S2 | Charge measured JS CPU instead of the configured limit | code | ⬜ | §3.4; needs per-invocation CPU data. |
 | S3 | Recalibrate prices from a month of real Cloudflare and Anthropic bills | ops/code | ⬜ | `docs/business/pricing.md`. |
-| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budget counters save 2–4 writes; unchanged alarms/runtime/recent-job indexes skip writes. Transactional reads/changes skip transient holds/expiry alarms; active day/month summaries share the balance row (two fewer ordinary settlement writes); repeated outcomes skip settings writes. Staged completion/private retry recovery is verified. The 24-path audit includes unfunded-retry pauses: 38 writes, 30 DO requests/five Worker invocations at 89 µ$/run after rounded floors. Further durable hold/ledger compaction remains. [Cost audit](docs/business/pricing.md). |
+| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budget counters save 2–4 writes; unchanged alarms/runtime/recent-job indexes skip writes. Transactional reads/changes skip transient holds/expiry alarms; active day/month summaries share the balance row (two fewer ordinary settlement writes); repeated outcomes skip settings writes. Staged completion/private retry recovery is verified. The 72-path audit covers compact, rollover and large-period states, including unfunded-retry pauses: 38 writes, 30 DO requests/five Worker invocations at 89 µ$/run after rounded floors. Further durable hold/ledger compaction remains. [Cost audit](docs/business/pricing.md). |
 
 ## Backlog
 
@@ -230,11 +230,14 @@ calendar days of billed counts rather than sampling retained logs.
   old periods; late settlements update their reserved periods. Oversized summaries
   remain standalone, keeping compact state below the storage value limit without
   exceeding the previous two-summary write allowance.
-- Lint and all 111 unit/integration tests pass, including migration, budget caps,
+- Lint and all 159 unit/integration tests pass, including migration, budget caps,
   deposit preservation, rollback after archive/receipt failures, cold reporting,
-  seven-day activity and all 24 full-path recovery cost checks.
+  seven-day activity and all 72 full-path recovery cost checks (compact, UTC rollover
+  and oversized periods across schedule/manual/action-test/webhook recovery).
 - All three browser flows, production dry-run bundle and real local SQLite/Queue
   acceptance pass (HTTP, JS, redaction, network denial, gateway and funded retry).
+  The local acceptance script now checks ledger/cost totals and each retry's
+  grouped cost, plus balance and spend preservation across duplicate deposits.
 - The 38-write worst-case bound and 89 µ$ price stay unchanged: rollover, late or
   oversized periods still need standalone writes. Durable hold/ledger compaction
   and L9–L14 owner/live acceptance remain outstanding.

@@ -43,5 +43,20 @@ assert.equal(retryRuns.find(run => run.id.endsWith(':retry')).status, 'success')
 assert(retryRuns.find(run => run.status === 'success').return_value.includes('acceptance-event'));
 assert.equal(retryRuns.reduce((sum, run) => sum + run.cost_microdollars, 0), 2 * price('run', { type: 'javascript', cpu_ms: 100, subrequests: 0 }) - PRICES.jsActivation);
 assert(retryRuns.every(run => !Object.hasOwn(run, 'retry') && !Object.hasOwn(run, 'completion')));
-assert.equal((await api('/api/account')).held_microdollars, 0);
-console.log('Local acceptance passed: deposits, dry runs, HTTP, JS, redaction, native network denial, gateway, and separately charged retries with preserved input. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
+const account = await api('/api/account');
+assert.equal(account.held_microdollars, 0);
+const transactions = (await api('/api/transactions')).items;
+const spent = -transactions.filter(row => row.kind !== 'deposit').reduce((sum, row) => sum + row.amount_microdollars, 0);
+assert.equal(account.balance_microdollars, transactions.reduce((sum, row) => sum + row.amount_microdollars, 0));
+assert.equal(transactions.filter(row => row.kind === 'run').length, 6);
+assert.equal((await api('/api/costs')).total_microdollars, spent);
+for (const group of ['job', 'action']) {
+  const costs = await api(`/api/costs?group=${group}`);
+  assert.equal(costs.total_microdollars, spent);
+  assert.equal(costs.items.find(row => row.name === 'retry').cost_microdollars, retryRuns.reduce((sum, run) => sum + run.cost_microdollars, 0));
+}
+await api('/api/dev/deposit', 'POST', { amount_microdollars: 1000 }, 'top-up');
+await api('/api/dev/deposit', 'POST', { amount_microdollars: 1000 }, 'top-up');
+assert.equal((await api('/api/account')).balance_microdollars, account.balance_microdollars + 1000);
+assert.equal((await api('/api/costs')).total_microdollars, spent);
+console.log('Local acceptance passed: deposits, dry runs, HTTP, JS, redaction, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement and spend preservation across deposits. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
