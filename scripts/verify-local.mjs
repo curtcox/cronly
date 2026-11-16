@@ -21,7 +21,7 @@ for (const [name, action] of Object.entries({
   gateway: { type: 'javascript', source: 'export default async ctx => { const result = await ctx.fetch("https://example.com"); return { status: result.status }; }', cpu_ms: 100, subrequests: 1 },
   retry: { type: 'javascript', source: 'export default async ctx => { if (!ctx.run.id.endsWith(":retry")) throw new Error("retry"); return { event: ctx.input.event }; }', cpu_ms: 100, subrequests: 0 }
 })) {
-  await api(`/api/actions/${name}`, 'PUT', action); await api(`/api/jobs/${name}`, 'PUT', { action: name, cron: null, retries: name === 'retry' ? 1 : 0 });
+  await api(`/api/actions/${name}`, 'PUT', action); await api(`/api/jobs/${name}`, 'PUT', { action: name, cron: null, retries: name === 'retry' ? 1 : 0, ...(name === 'http' ? { overlap: 'allow' } : {}) });
   await api(`/api/jobs/${name}/run`, 'POST', name === 'retry' ? { input: { event: 'acceptance-event' } } : {}, `run-${name}`);
 }
 // The shared activity index must retain the HTTP cooldown after switching jobs.

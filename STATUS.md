@@ -354,8 +354,11 @@ calendar days of billed counts rather than sampling retained logs.
 - Lint and all 287 unit/integration tests pass, including eight new migration,
   restart, eviction, rollback, billing and cooldown tests plus all 144 full-path
   cost checks. Dry runs, duplicate reservations and refusals do not alter activity.
-- The local Worker verifier now checks cross-job cooldowns and duplicate-run
-  protection. Browser, production dry-run and real SQLite/Queue acceptance for
-  this change are pending. The conservative 37-write allowance and 87 µ$ price
-  stay unchanged because eviction can still require a standalone write. S4 and
-  L9–L14 owner/live acceptance remain open; nothing was deployed to production.
+- All three browser flows and the production Worker dry-run build pass. Real local
+  SQLite/Queue acceptance verifies cross-job cooldowns and free duplicate runs,
+  HTTP, small/large JS snapshots, redaction, native network denial, counted gateway,
+  funded retries, ledger/cost agreement, archival and duplicate deposits. The HTTP
+  fixture allows overlap so its repeated-run assertion reaches the cooldown guard.
+- The conservative 37-write allowance and 87 µ$ price stay unchanged because
+  eviction can still require a standalone write. S4 and L9–L14 owner/live acceptance
+  remain open; nothing was deployed to production.
