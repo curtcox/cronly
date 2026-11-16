@@ -29,6 +29,8 @@ async function setup(failure, cap = PRICES.run + PRICES.hook) {
       if (op === 'prepare-run' && response.ok) throw new Error('reservation response lost');
       return response;
     });
+  } else if (failure === 'alarm') {
+    fault = vi.spyOn(job.storage, 'setAlarm').mockRejectedValue(new Error('alarm write failed'));
   } else {
     const put = job.storage.put.bind(job.storage);
     fault = vi.spyOn(job.storage, 'put').mockImplementation(async (key, value) => {
@@ -46,7 +48,7 @@ async function setup(failure, cap = PRICES.run + PRICES.hook) {
   return { env, account, messages, job: cold, hold, args };
 }
 
-for (const failure of ['response', 'pending']) {
+for (const failure of ['response', 'pending', 'alarm']) {
   it(`recovers a reserved run after a lost ${failure} with its original deadline, input and key cap`, async () => {
     const { env, account, messages, hold, args } = await setup(failure);
     await vi.advanceTimersByTimeAsync(30000);

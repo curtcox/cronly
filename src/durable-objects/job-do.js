@@ -121,7 +121,6 @@ export class JobDO {
       return { run: expired, cost_microdollars: 0 };
     }
     // A failed enqueue is retried from the durable pending row, without a second hold.
-    await this.arm();
     await this.send(run, settings);
     await this.arm(); return { run, cost_microdollars: 0, reserved_microdollars: reservation.amount };
   }
@@ -200,9 +199,17 @@ export class JobDO {
       const { expires_at, reserved_microdollars, attempt, key_id, enqueued } = run;
       summary.pending = { expires_at, reserved_microdollars, attempt, key_id, enqueued };
     }
-    if (full) await this.storage.transaction(async tx => {
-      await tx.put(`run:${id}`, run); await tx.put(`history:${id}`, summary);
+    const wake = summary.pending && !summary.pending.enqueued;
+    if (full || wake) await this.storage.transaction(async tx => {
+      if (full) await tx.put(`run:${id}`, run);
+      await tx.put(`history:${id}`, summary);
       if (settings) await tx.put('settings', settings);
+      // A pending outbox must never commit without a wakeup. The enqueue can fail
+      // or this object can restart immediately after this transaction commits.
+      if (wake) {
+        const next = Date.now() + 1000; const alarm = await tx.getAlarm();
+        if (alarm === null || alarm > next) await tx.setAlarm(next);
+      }
     });
     else await this.storage.put(`history:${id}`, summary);
     if (this.historyCache) this.historyCache = [summary, ...this.historyCache.filter(r => r.id !== id)];

@@ -56,7 +56,7 @@ disagrees with it, this file wins and the other document is stale.
 | L2 | Accounts and auth: Clerk sessions, Clerk webhook → AccountDO, API keys with scopes and daily spend caps, `API_ROUTES` access test | code | ✅ | Clerk/LocalDev auth, signed hashed scoped keys, revocation, daily caps and Clerk webhook; access coverage tests. §4.1. Port hashbin `src/auth/`. |
 | L3 | Money: µ$ ledger, reserve/settle/expire holds, Stripe deposits, history, `cost-policy.js`, `pricing.js`, price-floor tests, `/api/quote` | code | 🟨 | Transactional ledger/holds, signed Stripe webhook, itemized Checkout and quotes tested; S4 recovery/refused-retry audit and rounded floors set HTTP price to 89 µ$ and reads to 21 µ$ plus 2 µ$/job. Existing holds keep their maximum. Real deposit remains L14. §6, `docs/business/pricing.md`. Needs D4, D6. |
 | L4 | Definitions: variables, secrets (AES-GCM, write-only), HTTP actions, templates, change billing, audit log, dry run, idempotency | code | ✅ | Atomic billed CRUD, reference checks, AES-GCM write-only secrets, dry runs, audit and idempotency tested. §2, §3.3, §4.2. |
-| L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | ✅ | Real local Worker/Queue HTTP path verified; retries, missed/overlap, budgets, duplicate delivery, held snapshots, refusal pause and recovery tested. Replayed starts recover original deadlines, trigger/input and key identity from the reservation after a lost response/pending write; expired reservations never enqueue. Observed results stage before settlement; Queue redelivery/alarms recover completion and private retry dispatch after restart without repeating external work or charges. Retry input/key caps survive settlement; budget refusals clear the retry. §3, §3.1, §2.3. |
+| L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | ✅ | Real local Worker/Queue HTTP path verified; retries, missed/overlap, budgets, duplicate delivery, held snapshots, refusal pause and recovery tested. Initial pending runs and recovery alarms commit atomically. Replayed starts recover original deadlines, trigger/input and key identity from the reservation after a lost response/pending/alarm write; expired reservations never enqueue. Observed results stage before settlement; Queue redelivery/alarms recover completion and private retry dispatch after restart without repeating external work or charges. Retry input/key caps survive settlement; budget refusals clear the retry. §3, §3.1, §2.3. |
 | L6 | Runs, costs, upcoming, projection APIs; retention pruning | code | ✅ | Retained/deleted-job history, NDJSON, permanent UTC cost aggregates, ledger cursors, bounded upcoming, fast cron/DST projections and byte/retention bounds tested. §4.3, §6, §7. |
 | L7 | Triggers: run now, trigger tokens, `/hook/*`, per-token rate limits, CORS, `{{input.*}}` | code | ✅ | Manual runs, signed job-only tokens, revocation, token limits, input validation and hook-only CORS tested. §4.1. |
 | L8 | Web UI with balance + runway header on every signed-in page; Playwright tests | code | ✅ | All workspace pages, runtime status/runway, direct action tests, quote dialogs and logo implemented; mobile and browser save/run/escaping/cron flows pass. §5. |
@@ -254,3 +254,18 @@ calendar days of billed counts rather than sampling retained logs.
 - Lint and all 165 unit/integration tests pass, including the existing 72 full-path
   cost checks. No extra ordinary-path row writes or requests were introduced;
   published prices and existing holds are unchanged. Live acceptance remains L9–L14.
+
+## L5/S4 atomic pending wakeup acceptance — 2026-11-16
+
+- Initial pending-run metadata and its recovery alarm now commit in one JobDO
+  transaction before sending to the Queue. An alarm failure rolls back the pending
+  row and leaves the original reservation available for replay after restart.
+  The in-memory history cache updates only after the transaction commits.
+- This replaces the separate initial rearming step, preserving the existing
+  row-write allowance while avoiding an extra history scan before enqueue.
+- Lint and all 168 unit/integration tests pass, including nine initial-reservation
+  outage tests and all 72 full-path cost checks. All three browser flows, production
+  dry-run bundle and real local SQLite/Queue acceptance pass (HTTP, JavaScript,
+  redaction, native networking denial, gateway, funded retry and ledger/cost totals).
+- S4 durable hold/ledger compaction and L9–L14 owner/live acceptance remain open.
+  Nothing was deployed to production; published prices are unchanged.
