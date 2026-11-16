@@ -98,7 +98,15 @@ export class JobDO {
   }
   async start(args) {
     assert(this.env.COST_SAFETY_HARD_STOP !== 'true', 'cost_brake', 'Runs are paused by the operator', 503);
-    if (this.env.SAFETY) { const safety = await rpc(this.env.SAFETY, 'global', 'status'); if (safety.brake) { const settings = await this.storage.get('settings'); if (settings) { settings.paused = 'cost_brake'; await this.storage.put('settings', settings); await this.arm(); } assert(false, 'cost_brake', 'Runs are paused pending cost reconciliation', 503); } }
+    if (this.env.SAFETY && (await rpc(this.env.SAFETY, 'global', 'status')).brake) {
+      const prior = await this.storage.get('settings');
+      if (prior) {
+        const settings = { ...prior, paused: 'cost_brake' }; delete settings.resume_at;
+        if (JSON.stringify(settings) !== JSON.stringify(prior)) await this.storage.put('settings', settings);
+        await this.arm(); await this.publish(settings);
+      }
+      assert(false, 'cost_brake', 'Runs are paused pending cost reconciliation', 503);
+    }
     const settings = await this.storage.get('settings'); assert(settings?.job, 'not_found', 'Job not found', 404);
     const prior = await this.readRun(args.id); if (prior) return { run: prior, duplicate: true, cost_microdollars: 0 };
     let reservation;

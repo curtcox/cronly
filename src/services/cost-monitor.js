@@ -22,8 +22,7 @@ export function measuredCost(account) {
 /** Reconcile daily infrastructure against prepaid revenue; stale/missing analytics stops runs. */
 export async function runCostMonitor(env, now = Date.now()) {
   if (env.ENVIRONMENT === 'local') return { local: true };
-  const prior = await rpc(env.SAFETY, 'global', 'status');
-  let report; let registered = [];
+  let report;
   try {
     assert(env.CLOUDFLARE_ANALYTICS_TOKEN && env.CLOUDFLARE_ACCOUNT_ID && env.COST_SAFETY_DO_NAMESPACES, 'analytics_unconfigured', 'Analytics token, account and cronly namespace IDs are required', 503);
     const midnight = Date.parse(new Date(now).toISOString().slice(0, 10));
@@ -31,7 +30,7 @@ export async function runCostMonitor(env, now = Date.now()) {
     const response = await (env.ANALYTICS_FETCH || fetch)('https://api.cloudflare.com/client/v4/graphql', { method: 'POST', headers: { Authorization: `Bearer ${env.CLOUDFLARE_ANALYTICS_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ query: USAGE_QUERY, variables: { account: env.CLOUDFLARE_ACCOUNT_ID, start, end, scripts: ['cronly'], namespaces: env.COST_SAFETY_DO_NAMESPACES.split(',') } }), signal: AbortSignal.timeout(15000) });
     const data = await response.json(); assert(response.ok && !data.errors?.length && data.data?.viewer?.accounts?.[0], 'analytics_unavailable', 'Cloudflare analytics unavailable', 503);
     const observed = measuredCost(data.data.viewer.accounts[0]);
-    const accounts = await rpc(env.SAFETY, 'global', 'accounts'); registered = accounts.items; assert(accounts.items.length < 1000, 'registry_limit', 'Account registry requires pagination before expansion', 503);
+    const accounts = await rpc(env.SAFETY, 'global', 'accounts'); assert(accounts.items.length < 1000, 'registry_limit', 'Account registry requires pagination before expansion', 503);
     let revenue = 0; let estimated = 0;
     const day = new Date(now - 86400000).toISOString().slice(0, 10);
     for (const { account } of accounts.items) {
@@ -45,7 +44,13 @@ export async function runCostMonitor(env, now = Date.now()) {
     report = { checked_at: now, observed_microdollars: observed, estimated_microdollars: estimated, revenue_microdollars: revenue, projected_loss_microdollars: Math.ceil(projectedLoss), brake: projectedLoss > C.projectionBrakeCents * 10000, method: 'Cloudflare Worker/DO observations with conservative ledger allowance for Queue/sandbox costs' };
   } catch { report = { checked_at: now, brake: true, reason: 'Analytics missing, incomplete or unavailable; operator must investigate' }; }
   await rpc(env.SAFETY, 'global', 'record', { report });
-  if (prior.brake && !report.brake) for (const { account } of registered) await rpc(env.ACCOUNTS, account, 'resume-cost-jobs');
+  if (!report.brake) {
+    const pending = await rpc(env.SAFETY, 'global', 'resume-accounts');
+    for (const { account, version } of pending.items) {
+      await rpc(env.ACCOUNTS, account, 'resume-cost-jobs');
+      await rpc(env.SAFETY, 'global', 'resumed-account', { account, version });
+    }
+  }
   if (report.brake && env.ALERT_WEBHOOK_URL) await fetch(env.ALERT_WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'cronly cost safety brake is active. Inspect the private safety report.' }), signal: AbortSignal.timeout(10000) });
   return report;
 }

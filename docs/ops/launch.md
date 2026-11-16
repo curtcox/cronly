@@ -74,7 +74,11 @@ and Cloudflare account, with a separate Clerk application and Stripe product, as
 A global emergency stop is Worker variable COST_SAFETY_HARD_STOP=true. It is checked by
 JobDO, executor and gateway. The persisted daily cost brake also pauses schedules;
 missing/stale analytics fails closed. Clear the cause, rerun reconciliation and verify
-resumption. Do not defeat the brake to get a green launch check.
+resumption. A healthy report records pending account resumes atomically; if a resume
+request or acknowledgement fails, rerun reconciliation to finish the durable queue.
+New brake cycles supersede older acknowledgements. Analytics refusals
+publish the job's cost-brake pause to the account runtime without recurring settings
+writes. Do not defeat the brake to get a green launch check.
 
 ## Important operational limits
 

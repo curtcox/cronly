@@ -67,3 +67,42 @@ it('keeps a pause durable if configuration lookup fails during a wake', async ()
   expect(await job('status')).toEqual(settings);
   await job('wake'); expect((await job('status')).paused).toBe(null);
 });
+
+it('publishes analytics cost pauses and repairs publication without repeated writes', async () => {
+  const { env, account, job, object } = await setup();
+  env.SAFETY = { idFromName: id => id, get: () => ({ fetch: async () => Response.json({ brake: true }) }) };
+  const settings = { ...await job('status'), paused: 'budget_day', resume_at: Date.now() + 60000 };
+  await object.storage.put('settings', settings); await object.publish(settings);
+  const before = await account('account');
+  const fault = vi.spyOn(object, 'publish').mockRejectedValueOnce(new Error('publication unavailable'));
+  await expect(job('start', { id: 'blocked', input: {}, trigger: 'manual' })).rejects.toMatchObject({ status: 500 });
+  fault.mockRestore();
+  env.JOBS.objects.set('a:j', new JobDO({ storage: object.storage, blockConcurrencyWhile: fn => fn() }, env));
+  const put = vi.spyOn(object.storage, 'put');
+  const alarm = vi.spyOn(object.storage, 'setAlarm');
+  for (const id of ['blocked', 'again']) await expect(job('start', { id, input: {}, trigger: 'manual' })).rejects.toMatchObject({ status: 503, code: 'cost_brake' });
+  expect(put).not.toHaveBeenCalled(); expect(alarm).not.toHaveBeenCalled();
+  const paused = await job('status');
+  expect(paused).toMatchObject({ paused: 'cost_brake', last_outcome: 'success' });
+  expect(paused).not.toHaveProperty('resume_at');
+  const after = await account('account');
+  expect(after.job_runtime.j.paused).toBe('cost_brake');
+  expect(after.balance_microdollars).toBe(before.balance_microdollars);
+  expect(after.held_microdollars).toBe(0);
+  expect((await job('runs')).items).toHaveLength(1);
+});
+
+it('keeps the operator hard stop stateless so removing it permits scheduled work', async () => {
+  const { env, job, object } = await setup();
+  env.COST_SAFETY_HARD_STOP = 'true';
+  const before = await job('status');
+  const put = vi.spyOn(object.storage, 'put');
+  const send = vi.spyOn(env.RUN_QUEUE, 'send');
+  await expect(job('start', { id: 'blocked', input: {}, trigger: 'schedule' })).rejects.toMatchObject({ status: 503, code: 'cost_brake' });
+  expect(put).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
+  expect(await job('status')).toEqual(before);
+  env.COST_SAFETY_HARD_STOP = 'false';
+  await vi.advanceTimersByTimeAsync(3600000); await object.alarm();
+  expect(send).toHaveBeenCalledTimes(1);
+  expect((await job('status')).paused).toBe(null);
+});

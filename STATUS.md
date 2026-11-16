@@ -63,7 +63,7 @@ disagrees with it, this file wins and the other document is stale.
 | L9 | Prose: free cron explain; Claude to-cron, ask, change proposals + apply; holds and billing; to-cron eval | code/ops | 🟨 | Structured client, held read-only conversations, usage billing, separate stale-checked proposals and 100-case two-model eval implemented. Live eval requires owner Anthropic access. §3.5. Needs D3 and an Anthropic API key (ops). |
 | L10 | JavaScript actions: sandbox, outbound gateway, CPU/subrequest limits and pricing, editor | code/ops | 🟨 | Content-addressed Worker Loader, blocked native networking, counted gateway, daily activation settlement and editor implemented; real local JS succeeds. Activation follows the claim's UTC day and discounts only settled payments, including concurrent claims and safety refunds; reserved budget periods stay unchanged. Real SQLite/Queue verifies one activation across three jobs sharing a version. Shared redaction runs inside the sandbox before console/return truncation; its code participates in version/activation hashing. Live CPU-limit acceptance required. §2.2, §3.4. Needs D2. |
 | L11 | Agent surface: OpenAPI + drift test, `llms.txt`, agent docs, MCP server, `/api/config`, browser snippet | code | ✅ | Atomic config with conflict checks, OpenAPI drift test, scoped MCP protocol tests, llms.txt/agent docs and immutable SHA-384 SRI trigger SDK verified. §4.4, §4.5. |
-| L12 | Abuse and cost safety: limits, destination rules, rate-limit rules, daily cost reconciliation and brake, invite-only sign-up | code/ops | 🟨 | Account/job/destination caps, native ingress limiter, destination checks, conservative daily analytics reconciliation and stale-report brake implemented. Live schema/WAF/billing alerts and Clerk Restricted mode remain owner steps. §8. |
+| L12 | Abuse and cost safety: limits, destination rules, rate-limit rules, daily cost reconciliation and brake, invite-only sign-up | code/ops | 🟨 | Account/job/destination caps, native ingress limiter, destination checks, conservative daily analytics reconciliation and stale-report brake implemented. Brake recovery uses versioned durable account outboxes, surviving partial enqueue/ack failures and cold restarts. Analytics pauses publish runtime and repeated refusals skip settings writes. Live schema/WAF/billing alerts and Clerk Restricted mode remain owner steps. §8. |
 | L13 | Terms of Service and Privacy Policy (acceptable use, refunds, suspension) | legal | 🟨 | Service-specific drafts prepared; owner directed shared entity/jurisdiction with hashbin and separate contacts, approving placeholders for now. Offline profile renders escaped facts into both drafts with drift checks; approved-launch deploys require complete pinned facts. Actual facts, cronly contacts and policy approval remain. Checkout is gated by launch approval. |
 | L14 | Production: cronly.org DNS and custom domain, live Clerk and Stripe, secrets, end-to-end test with a real deposit, `verify:production` | ops | 🟨 | Custom-domain config, guarded CI deploy, secret upload, production verifier and live sandbox acceptance script prepared; provision credentials/DNS and perform real deposit/live acceptance per docs/ops/launch.md. §10.13. |
 
@@ -461,3 +461,18 @@ calendar days of billed counts rather than sampling retained logs.
   original input and one charge per attempt. Prices and cost bounds are unchanged.
 - No production deployment or live acceptance was performed; L9–L14 owner steps
   and further S4 reductions remain open.
+
+## L5/L12 durable cost-brake recovery — 2026-11-16
+
+- A healthy safety report atomically creates versioned account-resume outboxes.
+  Later reconciliation retries unfinished accounts after failed enqueue or
+  acknowledgement, including cold restarts. Old acknowledgements cannot erase a
+  newer recovery, and already acknowledged accounts are not enqueued again.
+- Analytics pauses publish the cost-brake reason to account runtime, remove stale
+  budget-reset deadlines and avoid repeated settings/alarm writes. Replayed
+  refusals repair failed publication. The operator hard stop remains stateless so
+  removing it permits schedules to continue. Malformed timestamps fail closed.
+- Lint, all 342 unit/integration tests, all four browser flows, the production
+  dry-run build and real local SQLite/Queue acceptance pass. HTTP prices and cost
+  bounds are unchanged. No production deployment or live acceptance was performed;
+  L9–L14 live/owner/legal steps and further S4 reductions remain open.
