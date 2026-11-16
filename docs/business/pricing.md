@@ -83,6 +83,8 @@ S3 recalibrates from actual bills. S4 has removed 2–4 separate budget-counter 
 per run and avoids unchanged alarm/runtime/recent-job writes. Transactional reads
 and changes also skip transient holds and their expiry alarms while enforcing the
 same balance and budget checks. External work still requires durable holds.
+Repeated run outcomes skip the unchanged job-settings write. Changed outcomes are
+saved atomically with completed logs; the worst-case bound still includes that write.
 
 Pending-run metadata now shares the compact history row, saving another write per
 run. Completed logs and summaries commit atomically. Legacy queued records remain

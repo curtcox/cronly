@@ -74,7 +74,7 @@ disagrees with it, this file wins and the other document is stale.
 | S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ✅ | Atomic versioned keyring, legacy reads, held per-secret re-encryption, edit/delete conflict protection, audit, scoped CLI and CI wiring verified. Persisted local Worker migrated v1 → v2 and executed a redacted JS run with v1 retired. [Operator procedure](docs/ops/secret-rotation.md). §3.3. |
 | S2 | Charge measured JS CPU instead of the configured limit | code | ⬜ | §3.4; needs per-invocation CPU data. |
 | S3 | Recalibrate prices from a month of real Cloudflare and Anthropic bills | ops/code | ⬜ | `docs/business/pricing.md`. |
-| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budget counters save 2–4 writes; unchanged alarms/runtime/recent-job indexes skip writes. Full-path HTTP cost guards cover redirects, cold history, pruning and safety. Compact pending runs reduce the bound to 33 writes/24 requests and the run price to 78 µ$; transactional reads/changes skip transient holds and expiry alarms. Further durable hold/ledger compaction remains. [Cost audit](docs/business/pricing.md). |
+| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budget counters save 2–4 writes; unchanged alarms/runtime/recent-job indexes skip writes. Full-path HTTP cost guards cover redirects, cold history, pruning and safety. Compact pending runs reduce the bound to 33 writes/24 requests and the run price to 78 µ$; transactional reads/changes skip transient holds and expiry alarms. Repeated outcomes skip a settings write; changed outcomes commit with logs and redelivery repairs publication. Further durable hold/ledger compaction remains. [Cost audit](docs/business/pricing.md). |
 
 ## Backlog
 
@@ -153,3 +153,14 @@ calendar days of billed counts rather than sampling retained logs.
   redaction, native network denial, counted gateway access and released holds.
 - Further durable hold/ledger compaction remains S4 work. L9–L14 live acceptance and
   owner/legal inputs are unchanged; nothing was deployed to production.
+
+## S4 completion settings acceptance — 2026-11-16
+
+- Repeated completion outcomes skip the redundant job-settings write. Changed
+  outcomes commit in the same transaction as the completed log and compact index.
+- Storage-failure rollback, cold restart, single-charge recovery and replay after a
+  failed cross-object outcome publication are tested. Replaying an older completion
+  publishes the current settings rather than overwriting a newer outcome.
+- Lint, 70 unit/integration tests, all three browser flows and the production dry-run
+  build pass. The worst-case write bound and 78 µ$ price
+  are unchanged because a changed outcome still needs its settings write.

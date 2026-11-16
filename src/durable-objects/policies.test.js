@@ -150,3 +150,56 @@ it('rolls back the completed log and index together and retries settlement once'
   expect((await job.summaries())[0].status).toBe('success');
   expect((await call('account')).balance_microdollars).toBe(before - 78);
 });
+
+it('skips unchanged completion settings and commits a changed outcome with its log', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
+  const { env, job, call } = await setup();
+  await rpc(env.JOBS, 'a:j', 'start', { id: 'first', input: {}, trigger: 'manual' });
+  await job.result({ id: 'first', result: { status: 'success' } });
+  await vi.advanceTimersByTimeAsync(60000);
+  await rpc(env.JOBS, 'a:j', 'start', { id: 'second', input: {}, trigger: 'manual' });
+  const put = vi.spyOn(job.storage, 'put');
+  await job.result({ id: 'second', result: { status: 'success' } });
+  expect(put.mock.calls.some(([key]) => key === 'settings')).toBe(false);
+  put.mockRestore();
+  await vi.advanceTimersByTimeAsync(60000);
+  await rpc(env.JOBS, 'a:j', 'start', { id: 'third', input: {}, trigger: 'manual' });
+  const original = job.storage.put.bind(job.storage);
+  const failure = vi.spyOn(job.storage, 'put').mockImplementation(async (key, value) => {
+    if (key === 'settings') throw new Error('settings failure');
+    return original(key, value);
+  });
+  const args = { id: 'third', result: { status: 'failure' } };
+  await expect(job.result(args)).rejects.toThrow('settings failure');
+  expect(await job.storage.get('run:third')).toBeUndefined();
+  expect((await job.summaries()).find(r => r.id === 'third').status).toBe('queued');
+  expect((await job.storage.get('settings')).last_outcome).toBe('success');
+  failure.mockRestore();
+  const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
+  await cold.result(args);
+  expect((await cold.storage.get('settings')).last_outcome).toBe('failure');
+  expect((await call('account')).job_runtime.j.last_outcome).toBe('failure');
+  const ledger = (await call('list', { prefix: 'ledger:' })).items;
+  expect(ledger.filter(row => row.id === 'third')).toHaveLength(1);
+});
+
+it('repairs a lost completion publication after restart without billing again', async () => {
+  const { env, job, call } = await setup();
+  await rpc(env.JOBS, 'a:j', 'start', { id: 'r', input: {}, trigger: 'manual' });
+  const publication = vi.spyOn(job, 'publish').mockRejectedValueOnce(new Error('account unavailable'));
+  const args = { id: 'r', result: { status: 'success' } };
+  await expect(job.result(args)).rejects.toThrow('account unavailable');
+  expect((await job.storage.get('run:r')).status).toBe('success');
+  expect((await call('account')).job_runtime.j.last_outcome).toBe(null);
+  publication.mockRestore();
+  const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
+  const balance = (await call('account')).balance_microdollars;
+  expect(await cold.result(args)).toEqual({ duplicate: true });
+  expect((await call('account')).job_runtime.j.last_outcome).toBe('success');
+  expect((await call('account')).balance_microdollars).toBe(balance);
+  // Replaying an older completion must publish the current outcome, not the old one.
+  const settings = await job.storage.get('settings');
+  await job.storage.put('settings', { ...settings, last_outcome: 'failure' });
+  await cold.result(args);
+  expect((await call('account')).job_runtime.j.last_outcome).toBe('failure');
+});

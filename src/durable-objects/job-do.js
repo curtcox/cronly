@@ -120,14 +120,20 @@ export class JobDO {
   }
   async result(args) {
     const run = await this.readRun(args.id); assert(run, 'not_found', 'Run not found', 404);
-    if (run.status === 'success' || run.status === 'failure' || run.status === 'expired') return { duplicate: true };
     const settings = await this.storage.get('settings');
+    if (run.status === 'success' || run.status === 'failure' || run.status === 'expired') {
+      // A committed outcome may still need its cross-object publication or cleanup.
+      await this.publish(settings); await this.prune(); await this.arm();
+      return { duplicate: true };
+    }
     const retryData = args.result.status === 'failure' && run.attempt < (settings.job?.retries || 0) ? await rpc(this.env.ACCOUNTS, settings.account, 'retry-data', { id: args.id }) : {};
     const receipt = await rpc(this.env.ACCOUNTS, settings.account, 'settle', { id: args.id, actual: args.result.charge_microdollars ?? run.reserved_microdollars });
     const result = { ...run, ...args.result, id: run.id, job: run.job, cost_microdollars: receipt.charged, subrequests: receipt.gateway_count ?? args.result.subrequests ?? 0, finished_at: Date.now() };
     delete result.input; delete result.key_id;
-    await this.history(result, true);
-    settings.last_outcome = result.status; await this.storage.put('settings', settings); await this.publish(settings);
+    const changed = settings.last_outcome !== result.status;
+    settings.last_outcome = result.status;
+    await this.history(result, true, changed ? settings : null);
+    await this.publish(settings);
     if (result.status === 'failure' && run.attempt < (settings.job?.retries || 0)) {
       try { await this.start({ id: `${args.id}:retry`, trigger: run.trigger, scheduled_at: run.scheduled_at, input: retryData.input || {}, key_id: run.key_id, retry: true, attempt: run.attempt + 1 }); }
       catch { /* Refusal has paused the job or capped the retry; never retry unfunded work. */ }
@@ -147,7 +153,7 @@ export class JobDO {
     // Older pending records kept their full metadata in a separate run row.
     return pending ? { ...publicSummary, ...pending } : (await this.storage.get(`run:${summary.id}`)) || publicSummary;
   }
-  async history(run, full = false) {
+  async history(run, full = false, settings = null) {
     const { id, job, status, created_at, trigger, scheduled_at, finished_at, cost_microdollars, http_status, reason } = run;
     const summary = { id, job, status, created_at, trigger, scheduled_at, finished_at, cost_microdollars, http_status, reason };
     // Pending metadata fits in the compact index; only completed logs need a body row.
@@ -157,6 +163,7 @@ export class JobDO {
     }
     if (full) await this.storage.transaction(async tx => {
       await tx.put(`run:${id}`, run); await tx.put(`history:${id}`, summary);
+      if (settings) await tx.put('settings', settings);
     });
     else await this.storage.put(`history:${id}`, summary);
     if (this.historyCache) this.historyCache = [summary, ...this.historyCache.filter(r => r.id !== id)];
