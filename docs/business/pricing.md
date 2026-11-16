@@ -4,19 +4,19 @@ Audited 2026-11-15. D4–D6 approved the proposed launch defaults and upward cor
 required by cost floors. The implementation audit found two material planning errors:
 per-read transactional ledger writes cost more than a 1 µ$ read, and prose's original
 1.5× markup fails the 1.5× margin after the 8% haircut. Dynamic Workers also now charge
-for distinct worker versions used each day. The public pricing page reads the same
+for distinct worker versions used each day. Indexing/retention and bounded history scans are included in the final rates. The public pricing page reads the same
 constants as the API; historical numbers in the master plan are superseded here.
 
 ## Current prices
 
 | Operation | Price | Estimated worst-case marginal cost |
 |---|---|---|
-| HTTP run | 50 µ$ | ceil(policy run bound), currently 29 µ$ |
+| HTTP run | 60 µ$ | ceil(policy run bound), currently 36 µ$ |
 | Webhook run | HTTP/JS price + 5 µ$ | run bound + 1 µ$ |
 | Change: action, variable, secret, job, key, trigger | 100 µ$ | 20 µ$ |
-| API-key read | 20 µ$ | 12 µ$ including reservation/settlement and key counters |
+| API-key read | 20 µ$ base + 2 µ$ per job scanned for aggregate history | 12 µ$ base + 1.2 µ$/job |
 | Web session reads, cron explain, quotes, mutation dry runs | Free, rate-limited | Bounded fixed operating cost |
-| JavaScript run | 50 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
+| JavaScript run | 60 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
 | JS daily activation | 3,300 µ$ on first invocation of each action version per UTC day | 2,000 µ$ provider activation |
 | Prose | ceil(1.64 × actual model-token cost) + 500 µ$ | actual tokens + bookkeeping |
 
@@ -26,7 +26,7 @@ configuration contribute to the content hash. CPU is billed at the configured li
 until per-invocation measured CPU is available (S2). Retries are separately reserved
 and charged as runs. Queue redelivery never repeats a claimed outbound operation.
 
-A regular hourly HTTP job is about $0.036 per 30 days; a minutely job is $2.16. These
+A regular hourly HTTP job is about $0.0432 per 30 days; a minutely job is $2.592. These
 are run charges only. Changes, API polling, prose and JS activation are additional.
 
 ## Units and deposits
@@ -49,8 +49,8 @@ reviewed Terms and applicable law.
 
 Rates live only in `src/utils/cost-policy.js`; prices only in `src/utils/pricing.js`;
 model rates only in `src/utils/llm-policy.js`. Included allowances are ignored.
-The HTTP bound includes 20 row writes, 12 DO requests, queue retry allowance, CPU,
-awake time and 16 KB retained logs. Read and change bounds include actual ledger,
+The HTTP bound includes 24 row writes, 12 DO requests and 3,000 compact-index row reads, queue retry allowance, CPU,
+awake time and 16 KB retained logs; orchestration caches compact summaries instead of loading log bodies. Read and change bounds include actual ledger,
 key-budget, audit and rate-counter bookkeeping rather than just one request.
 Permanent cost summaries share the account's existing daily/monthly counter writes.
 

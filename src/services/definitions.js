@@ -48,6 +48,7 @@ export function normalize(kind, value) {
 }
 /** Validate the resulting whole graph so deletions cannot strand active definitions. */
 export function validateConfig(config, profile, now = Date.now()) {
+  assert(new TextEncoder().encode(JSON.stringify(config)).length <= 1048576, 'config_size_limit', 'Total account definitions must fit within 1 MB', 413);
   const limit = now - profile.created_at < 7 * 86400000 ? COST_POLICY.newAccountMaxJobs : COST_POLICY.maxJobs;
   assert(Object.keys(config.jobs).length <= limit, 'job_limit', `Account job limit is ${limit}`);
   for (const action of Object.values(config.actions)) {

@@ -38,3 +38,21 @@ test('quotes before depositing or saving, escapes definitions and previews cron'
   await page.getByRole('link', { name: 'Runs', exact: true }).click(); await expect(page.locator('table')).toContainText('pinger');
   await page.screenshot({ path: '/tmp/cronly-workspace.png', fullPage: true });
 });
+
+test('keeps balance visible across workspace pages and tests an action without a job', async ({ page }) => {
+  await login(page);
+  const user = await page.evaluate(() => sessionStorage.getItem('cronly-local-user'));
+  const headers = { Authorization: `LocalDev ${user}` };
+  await page.request.post('/api/dev/deposit', { headers, data: { amount_microdollars: 5000000 } });
+  await page.request.put('/api/actions/ping', { headers, data: { url: 'https://example.com' } });
+  for (const [link, heading] of [['Jobs', 'Jobs'], ['Actions', 'Actions'], ['Variables', 'Variables'], ['Secrets', 'Secrets'], ['Upcoming', 'Upcoming'], ['Runs', 'Runs'], ['Costs', 'Costs'], ['Ask', 'Ask cronly'], ['Account', 'Account'], ['Dashboard', 'Dashboard']]) {
+    await page.getByRole('link', { name: link, exact: true }).click();
+    await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+    await expect(page.locator('#account-strip')).toBeVisible();
+  }
+  await page.getByRole('link', { name: 'Actions', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: 'Review test run', exact: true }).click();
+  await expect(page.locator('#review-price')).toContainText('60 µ$'); await apply(page);
+  await expect(page.locator('#notice')).toContainText('Test queued');
+});

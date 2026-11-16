@@ -19,7 +19,7 @@ it('reserves and separately charges each immediate retry', async () => {
   for (let index = 0; index < 3; index++) await consume({ body: messages[index], ack() {} }, env, {});
   expect(messages).toHaveLength(3);
   const runs = (await rpc(env.JOBS, 'a:j', 'runs')).items;
-  expect(runs.every(r => r.status === 'failure' && r.cost_microdollars === 50)).toBe(true);
+  expect(runs.every(r => r.status === 'failure' && r.cost_microdollars === 60)).toBe(true);
   expect((await call('account')).held_microdollars).toBe(0);
 });
 it('pauses a daily budget until the next UTC window', async () => {
@@ -43,8 +43,8 @@ it('skips missed runs or runs once, and deduplicates repeated alarm delivery', a
 });
 it('prunes expired and excess logs while preserving recent history', async () => {
   const { job } = await setup();
-  for (let i = 0; i < 1005; i++) await job.storage.put(`run:${i}`, { id: String(i), created_at: Date.now() - i, status: 'success' });
-  await job.storage.put('run:old', { id: 'old', created_at: Date.now() - 31 * 86400000, status: 'success' });
+  for (let i = 0; i < 1005; i++) { const run = { id: String(i), created_at: Date.now() - i, status: 'success' }; await job.storage.put(`run:${i}`, run); await job.history(run); }
+  const old = { id: 'old', created_at: Date.now() - 31 * 86400000, status: 'success' }; await job.storage.put('run:old', old); await job.history(old);
   await job.prune(); expect((await job.storage.list({ prefix: 'run:' })).size).toBe(1000); expect(await job.storage.get('run:old')).toBeUndefined();
 });
 it('keeps the total redacted log within the paid byte limit', async () => {

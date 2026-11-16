@@ -40,7 +40,7 @@ it('enforces scoped keys and includes read spending in daily caps', async () => 
   expect(key.token).toMatch(/^crk_/);
   const request = (path, method = 'GET') => worker.fetch(new Request(`https://cronly.org${path}`, { method, headers: { Authorization: `ApiKey ${key.token}` } }), env);
   expect((await request('/api/account')).status).toBe(200);
-  expect((await request('/api/account')).status).toBe(402);
+  expect((await request('/api/account?dry_run=1')).status).toBe(402);
   expect((await request('/api/variables/x', 'PUT')).status).toBe(403);
   await api(`/api/keys/${key.id}`, 'DELETE'); expect((await request('/api/account')).status).toBe(401);
 });

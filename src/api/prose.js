@@ -2,6 +2,7 @@ import { ApiError, assert, readJson } from '../utils/errors.js';
 import { rpc } from '../utils/rpc.js';
 import { callProse, proseQuote } from '../services/llm.js';
 import { explainCron } from '../services/cron.js';
+import { PRICES } from '../utils/pricing.js';
 import { digest } from '../auth/crypto.js';
 import { retainedRuns } from './reporting.js';
 import { projection } from '../services/reporting.js';
@@ -42,7 +43,8 @@ export async function prose(route, request, env, auth) {
   } catch (error) {
     // The provider may have done billable work even if the response was lost or invalid.
     const failure = error instanceof ApiError ? error : new ApiError(502, 'invalid_prose_response', 'Invalid prose provider response');
-    const cost = knownCharge ?? quote;
+    const knownTokens = error.details?.known_token_cost_microdollars;
+    const cost = knownCharge ?? (knownTokens === undefined ? quote : Math.min(quote, Math.ceil(knownTokens * PRICES.proseMarkup) + PRICES.proseBase));
     await rpc(env.ACCOUNTS, auth.account, 'finish-prose', { id, actual: cost, response: { failed: true, error: failure.message, code: failure.code, cost_microdollars: cost } });
     failure.details = { ...failure.details, cost_microdollars: cost }; throw failure;
   }

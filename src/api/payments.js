@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import { assert, readJson } from '../utils/errors.js';
+import { assert, readJson, readText } from '../utils/errors.js';
 import { rpc } from '../utils/rpc.js';
 import { grossUp, COST_POLICY } from '../utils/cost-policy.js';
 import { PRICES } from '../utils/pricing.js';
@@ -29,8 +29,8 @@ export async function checkout(request, env, auth, dryRun) {
 export async function stripeWebhook(request, env) {
   assert(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET, 'payments_unavailable', 'Payments are not configured', 503);
   const stripe = new Stripe(env.STRIPE_SECRET_KEY, { httpClient: Stripe.createFetchHttpClient() });
-  let event;
-  try { event = await stripe.webhooks.constructEventAsync(await request.text(), request.headers.get('stripe-signature'), env.STRIPE_WEBHOOK_SECRET, undefined, Stripe.createSubtleCryptoProvider()); }
+  let event; const payload = await readText(request);
+  try { event = await stripe.webhooks.constructEventAsync(payload, request.headers.get('stripe-signature'), env.STRIPE_WEBHOOK_SECRET, undefined, Stripe.createSubtleCryptoProvider()); }
   catch { assert(false, 'invalid_signature', 'Invalid webhook signature', 400); }
   if (!['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(event.type)) return { received: true };
   const session = event.data.object;
@@ -38,7 +38,8 @@ export async function stripeWebhook(request, env) {
   const credit = Number(session.metadata.credit_cents);
   assert(session.mode === 'payment' && session.currency === 'usd' && session.client_reference_id === session.metadata.account && Number.isSafeInteger(credit) && credit >= PRICES.minimumDepositCents && credit <= 100000 && session.amount_total === grossUp(credit), 'invalid_payment', 'Payment does not match credited amount');
   await rpc(env.ACCOUNTS, session.client_reference_id, 'init', { account: session.client_reference_id });
-  await rpc(env.ACCOUNTS, session.client_reference_id, 'deposit', { id: session.id, amount: credit * 10000 });
+  const deposit = await rpc(env.ACCOUNTS, session.client_reference_id, 'deposit', { id: session.id, amount: credit * 10000 });
+  if (deposit.duplicate) return { received: true };
   // Balance-paused jobs are nudged; their next reservation remains authoritative.
   const config = await rpc(env.ACCOUNTS, session.client_reference_id, 'config');
   for (const name of Object.keys(config.jobs)) await rpc(env.JOBS, `${session.client_reference_id}:${name}`, 'wake', {});

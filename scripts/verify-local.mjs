@@ -26,7 +26,12 @@ while (Date.now() < deadline) {
   if (runs.length === 4 && runs.every(r => ['success', 'failure'].includes(r.status))) break;
   await new Promise(resolve => setTimeout(resolve, 1000));
 }
-assert.equal(runs.length, 4); assert(!JSON.stringify(runs).includes('acceptance-secret'));
+assert.equal(runs.length, 4);
+const details = await Promise.all(runs.map(run => api(`/api/runs/${encodeURIComponent(run.id)}`)));
+assert(!JSON.stringify(details).includes('acceptance-secret'));
+assert(details.find(result => result.run.job === 'js').run.console.includes('«secret:token»'));
+assert(details.find(result => result.run.job === 'gateway').run.return_value.includes('200'));
+assert.equal(details.find(result => result.run.job === 'gateway').run.subrequests, 1);
 for (const name of ['http', 'js', 'gateway']) assert.equal(runs.find(r => r.job === name).status, 'success', `${name} did not succeed`);
 for (const name of ['blocked']) assert.equal(runs.find(r => r.job === name).status, 'failure', `${name} escaped sandbox limits`);
 assert.equal((await api('/api/account')).held_microdollars, 0);

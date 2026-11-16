@@ -8,6 +8,7 @@ it('keeps every price above the cost floor, including JS extremes', () => {
       expect(passesFloor(op, action), `${op}: ${JSON.stringify(action)}`).toBe(true);
     }
   }
+  expect(passesFloor('read', { job_count: 100 })).toBe(true);
   expect(PRICES.proseMarkup * COST_POLICY.revenueKept).toBeGreaterThanOrEqual(1.5);
 });
 it('passes payment costs through without reducing the credited deposit', () => {

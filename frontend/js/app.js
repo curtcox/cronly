@@ -2,6 +2,7 @@ import { api, settings, setAuth, getLocalUser, signOut, escapeHtml as e, dollars
 import { Cron } from '../vendor/croner.js';
 const $ = selector => document.querySelector(selector);
 const content = $('#content');
+let runsQuery = '';
 let renderVersion = 0;
 const currentPage = () => location.hash.slice(1) || 'dashboard';
 let config; let account; let forecast; let deployment; let pendingApply; let editing = null;
@@ -39,7 +40,7 @@ $('#sign-out').addEventListener('click', signOut);
 async function refreshHeader() {
   [account, forecast, { config }] = await Promise.all([api('/api/account'), api('/api/projection'), api('/api/config')]);
   const days = forecast.runway_days; const balancePaused = Object.values(account.job_runtime || {}).some(j => j.paused === 'insufficient_balance');
-  const runway = forecast.more_than_a_year ? 'Actions run for more than a year' : `Actions run until ${new Date(forecast.runs_until).toLocaleDateString()}`;
+  const runway = !forecast.daily_microdollars ? 'No scheduled spend at the current settings' : forecast.more_than_a_year ? 'Actions run for more than a year' : `Actions run until ${new Date(forecast.runs_until).toLocaleDateString()}`;
   $('#account-strip').hidden = false;
   $('#account-strip').className = `account-strip${balancePaused || (days !== null && days < 1) ? ' red' : days !== null && days < 7 ? ' amber' : ''}`;
   $('#account-strip').innerHTML = `<strong>Balance ${e(usd(account.balance_microdollars))}</strong><span>${e(runway)}${balancePaused ? ' · A job is paused for balance' : ''}</span><span class="small">Held ${e(usd(account.held_microdollars))}</span><a href="#account">Add credit →</a>`;
@@ -55,7 +56,7 @@ function definitionList(kind) {
 }
 function definitionForm(kind) {
   const value = editing ? config[kind][editing] : undefined;
-  const name = `<label>Name<input name="name" pattern="[a-z0-9-]{1,64}" maxlength="64" required value="${e(editing || '')}" ${editing ? 'readonly' : ''}></label>`;
+  const name = `<label>Name<input name="name" pattern="[a-z0-9\\-]{1,64}" maxlength="64" required value="${e(editing || '')}" ${editing ? 'readonly' : ''}></label>`;
   let fields;
   if (kind === 'variables' || kind === 'secrets') fields = `${name}<label>${kind === 'secrets' ? 'New secret value (write-only)' : 'Value'}<${kind === 'secrets' ? 'input type="password" autocomplete="new-password"' : 'textarea rows="4"'} name="value" required>${kind === 'variables' ? e(value || '') + '</textarea>' : ''}${kind === 'secrets' ? '' : ''}</label><p class="note">${kind === 'secrets' ? 'Existing values cannot be read. Saving replaces the encrypted value.' : 'Available in actions as {{var.NAME}}.'}</p>`;
   if (kind === 'actions') {
@@ -85,7 +86,12 @@ function updateJsPrice() {
   $('#js-price').textContent = `Maximum per run: ${usd(p.run + p.jsActivation + Math.ceil(cpu * p.jsCpuMs) + sub * p.jsSubrequest)}. Includes ${usd(p.jsActivation)} activation, charged only on the first use of this version per UTC day.`;
 }
 async function definitionsPage(kind) {
-  content.innerHTML = `<div class="row-header"><div><h1 class="app-title">${e(kind[0].toUpperCase() + kind.slice(1))}</h1><p class="muted">Named, reusable pieces of your schedule.</p></div></div><div class="grid"><section class="panel"><h2>Your ${e(kind)}</h2>${definitionList(kind)}${kind === 'jobs' ? `<p class="note">Projected monthly spend and budgets are on <a href="#costs">Costs</a>. Runs start within a few seconds of the scheduled minute.</p>` : ''}</section><section class="panel"><h2>${editing ? `Edit ${e(editing)}` : `New ${e(kind.slice(0, -1))}`}</h2>${definitionForm(kind)}${editing && kind === 'jobs' ? '<div class="section"><h3>Trigger tokens</h3><button id="create-trigger" class="secondary">Review new trigger</button><div id="triggers"></div></div>' : ''}${editing && ['actions', 'jobs'].includes(kind) ? `<h3>Use from a script</h3><pre>curl -X ${kind === 'jobs' ? 'POST' : 'GET'} https://cronly.org/api/${kind}/${e(editing)}${kind === 'jobs' ? '/run' : ''} \\\n  -H 'Authorization: ApiKey YOUR_KEY'</pre>${kind === 'actions' ? '<button id="test-action" class="secondary">Review test run</button>' : ''}` : ''}</section></div>`;
+  content.innerHTML = `<div class="row-header"><div><h1 class="app-title">${e(kind[0].toUpperCase() + kind.slice(1))}</h1><p class="muted">Named, reusable pieces of your schedule.</p></div></div><div class="grid"><section class="panel"><h2>Your ${e(kind)}</h2>${definitionList(kind)}${kind === 'jobs' ? `<p class="note">Projected monthly spend and budgets are on <a href="#costs">Costs</a>. Runs start within a few seconds of the scheduled minute.</p>` : ''}</section><section class="panel"><h2>${editing ? `Edit ${e(editing)}` : `New ${e(kind.slice(0, -1))}`}</h2>${definitionForm(kind)}${editing && kind === 'jobs' ? '<div class="section"><h3>Trigger tokens</h3><button id="create-trigger" class="secondary">Review new trigger</button><div id="triggers"></div></div>' : ''}${editing && ['actions', 'jobs'].includes(kind) ? `<h3>Use from a script</h3><pre>curl -X ${kind === 'jobs' ? 'POST' : 'GET'} https://cronly.org/api/${kind}/${e(editing)}${kind === 'jobs' ? '/run' : ''} \\\n  -H 'Authorization: ApiKey YOUR_KEY'
+
+fetch('https://cronly.org/api/${kind}/${e(editing)}${kind === 'jobs' ? '/run' : ''}', {
+  method: '${kind === 'jobs' ? 'POST' : 'GET'}',
+  headers: { Authorization: 'ApiKey YOUR_KEY' }
+});</pre>${kind === 'actions' ? '<button id="test-action" class="secondary">Review test run</button>' : ''}` : ''}</section></div>`;
   cronPreview(); updateJsPrice();
   if (editing && kind === 'jobs') {
     const result = await api(`/api/jobs/${editing}/triggers`);
@@ -96,12 +102,13 @@ async function definitionsPage(kind) {
 async function upcomingPage() {
   const result = await api('/api/upcoming?limit=100');
   if (currentPage() !== 'upcoming') return;
-  content.innerHTML = `<h1 class="app-title">Upcoming</h1><p class="muted">Scheduled starts and maximum prices. Budgets may pause a job before it fires.</p><form id="upcoming-filter" class="inline"><label>From<input name="from" type="datetime-local"></label><label>To<input name="to" type="datetime-local"></label><button>Show window</button></form><section class="panel" id="upcoming-results">${upcomingTable(result.items)}<p class="note">Subtotal ${e(usd(result.subtotal_microdollars))}${result.truncated ? ' · First 100 shown; narrow the window for the full total.' : ''}</p></section>`;
+  content.innerHTML = `<h1 class="app-title">Upcoming</h1><p class="muted">Scheduled starts and maximum prices. Budgets may pause a job before it fires.</p><form id="upcoming-filter" class="inline"><label>From<input name="from" type="datetime-local"></label><label>To<input name="to" type="datetime-local"></label><button>Show window</button></form><section class="panel" id="upcoming-results">${upcomingTable(result.items)}<p class="note">Window maximum ${e(usd(result.window_total_microdollars))} · Shown subtotal ${e(usd(result.subtotal_microdollars))}${result.truncated ? ' · First 100 shown; narrow the window for the full total.' : ''}</p></section>`;
 }
 async function runsPage(query = '') {
+  runsQuery = query; const filters = new URLSearchParams(query);
   const result = await api(`/api/runs${query}`);
   if (currentPage() !== 'runs') return;
-  content.innerHTML = `<h1 class="app-title">Runs</h1><p class="muted">30 days or 1,000 runs per job, whichever is fewer. Every excerpt is displayed as text.</p><form id="runs-filter" class="inline"><label>Job<input name="job" placeholder="Any job"></label><label>Outcome<select name="status"><option value="">Any outcome</option>${['success', 'failure', 'paused', 'expired', 'queued'].map(s => `<option>${s}</option>`).join('')}</select></label><label>From<input name="from" type="date"></label><label>To<input name="to" type="date"></label><button>Filter</button><button type="button" id="export-runs" class="secondary">Export NDJSON</button></form><section class="panel">${result.items.length ? table(['Job / time', 'Outcome', 'Charge'], runRows(result.items)) : empty('No matching runs.')}</section>`;
+  content.innerHTML = `<h1 class="app-title">Runs</h1><p class="muted">30 days or 1,000 runs per job, whichever is fewer. Every excerpt is displayed as text.</p><form id="runs-filter" class="inline"><label>Job<input name="job" placeholder="Any job" value="${e(filters.get('job') || '')}"></label><label>Outcome<select name="status"><option value="">Any outcome</option>${['success', 'failure', 'paused', 'expired', 'queued'].map(s => `<option>${s}</option>`).join('')}</select></label><label>From<input name="from" type="date"></label><label>To<input name="to" type="date"></label><button>Filter</button><button type="button" id="export-runs" class="secondary">Export NDJSON</button></form><section class="panel">${result.items.length ? table(['Job / time', 'Outcome', 'Charge'], runRows(result.items)) : empty('No matching runs.')}<p class="note">${result.summary ? e(result.note) : 'Full log page, at most 100 runs.'}</p>${result.next_before ? `<button class="secondary" data-runs-before="${e(result.next_before)}">Older runs →</button>` : ''}</section>`;
 }
 async function costsPage() {
   const result = await api('/api/costs?group=day');
@@ -144,6 +151,7 @@ content.addEventListener('click', async event => {
   const button = event.target.closest('button'); if (!button) return;
   const page = location.hash.slice(1) || 'dashboard';
   try {
+    if (button.dataset.runsBefore) { const query = new URLSearchParams(runsQuery); query.set('before', button.dataset.runsBefore); await runsPage(`?${query}`); }
     if (button.dataset.edit) { editing = button.dataset.edit; await definitionsPage(page); }
     if (button.id === 'new-definition') { editing = null; await definitionsPage(page); }
     if (button.dataset.delete) await reviewed(`/api/${page}/${button.dataset.delete}`, 'DELETE');
@@ -157,7 +165,7 @@ content.addEventListener('click', async event => {
       await reviewed(`/api/actions/${editing}/test`, 'POST', {}, async result => { await render(); notify(`Test queued; held ${usd(result.reserved_microdollars)}.`); });
     }
     if (button.id === 'export-config') download('cronly.json', JSON.stringify(config, null, 2));
-    if (button.id === 'export-runs') { const result = await api('/api/runs'); download('cronly-runs.ndjson', result.items.map(r => JSON.stringify(r)).join('\n'), 'application/x-ndjson'); }
+    if (button.id === 'export-runs') { const result = await api(`/api/runs${runsQuery}`); download('cronly-runs.ndjson', result.items.map(r => JSON.stringify(r)).join('\n'), 'application/x-ndjson'); }
     if (button.id === 'translate-job') {
       const input = { text: $('#job-prose').value, timezone: $('#job-timezone').value };
       await reviewed('/api/prose/to-cron', 'POST', input, async result => { $('#job-cron').value = result.cron; cronPreview(); notify(`Translation cost ${usd(result.cost_microdollars)}. Review the cron and save separately.`); });
@@ -178,7 +186,7 @@ content.addEventListener('submit', async event => {
       else body = { action: fields.action, cron: fields.cron.trim() || null, timezone: fields.timezone, overlap: fields.overlap, missed: fields.missed, retries: Number(fields.retries), enabled: data.has('enabled'), budget: { day: fields.budget_day === '' ? undefined : Number(fields.budget_day), month: fields.budget_month === '' ? undefined : Number(fields.budget_month) } };
       await reviewed(`/api/${kind}/${fields.name}`, 'PUT', body);
     }
-    if (form.id === 'upcoming-filter') { const query = new URLSearchParams(); for (const [k, v] of data) if (v) query.set(k, new Date(v).toISOString()); const result = await api(`/api/upcoming?${query}`); $('#upcoming-results').innerHTML = `${upcomingTable(result.items)}<p>Subtotal ${e(usd(result.subtotal_microdollars))}${result.truncated ? ' · Results truncated; narrow the window.' : ''}</p>`; }
+    if (form.id === 'upcoming-filter') { const query = new URLSearchParams(); for (const [k, v] of data) if (v) query.set(k, new Date(v).toISOString()); const result = await api(`/api/upcoming?${query}`); $('#upcoming-results').innerHTML = `${upcomingTable(result.items)}<p>Window maximum ${e(usd(result.window_total_microdollars))} · Shown subtotal ${e(usd(result.subtotal_microdollars))}${result.truncated ? ' · Results truncated; narrow the window.' : ''}</p>`; }
     if (form.id === 'runs-filter') { const query = new URLSearchParams(); for (const [k, v] of data) if (v) query.set(k, v); await runsPage(`?${query}`); }
     if (form.id === 'costs-filter') $('#costs-results').innerHTML = costTable(await api(`/api/costs?group=${fields.group}`));
     if (form.id === 'key-form') await reviewed('/api/keys', 'POST', { name: fields.name, scopes: data.getAll('scopes'), daily_spend_microdollars: fields.daily_spend_microdollars === '' ? null : Number(fields.daily_spend_microdollars) }, async result => { await render(); $('#new-key-result').innerHTML = `<p>Copy your key now:</p><pre>${e(result.token)}</pre>`; });
@@ -193,13 +201,14 @@ content.addEventListener('submit', async event => {
     });
   } catch (error) { notify(error.message, true); }
 });
+$('#workspace-nav').addEventListener('click', event => { const link = event.target.closest('a'); if (link && link.hash !== location.hash) { content.innerHTML = '<p class="muted">Loading workspace…</p>'; content.setAttribute('aria-busy', 'true'); } });
 window.addEventListener('hashchange', () => { editing = null; render(); });
 async function signedIn() { $('#workspace-nav').hidden = false; $('#sign-out').hidden = false; await render(); }
 async function boot() {
   deployment = await settings();
   if (deployment.local) {
     if (getLocalUser()) return signedIn();
-    content.innerHTML = '<section class="signed-out panel"><h1 class="app-title">Your local workspace</h1><p class="muted">Development accounts use local storage and development credit.</p><form id="local-login"><label>Local account name<input name="user" value="developer" pattern="[a-zA-Z0-9_-]{1,128}" required></label><button>Use local account</button></form></section>';
+    content.innerHTML = '<section class="signed-out panel"><h1 class="app-title">Your local workspace</h1><p class="muted">Development accounts use local storage and development credit.</p><form id="local-login"><label>Local account name<input name="user" value="developer" pattern="[a-zA-Z0-9_\\-]{1,128}" required></label><button>Use local account</button></form></section>';
     $('#local-login').addEventListener('submit', event => { event.preventDefault(); setAuth(new FormData(event.target).get('user')); signedIn(); });
     return;
   }

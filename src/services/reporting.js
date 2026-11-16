@@ -1,6 +1,6 @@
 import { CronPattern } from 'croner';
 import { cron } from './cron.js';
-import { price } from '../utils/pricing.js';
+import { price, PRICES } from '../utils/pricing.js';
 import { assert } from '../utils/errors.js';
 const offsetCache = new Map();
 function zoneOffset(zone, time) {
@@ -53,6 +53,7 @@ export function upcoming(config, from, to, limit = 100) {
   const cursors = Object.entries(config.jobs).filter(([, j]) => j.enabled && j.cron).map(([name, job]) => {
     const schedule = cron(job.cron, job.timezone); return { name, job, schedule, next: schedule.nextRun(new Date(from - 1)) };
   });
+  const windowTotal = cursors.reduce((sum, c) => sum + countFires(c.job.cron, c.job.timezone, from, to) * price('run', config.actions[c.job.action]), 0);
   const items = [];
   while (items.length < limit) {
     const next = cursors.filter(c => c.next && +c.next < to).sort((a, b) => +a.next - +b.next || a.name.localeCompare(b.name))[0];
@@ -61,25 +62,36 @@ export function upcoming(config, from, to, limit = 100) {
     next.next = next.schedule.nextRun(next.next);
   }
   const truncated = cursors.some(c => c.next && +c.next < to);
-  return { items, truncated, next_from: truncated ? items.at(-1).scheduled_at : null, subtotal_microdollars: items.reduce((sum, r) => sum + r.price_microdollars, 0) };
+  return { items, truncated, window_total_microdollars: windowTotal, subtotal_microdollars: items.reduce((sum, r) => sum + r.price_microdollars, 0) };
 }
 /** Forecast scheduled maximum spend, capped by each job's UTC budget. */
 export function projection(config, balance, webhookRuns = [], now = Date.now()) {
-  const from = Date.parse(new Date(now).toISOString().slice(0, 10));
-  const to = from + 30 * 86400000; const jobs = [];
+  const from = now; const to = now + 30 * 86400000; const jobs = [];
   for (const [name, job] of Object.entries(config.jobs)) {
     if (!job.enabled) continue;
-    const runPrice = price('run', config.actions[job.action]);
-    const count = job.cron ? countFires(job.cron, job.timezone, from, to) : webhookRuns.filter(r => r.job === name && r.created_at >= now - 7 * 86400000).length / 7 * 30;
-    let monthly = Math.ceil(count * runPrice);
-    if (job.budget.day != null) monthly = Math.min(monthly, job.budget.day * 30);
-    if (job.budget.month != null) monthly = Math.min(monthly, job.budget.month);
-    jobs.push({ job: name, runs_30_days: count, monthly_microdollars: monthly, daily_microdollars: Math.ceil(monthly / 30) });
+    const action = config.actions[job.action];
+    const runPrice = price('run', action) - (action.type === 'javascript' ? PRICES.jsActivation : 0);
+    const months = {}; let count = 0;
+    for (let day = Math.floor(from / 86400000) * 86400000; day < to; day += 86400000) {
+      const start = Math.max(day, from); const end = Math.min(day + 86400000, to);
+      const dayCount = job.cron ? countFires(job.cron, job.timezone, start, end) : (Array.isArray(webhookRuns) ? webhookRuns.filter(r => r.job === name && r.created_at >= now - 7 * 86400000).length : webhookRuns[name] || 0) / 7 * (end - start) / 86400000;
+      count += dayCount;
+      let amount = Math.ceil(dayCount * runPrice) + (dayCount > 0 && action.type === 'javascript' ? PRICES.jsActivation : 0);
+      if (job.budget.day != null) amount = Math.min(amount, Math.max(0, job.budget.day - (day === Math.floor(now / 86400000) * 86400000 ? balance.spend_today_by_job?.[name] || 0 : 0)));
+      const month = new Date(day).toISOString().slice(0, 7);
+      months[month] = (months[month] || 0) + amount;
+    }
+    let monthly = 0;
+    for (const [month, amount] of Object.entries(months)) {
+      const spent = month === new Date(now).toISOString().slice(0, 7) ? balance.spend_by_job?.[name] || 0 : 0;
+      monthly += job.budget.month == null ? amount : Math.min(amount, Math.max(0, job.budget.month - spent));
+    }
+    jobs.push({ job: name, runs_30_days: Math.ceil(count), monthly_microdollars: monthly, daily_microdollars: Math.ceil(monthly / 30) });
   }
   const monthly = jobs.reduce((sum, j) => sum + j.monthly_microdollars, 0); const daily = Math.ceil(monthly / 30);
   const available = balance.balance_microdollars - balance.held_microdollars;
   const days = daily ? available / daily : null;
-  return { jobs, daily_microdollars: daily, monthly_microdollars: monthly, runway_days: days, runs_until: days === null || days > 36500 ? null : new Date(now + days * 86400000).toISOString(), more_than_a_year: days === null || days > 365, estimate: '30-day maximum at current schedules; webhook-only jobs use trailing 7-day activity' };
+  return { jobs, daily_microdollars: daily, monthly_microdollars: monthly, runway_days: days, runs_until: days === null || days > 36500 ? null : new Date(now + days * 86400000).toISOString(), more_than_a_year: days === null || days > 365, estimate: '30-day maximum with UTC budget resets; JS includes one activation allowance per active job/day (shared versions may cost less); webhook-only jobs use seven UTC calendar days of billed activity' };
 }
 /** Filter retained logs without ever treating response excerpts as markup. */
 export function filterRuns(runs, params) {

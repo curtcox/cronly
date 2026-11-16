@@ -15,7 +15,7 @@ export function grossUp(creditCents) {
 /** Conservative bounds; queue retries and bookkeeping have explicit allowances. */
 export function worstCaseCost(op, action = {}) {
   const c = COST_POLICY;
-  const base = 12 * c.doRequest + 20 * c.rowWritten + 6 * c.queueOperation + c.workerRequest + 20 * c.workerCpuMs + 16 * c.storageKBMonth + c.doSecond * 0.2;
+  const base = 12 * c.doRequest + 24 * c.rowWritten + 6 * c.queueOperation + c.workerRequest + 20 * c.workerCpuMs + 16 * c.storageKBMonth + c.doSecond * 0.2 + 3000 * c.rowRead;
   if (op === 'run' || op === 'hook') return base + (op === 'hook' ? 1 : 0) + (action.type === 'javascript' ? c.dynamicWorkerDay + c.workerRequest + action.cpu_ms * c.workerCpuMs + action.subrequests * 2.3 : 0);
-  return op === 'change' ? 20 : op === 'read' ? 12 : 0;
+  return op === 'change' ? 20 : op === 'read' ? 12 + (action.job_count || 0) * 1.2 : 0;
 }

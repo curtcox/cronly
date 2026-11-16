@@ -25,8 +25,8 @@ export function openapi(routes) {
       if (route.handler === 'config-write') schema = { $ref: '#/components/schemas/Config' };
       operation.requestBody = { content: { 'application/json': { schema } } };
     }
-    if (route.handler === 'quote') for (const name of ['op', 'job']) operation.parameters.push({ name, in: 'query', schema: { type: 'string' } });
-    if (['runs', 'costs', 'upcoming'].includes(route.handler)) for (const name of ['from', 'to', 'job', 'status', 'group', 'limit', 'format']) operation.parameters.push({ name, in: 'query', schema: { type: 'string' } });
+    if (route.handler === 'quote') for (const name of ['op', 'job', 'resource']) operation.parameters.push({ name, in: 'query', schema: { type: 'string' } });
+    if (['runs', 'costs', 'upcoming'].includes(route.handler)) for (const name of ['from', 'to', 'job', 'status', 'group', 'limit', 'format', 'before', 'cursor']) operation.parameters.push({ name, in: 'query', schema: { type: 'string' } });
     (paths[path] ||= {})[route.method.toLowerCase()] = operation;
   }
   return { openapi: '3.1.0', info: { title: 'cronly API', version: '0.1.0', description: 'Prepaid cron actions. Quote first, apply separately. Session reads are free; API reads are metered.' }, servers: [{ url: 'https://cronly.org' }], paths,

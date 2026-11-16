@@ -3,9 +3,9 @@
 **This file is the single source of truth for project status.** If another document
 disagrees with it, this file wins and the other document is stale.
 
-- **Last audited:** 2026-11-15 (implementation underway)
+- **Last audited:** 2026-11-15 (code implemented; live acceptance pending)
 - **Production:** nothing deployed. `cronly.org` is not yet pointed at Cloudflare.
-- **Overall:** Building on main. Design is in [`todo/master_plan.md`](todo/master_plan.md); pricing in
+- **Overall:** Code implemented and locally verified on main; production/credential/legal acceptance remains. Design is in [`todo/master_plan.md`](todo/master_plan.md); pricing in
   [`docs/business/pricing.md`](docs/business/pricing.md).
 
 ---
@@ -44,7 +44,7 @@ disagrees with it, this file wins and the other document is stale.
 | D2 | JavaScript sandbox: Workers for Platforms or Dynamic Worker Loader | code/ops | ✅ | Worker Loader selected: current documented native CPU/subrequest limits and stable Wrangler binding; daily activation pricing included. Live enforcement acceptance remains L10. Master plan §3.4. Decide at the start of L10. |
 | D3 | Prose model: `claude-opus-5-5` (≈1.4¢ per translation) or `claude-haiku-5-5` (≈0.1¢) | owner | 🟨 | Owner approved Opus default 2026-11-15; final model selection follows live eval; run the L9 eval on both and pick per endpoint. One constant in `src/utils/llm-policy.js`. |
 | D4 | Minimum deposit | owner | ✅ | Owner approved 2026-11-15: $5, card payment cost itemized on top (hashbin L20 wording). |
-| D5 | API reads billed (20 µ$ after implementation audit), web UI reads free and rate-limited | owner | ✅ | Owner approved billed reads and upward floor corrections 2026-11-15; ledger write costs require 20 µ$ rather than the 1 µ$ planning estimate; keeps "no account costs more than it paid" true for scripted polling. |
+| D5 | API reads billed (20 µ$ after implementation audit), web UI reads free and rate-limited | owner | ✅ | Owner approved billed reads and upward floor corrections 2026-11-15; ledger write costs require a 20 µ$ base plus a 2 µ$/job aggregate-history allowance rather than the 1 µ$ planning estimate; keeps "no account costs more than it paid" true for scripted polling. |
 | D6 | Starting prices in `docs/business/pricing.md` (25 µ$/run, 100 µ$/change, prose 1.5× + 500 µ$) | owner | ✅ | Owner approved 2026-11-15: accept, adjusting upward to pass floors; recalibrate after a month of production cost data (S3). |
 
 ## Launch blockers
@@ -58,10 +58,10 @@ disagrees with it, this file wins and the other document is stale.
 | L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | ✅ | Real local Worker/Queue HTTP path verified; retries, missed/overlap, budgets, duplicate delivery, held snapshots, refusal pause and recovery tested. §3, §3.1, §2.3. |
 | L6 | Runs, costs, upcoming, projection APIs; retention pruning | code | ✅ | Retained/deleted-job history, NDJSON, permanent UTC cost aggregates, ledger cursors, bounded upcoming, fast cron/DST projections and byte/retention bounds tested. §4.3, §6, §7. |
 | L7 | Triggers: run now, trigger tokens, `/hook/*`, per-token rate limits, CORS, `{{input.*}}` | code | ✅ | Manual runs, signed job-only tokens, revocation, token limits, input validation and hook-only CORS tested. §4.1. |
-| L8 | Web UI with balance + runway header on every signed-in page; Playwright tests | code | 🚧 | Browser flows pass; final UI/runtime-status and direct action-test changes under verification. §5. |
+| L8 | Web UI with balance + runway header on every signed-in page; Playwright tests | code | ✅ | All workspace pages, runtime status/runway, direct action tests, quote dialogs and logo implemented; mobile and browser save/run/escaping/cron flows pass. §5. |
 | L9 | Prose: free cron explain; Claude to-cron, ask, change proposals + apply; holds and billing; to-cron eval | code/ops | 🟨 | Structured client, held read-only conversations, usage billing, separate stale-checked proposals and 100-case two-model eval implemented. Live eval requires owner Anthropic access. §3.5. Needs D3 and an Anthropic API key (ops). |
 | L10 | JavaScript actions: sandbox, outbound gateway, CPU/subrequest limits and pricing, editor | code/ops | 🟨 | Content-addressed Worker Loader, blocked native networking, counted gateway, daily activation settlement and editor implemented; real local JS succeeds. Live CPU-limit acceptance required. §2.2, §3.4. Needs D2. |
-| L11 | Agent surface: OpenAPI + drift test, `llms.txt`, agent docs, MCP server, `/api/config`, browser snippet | code | 🚧 | Atomic config, OpenAPI drift test, scoped MCP protocol tests, llms.txt/docs and immutable SRI SDK implemented; final verification underway. §4.4, §4.5. |
+| L11 | Agent surface: OpenAPI + drift test, `llms.txt`, agent docs, MCP server, `/api/config`, browser snippet | code | ✅ | Atomic config with conflict checks, OpenAPI drift test, scoped MCP protocol tests, llms.txt/agent docs and immutable SHA-384 SRI trigger SDK verified. §4.4, §4.5. |
 | L12 | Abuse and cost safety: limits, destination rules, rate-limit rules, daily cost reconciliation and brake, invite-only sign-up | code/ops | 🟨 | Account/job/destination caps, native ingress limiter, destination checks, conservative daily analytics reconciliation and stale-report brake implemented. Live schema/WAF/billing alerts and Clerk Restricted mode remain owner steps. §8. |
 | L13 | Terms of Service and Privacy Policy (acceptable use, refunds, suspension) | legal | 🟨 | Service-specific Terms/Privacy drafts prepared following hashbin draft convention; entity/contact/jurisdiction and legal approval remain. Checkout is gated by launch approval. |
 | L14 | Production: cronly.org DNS and custom domain, live Clerk and Stripe, secrets, end-to-end test with a real deposit, `verify:production` | ops | 🟨 | Custom-domain config, guarded CI deploy, secret upload, production verifier and live sandbox acceptance script prepared; provision credentials/DNS and perform real deposit/live acceptance per docs/ops/launch.md. §10.13. |
@@ -80,3 +80,22 @@ disagrees with it, this file wins and the other document is stale.
 | ID | Item | Owner | Status | Notes / reference |
 |----|------|-------|--------|-------------------|
 | B1 | Anything in master plan §11 that customers ask for | — | ⬜ | Add a row per request. |
+
+## Acceptance record — 2026-11-15
+
+- Lint and 38 unit/integration tests pass; real local Worker/Queue verifies HTTP and
+  JavaScript, secret redaction, native network denial and counted gateway access.
+- Three Playwright flows pass: responsive layout/logo and quote-before-deposit/save,
+  XSS escaping, deterministic cron preview run submission, all-page balance visibility and direct action testing.
+- Production Worker dry-run bundles with all DO, Queue, rate-limit and Loader bindings.
+- No production deploy, live payment, Anthropic eval or Cloudflare CPU enforcement
+  acceptance has been claimed. Follow [launch handoff](docs/ops/launch.md).
+- Owner approved Opus as initial default pending the live comparison. Entity name,
+  support/privacy contact and legal jurisdiction remain requested owner input.
+- Master plan remains in todo because L9/L10/L12/L13/L14 have live or owner work.
+
+Final audit corrections: 60 µ$/HTTP run covers indexed retention and orchestration;
+API reads are 20 µ$ plus 2 µ$ per job scanned for aggregate history. Histories return
+compact summaries globally and full per-job pages (100 records) to bound memory and
+cost. Monthly projections handle calendar resets; webhook forecasts use seven UTC
+calendar days of billed counts rather than sampling retained logs.

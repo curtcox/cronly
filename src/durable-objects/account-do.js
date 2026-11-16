@@ -57,6 +57,7 @@ export class AccountDO {
         return {};
       }
       case 'prepare-run': return prepareRun(tx, args, this.env);
+      case 'retry-data': { const hold = await tx.get(`hold:${args.id}`); return { input: hold?.execution?.input || {} }; }
       case 'claim-run': return claimRun(tx, args.id);
       case 'config': return loadConfig(tx, args.public_view !== false);
       case 'mutate': return mutate(tx, args, this.env);
@@ -90,9 +91,17 @@ export class AccountDO {
         if (!hold.duplicate) { await settle(tx, hold.id, amount); await tx.put(`audit:${Date.now()}:${args.id}`, { id: args.id, kind: 'trigger', created_at: Date.now() }); }
         return { cost_microdollars: hold.duplicate ? 0 : amount };
       }
+      case 'activity': {
+        const counts = {};
+        for (let offset = 0; offset < 7; offset++) { const period = new Date(Date.now() - offset * 86400000).toISOString().slice(0, 10); const metric = await tx.get(`spent:account:self:${period}`); for (const [name, count] of Object.entries(metric?.run_count_by_job || {})) counts[name] = (counts[name] || 0) + count; }
+        return { counts };
+      }
+      case 'read-plan': return { names: (await tx.get('recent-jobs')) || [] };
+      case 'run-route': { const hold = await tx.get(`hold:${args.id}`) || await tx.get(`receipt:${args.id}`); if (hold?.job) return { job: hold.job }; const profile = await tx.get('profile'); const prefix = `${profile.id}:`; assert(args.id.startsWith(prefix), 'not_found', 'Run not found', 404); const parts = args.id.slice(prefix.length).split(':'); const name = parts[0] === '_test' ? parts.slice(0, 2).join(':') : parts[0]; assert(await tx.get(`job-index:${name}`), 'not_found', 'Run not found', 404); return { job: name }; }
       case 'meter-read': {
-        const hold = await reserve(tx, { id: args.id, amount: price('read'), kind: 'read', ...await keyBudget(tx, args.key_id) });
-        await settle(tx, hold.id, hold.amount); return { cost_microdollars: hold.amount };
+        const names = args.resource === 'runs' ? (args.job ? [args.job] : (await tx.get('recent-jobs')) || []) : [];
+        const hold = await reserve(tx, { id: args.id, amount: price('read', { job_count: names.length }), read_job_count: names.length, kind: 'read', ...await keyBudget(tx, args.key_id) });
+        await settle(tx, hold.id, hold.amount); return { cost_microdollars: hold.amount, names };
       }
       case 'rate-limit': {
         const key = `rate:${args.id}`; const now = Date.now();
@@ -126,8 +135,8 @@ export class AccountDO {
         return { cost_microdollars: amount };
       }
       case 'settle': return settle(tx, args.id, args.actual);
-      case 'deposit': { const result = await deposit(tx, args.id, args.amount); await this.nudge(tx); return result; }
-      case 'dev-deposit': assert(this.env.ENVIRONMENT === 'local', 'not_found', 'Not found', 404); { const result = await deposit(tx, args.id, args.amount); await this.nudge(tx); return result; }
+      case 'deposit': { const result = await deposit(tx, args.id, args.amount); if (!result.duplicate) await this.nudge(tx); return result; }
+      case 'dev-deposit': assert(this.env.ENVIRONMENT === 'local', 'not_found', 'Not found', 404); { const result = await deposit(tx, args.id, args.amount); if (!result.duplicate) await this.nudge(tx); return result; }
       case 'list': {
         const entries = [...await tx.list({ prefix: args.prefix, ...(args.cursor ? args.reverse ? { end: args.cursor } : { startAfter: args.cursor } : {}), limit: Math.min(args.limit || 1000, 1000), reverse: args.reverse || false })];
         return { items: entries.map(([, value]) => value), next_cursor: entries.length === Math.min(args.limit || 1000, 1000) ? entries.at(-1)[0] : null };

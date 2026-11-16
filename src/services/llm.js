@@ -12,7 +12,8 @@ export const PROSE_SCHEMAS = {
 export function proseQuote(mode) { return Math.ceil(PRICES.proseMarkup * (LLM_POLICY.maxInputBytes * LLM_POLICY.maxInput + LLM_POLICY.maxOutputTokens * LLM_POLICY.output) * (mode === 'ask' ? LLM_POLICY.maxTurns : 1)) + PRICES.proseBase; }
 /** Bounded structured Anthropic requests; tools can only read an injected account view. */
 export async function callProse(mode, input, env, readTool) {
-  const messages = [{ role: 'user', content: JSON.stringify(input) }]; let cost = 0;
+  const messages = [{ role: 'user', content: JSON.stringify(input) }]; let cost = 0; let usageKnown = true;
+  try {
   for (let turn = 0; turn < (mode === 'ask' ? LLM_POLICY.maxTurns : 1); turn++) {
     const payload = { model: LLM_POLICY.model, max_tokens: LLM_POLICY.maxOutputTokens,
       system: [{ type: 'text', text: PROSE_SYSTEM, cache_control: { type: 'ephemeral' } }], messages,
@@ -20,10 +21,11 @@ export async function callProse(mode, input, env, readTool) {
     if (mode === 'ask') payload.tools = ['list_jobs', 'recent_runs', 'projection'].map(name => ({ name, description: `Read caller's ${name}; no mutations.`, input_schema: object({}) }));
     const body = JSON.stringify(payload);
     assert(new TextEncoder().encode(body).length + 4096 <= LLM_POLICY.maxInputBytes, 'prose_context_limit', 'Account context is too large for this request');
+    usageKnown = false;
     const response = await (env.LLM_FETCH || fetch)('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', 'x-api-key': env.ANTHROPIC_API_KEY }, body, signal: AbortSignal.timeout(45000) });
     assert(response.ok, 'prose_provider_error', 'Prose provider could not complete the request', 502);
     const data = await response.json(); assert(data.usage && Array.isArray(data.content), 'invalid_prose_response', 'Invalid prose response', 502);
-    cost += tokenCost(data.usage);
+    cost += tokenCost(data.usage); usageKnown = true;
     const toolCalls = data.content.filter(block => block.type === 'tool_use');
     if (toolCalls.length) {
       assert(mode === 'ask' && toolCalls.length <= 3, 'invalid_prose_tool', 'Unsupported tool use', 502);
@@ -42,4 +44,5 @@ export async function callProse(mode, input, env, readTool) {
     return { value, token_cost_microdollars: cost, cost_microdollars: Math.ceil(cost * PRICES.proseMarkup) + PRICES.proseBase };
   }
   assert(false, 'prose_turn_limit', 'Prose tool-turn limit reached', 502);
+  } catch (error) { if (usageKnown) error.details = { ...error.details, known_token_cost_microdollars: cost }; throw error; }
 }

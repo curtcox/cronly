@@ -92,7 +92,8 @@ async function handle(route, request, env, auth) {
     case 'quote': {
       const op = url.searchParams.get('op'); assert(['run', 'hook', 'change', 'read', 'prose'].includes(op), 'invalid_operation', 'Unknown operation');
       let action = {};
-      if (url.searchParams.has('job')) {
+      if (op === 'read' && url.searchParams.get('resource') === 'runs') { const caller = await authenticate(request, env); assert(canAccess(caller, 'read'), 'insufficient_scope', 'read scope required', 403); action.job_count = url.searchParams.has('job') ? 1 : (await rpc(env.ACCOUNTS, caller.account, 'read-plan')).names.length; }
+      if (url.searchParams.has('job') && ['run', 'hook'].includes(op)) {
         const caller = await authenticate(request, env); assert(canAccess(caller, ['read', 'run']), 'insufficient_scope', 'read scope required', 403);
         const config = await rpc(env.ACCOUNTS, caller.account, 'config'); const job = config.jobs[url.searchParams.get('job')]; assert(job, 'not_found', 'Job not found', 404); action = config.actions[job.action];
       }
@@ -114,27 +115,30 @@ const worker = {
     for (const message of batch.messages) { try { await consume(message, env, ctx); } catch (error) { console.error('Queue operation failed', error.code || 'internal_error'); message.retry(); } }
   },
   async fetch(request, env) {
+    let cost = 0; let auth = null;
     try {
       const path = new URL(request.url).pathname;
-      if (env.PUBLIC_LIMITER && (path.startsWith('/api/') || path.startsWith('/hook/') || path === '/mcp')) { const limit = await env.PUBLIC_LIMITER.limit({ key: request.headers.get('CF-Connecting-IP') || 'local' }); assert(limit.success, 'rate_limited', 'Request rate exceeded', 429); }
+      if (env.PUBLIC_LIMITER && (path.startsWith('/api/') || path.startsWith('/webhooks/') || path.startsWith('/hook/') || path === '/mcp')) { const limit = await env.PUBLIC_LIMITER.limit({ key: request.headers.get('CF-Connecting-IP') || 'local' }); assert(limit.success, 'rate_limited', 'Request rate exceeded', 429); }
       const idempotency = request.headers.get('Idempotency-Key'); assert(!idempotency || idempotency.length <= 128, 'invalid_idempotency_key', 'Idempotency-Key must be at most 128 characters');
       if (path.startsWith('/hook/') && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Idempotency-Key', 'Access-Control-Max-Age': '86400' } });
       const route = matchRoute(request.method, path);
       if (!route && !path.startsWith('/api/') && env.ASSETS && request.method === 'GET') return env.ASSETS.fetch(request);
       assert(route, 'not_found', 'Not found', 404);
-      const auth = route.access === PUBLIC ? null : await authenticate(request, env);
+      auth = route.access === PUBLIC ? null : await authenticate(request, env);
       assert(canAccess(auth, route.access), 'insufficient_scope', 'Credential does not allow this operation', 403);
       if (route.handler === 'mcp') return mcp(request, env, auth, (path, method, body) => worker.fetch(new Request(new URL(path, request.url), { method, headers: { Authorization: request.headers.get('Authorization'), 'Content-Type': 'application/json', 'Idempotency-Key': request.headers.get('Idempotency-Key') || crypto.randomUUID() }, body: method === 'GET' ? undefined : JSON.stringify(body) }), env));
       if (auth) await rpc(env.ACCOUNTS, auth.account, 'rate-limit', { id: 'api', limit: 120 });
-      let cost = 0;
       if (auth?.key_id && request.method === 'GET') {
-        const metered = await rpc(env.ACCOUNTS, auth.account, 'meter-read', { id: `read:${crypto.randomUUID()}`, key_id: auth.key_id }); cost = metered.cost_microdollars;
+        const metered = await rpc(env.ACCOUNTS, auth.account, 'meter-read', { id: `read:${crypto.randomUUID()}`, key_id: auth.key_id, resource: route.handler === 'runs' ? 'runs' : null, job: new URL(request.url).searchParams.get('job') }); cost = metered.cost_microdollars; auth.read_names = metered.names;
       }
       const data = await handle(route, request, env, auth);
       const balance = auth ? await rpc(env.ACCOUNTS, auth.account, 'account') : {};
-      if (route.handler === 'runs' && new URL(request.url).searchParams.get('format') === 'ndjson') return new Response(data.items.map(item => JSON.stringify(item)).join('\n') + '\n', { headers: { 'content-type': 'application/x-ndjson', 'X-Cost-Microdollars': String(cost), 'X-Balance-Microdollars': String(balance.balance_microdollars) } });
+      if (route.handler === 'runs' && new URL(request.url).searchParams.get('format') === 'ndjson') return new Response(data.items.map(item => JSON.stringify(item)).join('\n') + '\n', { headers: { 'content-type': 'application/x-ndjson', 'X-Next-Before': String(data.next_before || ''), 'X-Cost-Microdollars': String(cost), 'X-Balance-Microdollars': String(balance.balance_microdollars) } });
       return Response.json({ cost_microdollars: cost, balance_microdollars: balance.balance_microdollars, ...data }, { headers: path.startsWith('/hook/') ? { 'Access-Control-Allow-Origin': '*' } : {} });
-    } catch (error) { const response = errorResponse(error); if (new URL(request.url).pathname.startsWith('/hook/')) response.headers.set('Access-Control-Allow-Origin', '*'); return response; }
+    } catch (error) {
+      let balance; if (auth) { try { balance = (await rpc(env.ACCOUNTS, auth.account, 'account')).balance_microdollars; } catch { /* Preserve the original failure. */ } }
+      error.details = { cost_microdollars: cost, balance_microdollars: balance, ...error.details };
+      const response = errorResponse(error); if (new URL(request.url).pathname.startsWith('/hook/')) response.headers.set('Access-Control-Allow-Origin', '*'); return response; }
   }
 };
 

@@ -211,6 +211,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -367,6 +381,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -466,6 +494,20 @@
           },
           {
             "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
             "in": "query",
             "schema": {
               "type": "string"
@@ -952,6 +994,13 @@
           },
           {
             "name": "job",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "resource",
             "in": "query",
             "schema": {
               "type": "string"

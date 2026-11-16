@@ -24,7 +24,7 @@ export async function guardedFetch(request, env, account, signal, redirects = 0,
     assert(index < maxRequests, 'subrequest_limit', 'Subrequest limit reached');
     const replayBody = ['GET', 'HEAD'].includes(current.method) ? undefined : await current.clone().arrayBuffer();
     const response = await (env.OUTBOUND_FETCH || fetch)(current, { redirect: 'manual', signal });
-    if (![301, 302, 303, 307, 308].includes(response.status) || !response.headers.has('location') || index >= redirects) return response;
+    if (![301, 302, 303, 307, 308].includes(response.status) || !response.headers.has('location') || index >= redirects) return { response, subrequests: index + 1 };
     const destination = validateDestination(new URL(response.headers.get('location'), current.url).href);
     const headers = new Headers(current.headers);
     if (destination.origin !== url.origin) for (const name of [...headers.keys()]) headers.delete(name);
@@ -42,9 +42,9 @@ export async function executeHttp(execution, context, env, secrets) {
   const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), action.timeout_seconds * 1000);
   const started = Date.now();
   try {
-    const response = await guardedFetch(request, env, context.account.id, controller.signal, action.follow_redirects ? 5 : 0);
+    const { response, subrequests } = await guardedFetch(request, env, context.account.id, controller.signal, action.follow_redirects ? 5 : 0);
     const excerpt = await readExcerpt(response, secrets);
-    return { status: action.success_status.some(([min, max]) => response.status >= min && response.status <= max) ? 'success' : 'failure', http_status: response.status, duration_ms: Date.now() - started,
+    return { status: action.success_status.some(([min, max]) => response.status >= min && response.status <= max) ? 'success' : 'failure', http_status: response.status, subrequests, duration_ms: Date.now() - started,
       request: redact(JSON.stringify({ url, method: action.method, headers, body }), secrets).slice(0, 4096), response_headers: redact(JSON.stringify(Object.fromEntries(response.headers)), secrets).slice(0, 2048), response_excerpt: excerpt };
   } finally { clearTimeout(timeout); }
 }

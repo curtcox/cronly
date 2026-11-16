@@ -48,11 +48,12 @@ export async function settle(tx, id, actual, now = Date.now()) {
       const key = `spent:${kind}:${value}:${period}`;
       if (kind === 'account') {
         const existing = await tx.get(key); const metric = typeof existing === 'number' ? { spent_microdollars: existing } : existing || {};
-        const estimate = hold.kind === 'prose' ? Math.max(0, (amount - PRICES.proseBase) / PRICES.proseMarkup) : worstCaseCost(hold.kind, hold.execution?.action) - (hold.execution?.action?.type === 'javascript' && hold.actual_price < hold.amount ? COST_POLICY.dynamicWorkerDay : 0);
+        const estimate = hold.kind === 'prose' ? Math.max(0, (amount - PRICES.proseBase) / PRICES.proseMarkup) : worstCaseCost(hold.kind, hold.execution?.action || { job_count: hold.read_job_count || 0 }) - (hold.execution?.action?.type === 'javascript' && hold.actual_price < hold.amount ? COST_POLICY.dynamicWorkerDay : 0);
         const jobGroup = hold.job || hold.kind || 'other'; const actionGroup = hold.action || hold.kind || 'other';
         const by_job = { ...metric.by_job, [jobGroup]: ((metric.by_job || {})[jobGroup] || 0) + amount };
         const by_action = { ...metric.by_action, [actionGroup]: ((metric.by_action || {})[actionGroup] || 0) + amount };
-        await tx.put(key, { period, by_job, by_action, spent_microdollars: (metric.spent_microdollars || 0) + amount, estimated_cost_microdollars: (metric.estimated_cost_microdollars || 0) + Math.ceil(estimate) });
+        const run_count_by_job = { ...metric.run_count_by_job, [jobGroup]: ((metric.run_count_by_job || {})[jobGroup] || 0) + (hold.kind === 'run' ? 1 : 0) };
+        await tx.put(key, { period, run_count_by_job, by_job, by_action, spent_microdollars: (metric.spent_microdollars || 0) + amount, estimated_cost_microdollars: (metric.estimated_cost_microdollars || 0) + Math.ceil(estimate) });
       } else await tx.put(key, ((await tx.get(key)) || 0) + amount);
     }
   }

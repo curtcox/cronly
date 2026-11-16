@@ -37,6 +37,7 @@ export async function prepareRun(tx, args, env = {}) {
   if (args.test_action) await tx.put(`job-index:${args.name}`, { name: args.name, account: args.account, updated_at: Date.now() });
   const hold = await reserve(tx, { id: args.id, amount, job: args.name, action: job.action, kind: 'run', budget: job.budget, ...await keyBudget(tx, args.key_id), execution: { version: action.type === 'javascript' ? await digest(JSON.stringify([SANDBOX_WRAPPER, action])) : null, action, vars, secrets, job, input: args.input, trigger: args.trigger, scheduled_at: args.scheduled_at }, ttl_ms: 120000 });
   await tx.put(`last-run:${args.name}`, now);
+  const recent = (await tx.get('recent-jobs')) || []; await tx.put('recent-jobs', [args.name, ...recent.filter(name => name !== args.name)].slice(0, 100));
   return { id: hold.id, amount, job };
 }
 /** A queue redelivery cannot re-execute an already claimed external request. */

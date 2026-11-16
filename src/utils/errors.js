@@ -12,10 +12,10 @@ export function assert(condition, code, message, status = 400, details) {
 export function errorResponse(error) {
   return Response.json({ error: error instanceof ApiError ? error.message : 'Internal error', code: error.code || 'internal_error', ...(error.details || {}) }, { status: error.status || 500 });
 }
-/** Parse bounded JSON, including requests without a Content-Length header. */
-export async function readJson(request, maxBytes = 300000) {
+/** Read bounded UTF-8, including chunked webhook requests. */
+export async function readText(request, maxBytes = 300000) {
   const reader = request.body?.getReader();
-  if (!reader) return {};
+  if (!reader) return '';
   let size = 0; const chunks = [];
   while (true) {
     const { value, done } = await reader.read(); if (done) break;
@@ -25,6 +25,12 @@ export async function readJson(request, maxBytes = 300000) {
   }
   const bytes = new Uint8Array(size); let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
-  try { return JSON.parse(new TextDecoder().decode(bytes)); }
+  return new TextDecoder().decode(bytes);
+}
+/** Parse bounded JSON without trusting Content-Length. */
+export async function readJson(request, maxBytes = 300000) {
+  if (!request.body) return {};
+  const text = await readText(request, maxBytes);
+  try { return JSON.parse(text); }
   catch { throw new ApiError(400, 'invalid_json', 'Invalid JSON'); }
 }
