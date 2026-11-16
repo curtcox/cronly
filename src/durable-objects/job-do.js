@@ -55,17 +55,17 @@ export class JobDO {
       case 'runs': {
         const limit = Math.min(args.limit || 100, 100); const before = args.before || Infinity;
         const entries = (await this.summaries()).filter(r => r.created_at < before && (!args.status || r.status === args.status) && (!args.from || r.created_at >= args.from) && (!args.to || r.created_at <= args.to)).sort((a, b) => b.created_at - a.created_at);
-        const page = entries.slice(0, limit); const items = args.summary ? page : await Promise.all(page.map(r => this.storage.get(`run:${r.id}`)));
+        const page = entries.slice(0, limit); const items = args.summary ? page.map(({ pending: _pending, ...summary }) => summary) : await Promise.all(page.map(r => this.record(r)));
         return { items: items.filter(Boolean), next_before: entries.length > limit ? page.at(-1).created_at : null };
       }
-      case 'run': return (await this.storage.get(`run:${args.id}`)) || {};
+      case 'run': return (await this.readRun(args.id)) || {};
       default: assert(false, 'unknown_operation', 'Unknown job operation', 404);
     }
   }
   async arm() {
     const settings = await this.storage.get('settings');
     const summaries = (await this.summaries());
-    const pending = await Promise.all(summaries.filter(r => r.status === 'queued' || r.status === 'running').map(r => this.storage.get(`run:${r.id}`)));
+    const pending = await Promise.all(summaries.filter(r => r.status === 'queued' || r.status === 'running').map(r => this.record(r)));
     const timers = pending.map(r => r.enqueued ? r.expires_at : Date.now() + 1000);
     if (settings?.job?.enabled && !settings.paused && settings.next_fire) timers.push(settings.next_fire);
     if (settings?.resume_at) timers.push(settings.resume_at);
@@ -90,7 +90,7 @@ export class JobDO {
     assert(this.env.COST_SAFETY_HARD_STOP !== 'true', 'cost_brake', 'Runs are paused by the operator', 503);
     if (this.env.SAFETY) { const safety = await rpc(this.env.SAFETY, 'global', 'status'); if (safety.brake) { const settings = await this.storage.get('settings'); if (settings) { settings.paused = 'cost_brake'; await this.storage.put('settings', settings); await this.arm(); } assert(false, 'cost_brake', 'Runs are paused pending cost reconciliation', 503); } }
     const settings = await this.storage.get('settings'); assert(settings?.job, 'not_found', 'Job not found', 404);
-    const prior = await this.storage.get(`run:${args.id}`); if (prior) return { run: prior, duplicate: true, cost_microdollars: 0 };
+    const prior = await this.readRun(args.id); if (prior) return { run: prior, duplicate: true, cost_microdollars: 0 };
     let reservation;
     try {
       reservation = await rpc(this.env.ACCOUNTS, settings.account, 'prepare-run', { ...args, name: settings.name, account: settings.account, test_action: settings.job.test_action });
@@ -101,14 +101,14 @@ export class JobDO {
         if (error.code === 'budget_month') { const date = new Date(); settings.resume_at = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1); }
         await this.storage.put('settings', settings); await this.publish(settings);
         const pausedRun = { id: args.id, status: 'paused', reason: error.code, created_at: Date.now(), cost_microdollars: 0, job: settings.name };
-        await this.storage.put(`run:${args.id}`, pausedRun); await this.history(pausedRun);
+        await this.history(pausedRun);
         await this.arm();
       }
       throw error;
     }
     if (reservation.duplicate && reservation.settled) return { id: args.id, duplicate: true, cost_microdollars: 0 };
     const run = { id: args.id, job: settings.name, trigger: args.trigger, scheduled_at: args.scheduled_at, created_at: Date.now(), expires_at: Date.now() + 120000, status: 'queued', reserved_microdollars: reservation.amount, attempt: args.attempt || 0, key_id: args.key_id };
-    await this.storage.put(`run:${args.id}`, run); await this.history(run);
+    await this.history(run);
     // A failed enqueue is retried from the durable pending row, without a second hold.
     await this.arm();
     await this.send(run, settings);
@@ -116,17 +116,17 @@ export class JobDO {
   }
   async send(run, settings) {
     await this.env.RUN_QUEUE.send({ account: settings.account, name: settings.name, id: run.id });
-    await this.storage.put(`run:${run.id}`, { ...run, enqueued: true });
+    await this.history({ ...run, enqueued: true });
   }
   async result(args) {
-    const run = await this.storage.get(`run:${args.id}`); assert(run, 'not_found', 'Run not found', 404);
+    const run = await this.readRun(args.id); assert(run, 'not_found', 'Run not found', 404);
     if (run.status === 'success' || run.status === 'failure' || run.status === 'expired') return { duplicate: true };
     const settings = await this.storage.get('settings');
     const retryData = args.result.status === 'failure' && run.attempt < (settings.job?.retries || 0) ? await rpc(this.env.ACCOUNTS, settings.account, 'retry-data', { id: args.id }) : {};
     const receipt = await rpc(this.env.ACCOUNTS, settings.account, 'settle', { id: args.id, actual: args.result.charge_microdollars ?? run.reserved_microdollars });
     const result = { ...run, ...args.result, id: run.id, job: run.job, cost_microdollars: receipt.charged, subrequests: receipt.gateway_count ?? args.result.subrequests ?? 0, finished_at: Date.now() };
     delete result.input; delete result.key_id;
-    await this.storage.put(`run:${args.id}`, result); await this.history(result);
+    await this.history(result, true);
     settings.last_outcome = result.status; await this.storage.put('settings', settings); await this.publish(settings);
     if (result.status === 'failure' && run.attempt < (settings.job?.retries || 0)) {
       try { await this.start({ id: `${args.id}:retry`, trigger: run.trigger, scheduled_at: run.scheduled_at, input: retryData.input || {}, key_id: run.key_id, retry: true, attempt: run.attempt + 1 }); }
@@ -138,10 +138,27 @@ export class JobDO {
     if (!this.historyCache) this.historyCache = [...(await this.storage.list({ prefix: 'history:' })).values()];
     return this.historyCache;
   }
-  async history(run) {
+  async readRun(id) {
+    const summary = await this.storage.get(`history:${id}`);
+    return summary ? this.record(summary) : this.storage.get(`run:${id}`);
+  }
+  async record(summary) {
+    const { pending, ...publicSummary } = summary;
+    // Older pending records kept their full metadata in a separate run row.
+    return pending ? { ...publicSummary, ...pending } : (await this.storage.get(`run:${summary.id}`)) || publicSummary;
+  }
+  async history(run, full = false) {
     const { id, job, status, created_at, trigger, scheduled_at, finished_at, cost_microdollars, http_status, reason } = run;
     const summary = { id, job, status, created_at, trigger, scheduled_at, finished_at, cost_microdollars, http_status, reason };
-    await this.storage.put(`history:${id}`, summary);
+    // Pending metadata fits in the compact index; only completed logs need a body row.
+    if (status === 'queued' || status === 'running') {
+      const { expires_at, reserved_microdollars, attempt, key_id, enqueued } = run;
+      summary.pending = { expires_at, reserved_microdollars, attempt, key_id, enqueued };
+    }
+    if (full) await this.storage.transaction(async tx => {
+      await tx.put(`run:${id}`, run); await tx.put(`history:${id}`, summary);
+    });
+    else await this.storage.put(`history:${id}`, summary);
     if (this.historyCache) this.historyCache = [summary, ...this.historyCache.filter(r => r.id !== id)];
   }
   async publish(settings) {
@@ -154,7 +171,7 @@ export class JobDO {
   async alarm() {
     return this.ctx.blockConcurrencyWhile(async () => {
       let settings = await this.storage.get('settings'); if (!settings) return;
-      const pending = await Promise.all((await this.summaries()).filter(r => ['queued', 'running'].includes(r.status)).map(r => this.storage.get(`run:${r.id}`)));
+      const pending = await Promise.all((await this.summaries()).filter(r => ['queued', 'running'].includes(r.status)).map(r => this.record(r)));
       for (const run of pending.filter(Boolean)) {
         if (!['queued', 'running'].includes(run.status)) continue;
         if (run.expires_at <= Date.now()) await this.result({ id: run.id, result: { status: 'expired', error: 'Result was not received before the deadline' } });

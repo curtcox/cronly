@@ -54,7 +54,7 @@ disagrees with it, this file wins and the other document is stale.
 |----|------|-------|--------|-------------------|
 | L1 | Scaffold: wrangler (prod + local), Vitest, ESLint, `dev:local`, CI, `/health` | code | ✅ | Wrangler prod/local, pinned dependencies, lint, CI, health and gated LocalDev/deposits verified. Master plan §10.1. Copy hashbin's local mode and CI shape. |
 | L2 | Accounts and auth: Clerk sessions, Clerk webhook → AccountDO, API keys with scopes and daily spend caps, `API_ROUTES` access test | code | ✅ | Clerk/LocalDev auth, signed hashed scoped keys, revocation, daily caps and Clerk webhook; access coverage tests. §4.1. Port hashbin `src/auth/`. |
-| L3 | Money: µ$ ledger, reserve/settle/expire holds, Stripe deposits, history, `cost-policy.js`, `pricing.js`, price-floor tests, `/api/quote` | code | 🟨 | Transactional ledger/holds, signed Stripe webhook, itemized Checkout and quotes tested; S4 full-path audit corrected the HTTP floor to 80 µ$ including redirects, alarms and retention. Existing holds keep their maximum. Real deposit remains L14. §6, `docs/business/pricing.md`. Needs D4, D6. |
+| L3 | Money: µ$ ledger, reserve/settle/expire holds, Stripe deposits, history, `cost-policy.js`, `pricing.js`, price-floor tests, `/api/quote` | code | 🟨 | Transactional ledger/holds, signed Stripe webhook, itemized Checkout and quotes tested; S4 full-path audit and pending-run compaction set the HTTP price to 78 µ$ including redirects, alarms and retention. Existing holds keep their maximum. Real deposit remains L14. §6, `docs/business/pricing.md`. Needs D4, D6. |
 | L4 | Definitions: variables, secrets (AES-GCM, write-only), HTTP actions, templates, change billing, audit log, dry run, idempotency | code | ✅ | Atomic billed CRUD, reference checks, AES-GCM write-only secrets, dry runs, audit and idempotency tested. §2, §3.3, §4.2. |
 | L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | ✅ | Real local Worker/Queue HTTP path verified; retries, missed/overlap, budgets, duplicate delivery, held snapshots, refusal pause and recovery tested. §3, §3.1, §2.3. |
 | L6 | Runs, costs, upcoming, projection APIs; retention pruning | code | ✅ | Retained/deleted-job history, NDJSON, permanent UTC cost aggregates, ledger cursors, bounded upcoming, fast cron/DST projections and byte/retention bounds tested. §4.3, §6, §7. |
@@ -74,7 +74,7 @@ disagrees with it, this file wins and the other document is stale.
 | S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ✅ | Atomic versioned keyring, legacy reads, held per-secret re-encryption, edit/delete conflict protection, audit, scoped CLI and CI wiring verified. Persisted local Worker migrated v1 → v2 and executed a redacted JS run with v1 retired. [Operator procedure](docs/ops/secret-rotation.md). §3.3. |
 | S2 | Charge measured JS CPU instead of the configured limit | code | ⬜ | §3.4; needs per-invocation CPU data. |
 | S3 | Recalibrate prices from a month of real Cloudflare and Anthropic bills | ops/code | ⬜ | `docs/business/pricing.md`. |
-| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budget counters save 2–4 writes; unchanged alarms/runtime/recent-job indexes skip writes. Full-path HTTP cost guards cover redirects, cold history, pruning and safety. Corrected 34-write/24-request allowance requires an 80 µ$ run price; transactional reads/changes now skip transient holds and expiry alarms; run-log compaction and further reductions remain. [Cost audit](docs/business/pricing.md). |
+| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budget counters save 2–4 writes; unchanged alarms/runtime/recent-job indexes skip writes. Full-path HTTP cost guards cover redirects, cold history, pruning and safety. Compact pending runs reduce the bound to 33 writes/24 requests and the run price to 78 µ$; transactional reads/changes skip transient holds and expiry alarms. Further durable hold/ledger compaction remains. [Cost audit](docs/business/pricing.md). |
 
 ## Backlog
 
@@ -137,3 +137,19 @@ calendar days of billed counts rather than sampling retained logs.
 - Lint and 65 tests pass, including duplicate protection, pending holds and key caps,
   insufficient balance, transaction rollback and existing reservation compatibility.
 - Permanent receipts, sortable ledger entries and published prices are preserved.
+
+## S4 compact run acceptance — 2026-11-16
+
+- Pending runs share one durable history/outbox row instead of duplicating a full run
+  row. Final log bodies and summaries commit atomically; cache updates follow commit.
+- Cold restart, legacy outbox recovery, duplicate starts, expiry and failed final-index
+  writes are covered. Retried settlement charges once and preserves the outcome.
+- Full-path schedule/manual/action-test/webhook cost checks pass at 33 row writes,
+  24 DO requests and 3,000 row reads (webhook ingress has its separate allowance).
+  The base run price is reduced from 80 to 78 µ$; all price floors pass. Existing
+  holds preserve their original maximum, including holds above the new price.
+- Lint, 68 unit/integration tests, all three browser flows and the production dry-run
+  build pass. Real local Worker/Queue acceptance verifies HTTP, JavaScript, secret
+  redaction, native network denial, counted gateway access and released holds.
+- Further durable hold/ledger compaction remains S4 work. L9–L14 live acceptance and
+  owner/legal inputs are unchanged; nothing was deployed to production.

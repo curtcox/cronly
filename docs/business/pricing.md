@@ -11,12 +11,12 @@ constants as the API; historical numbers in the master plan are superseded here.
 
 | Operation | Price | Estimated worst-case marginal cost |
 |---|---|---|
-| HTTP run | 80 µ$ | ceil(policy run bound), currently 48 µ$ |
+| HTTP run | 78 µ$ | ceil(policy run bound), currently 47 µ$ |
 | Webhook run | HTTP/JS price + 5 µ$ | run bound + 2 µ$ |
 | Change: action, variable, secret (including key rotation), job, key, trigger | 100 µ$ | 20 µ$ |
 | API-key read | 20 µ$ base + 2 µ$ per job scanned for aggregate history | 12 µ$ base + 1.2 µ$/job |
 | Web session reads, cron explain, quotes, mutation dry runs | Free, rate-limited | Bounded fixed operating cost |
-| JavaScript run | 80 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
+| JavaScript run | 78 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
 | JS daily activation | 3,300 µ$ on first invocation of each action version per UTC day | 2,000 µ$ provider activation |
 | Prose | ceil(1.64 × actual model-token cost) + 500 µ$ | actual tokens + bookkeeping |
 
@@ -26,7 +26,7 @@ configuration contribute to the content hash. CPU is billed at the configured li
 until per-invocation measured CPU is available (S2). Retries are separately reserved
 and charged as runs. Queue redelivery never repeats a claimed outbound operation.
 
-A regular hourly HTTP job is about $0.0576 per 30 days; a minutely job is $3.456. These
+A regular hourly HTTP job is about $0.05616 per 30 days; a minutely job is $3.3696. These
 are run charges only. Changes, API polling, prose and JS activation are additional.
 
 ## Units and deposits
@@ -49,7 +49,7 @@ reviewed Terms and applicable law.
 
 Rates live only in `src/utils/cost-policy.js`; prices only in `src/utils/pricing.js`;
 model rates only in `src/utils/llm-policy.js`. Included allowances are ignored.
-The HTTP bound includes 34 row writes, 24 DO requests and 3,000 compact-index row reads, queue retry allowance, CPU,
+The HTTP bound includes 33 row writes, 24 DO requests and 3,000 compact-index row reads, queue retry allowance, CPU,
 awake time and 16 KB retained logs; orchestration caches compact summaries instead of loading log bodies. Read and change bounds include actual ledger,
 key-budget, audit and rate-counter bookkeeping rather than just one request.
 Permanent cost summaries and job/key budget counters share the account's two
@@ -63,8 +63,9 @@ tests fail if these paths exceed the policy's row/request allowances. Merely bat
 separate keys into one storage call would not reduce billed SQLite rows.
 
 This corrects the earlier 24-write/12-request allowance, which omitted some of that
-bookkeeping. Despite S4's savings, the prior 60 µ$ run price fails the audited floor;
-the corrected default is 80 µ$. Persisted job quotes follow the current price;
+bookkeeping. The prior 60 µ$ run price fails the audited floor. Compact pending-run records
+now remove one more write per run and support reducing the corrected 80 µ$ default
+to 78 µ$. Persisted job quotes follow the current price;
 already-held runs settle within their original maximum.
 
 Tests assert `price × 0.92 >= 1.5 × worstCaseCost` for every operation and JS extremes.
@@ -79,11 +80,15 @@ These are conservative engineering estimates, not measured production costs. L12
 monitor distinguishes measured Worker/DO totals from a conservative ledger allowance
 for Queue/sandbox usage. Missing, truncated or stale analytics activates the brake.
 S3 recalibrates from actual bills. S4 has removed 2–4 separate budget-counter writes
-per run and avoids unchanged alarm/runtime/recent-job writes. Transactional reads and changes also avoid writing/deleting a transient hold and
-scheduling its expiry alarm, while applying the same balance and budget checks in
-their atomic transaction. External work still requires durable holds. Further run-log
-compaction and safe price reductions remain pending; permanent receipt tombstones
-and the sortable ledger are still separate so outstanding-hold scans stay bounded.
+per run and avoids unchanged alarm/runtime/recent-job writes. Transactional reads
+and changes also skip transient holds and their expiry alarms while enforcing the
+same balance and budget checks. External work still requires durable holds.
+
+Pending-run metadata now shares the compact history row, saving another write per
+run. Completed logs and summaries commit atomically. Legacy queued records remain
+readable, and cold outbox recovery is tested. Permanent receipt tombstones and the
+sortable ledger remain separate so outstanding-hold scans stay bounded; further
+safe compaction remains S4 work.
 
 ## Verified provider sources
 

@@ -20,7 +20,7 @@ it('reserves and separately charges each immediate retry', async () => {
   for (let index = 0; index < 3; index++) await consume({ body: messages[index], ack() {} }, env, {});
   expect(messages).toHaveLength(3);
   const runs = (await rpc(env.JOBS, 'a:j', 'runs')).items;
-  expect(runs.every(r => r.status === 'failure' && r.cost_microdollars === 80)).toBe(true);
+  expect(runs.every(r => r.status === 'failure' && r.cost_microdollars === 78)).toBe(true);
   expect((await call('account')).held_microdollars).toBe(0);
 });
 it('pauses a daily budget until the next UTC window', async () => {
@@ -72,14 +72,14 @@ it('recovers a failed queue send from its prepaid outbox without another hold', 
   const send = env.RUN_QUEUE.send;
   env.RUN_QUEUE.send = vi.fn().mockRejectedValueOnce(new Error('queue unavailable')).mockImplementation(send);
   await expect(rpc(env.JOBS, 'a:j', 'start', { id: 'r', input: {}, trigger: 'manual' })).rejects.toThrow();
-  expect((await call('account')).held_microdollars).toBe(80);
+  expect((await call('account')).held_microdollars).toBe(78);
   expect(job.storage.alarm).toBe(Date.now() + 1000);
   await vi.advanceTimersByTimeAsync(1000); await job.alarm();
   expect(messages).toHaveLength(1);
   await consume({ body: messages[0], ack() {} }, env, {});
   await job.alarm(); expect(messages).toHaveLength(1);
   expect(await call('account')).toMatchObject({ held_microdollars: 0 });
-  expect((await job.storage.get('run:r')).cost_microdollars).toBe(80);
+  expect((await job.storage.get('run:r')).cost_microdollars).toBe(78);
 });
 
 it('keeps an expired outcome when the same alarm advances the schedule', async () => {
@@ -92,4 +92,61 @@ it('keeps an expired outcome when the same alarm advances the schedule', async (
   await job.alarm();
   expect((await job.storage.get('settings')).last_outcome).toBe('expired');
   expect((await call('account')).job_runtime.j.last_outcome).toBe('expired');
+});
+
+it('restores a compact pending run after a cold restart without exposing its outbox', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
+  const { env, job, messages, call } = await setup();
+  const send = env.RUN_QUEUE.send;
+  env.RUN_QUEUE.send = vi.fn().mockRejectedValueOnce(new Error('queue unavailable')).mockImplementation(send);
+  await expect(rpc(env.JOBS, 'a:j', 'start', { id: 'r', input: {}, trigger: 'manual' })).rejects.toThrow();
+  expect(await job.storage.get('run:r')).toBeUndefined();
+  const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
+  env.JOBS.objects.set('a:j', cold);
+  expect(await rpc(env.JOBS, 'a:j', 'run', { id: 'r' })).toMatchObject({ id: 'r', status: 'queued', reserved_microdollars: 78, expires_at: Date.now() + 120000 });
+  const summary = (await rpc(env.JOBS, 'a:j', 'runs', { summary: true })).items[0];
+  expect(summary).not.toHaveProperty('pending'); expect(summary).not.toHaveProperty('key_id');
+  await vi.advanceTimersByTimeAsync(1000); await cold.alarm();
+  expect(messages).toHaveLength(1);
+  expect(await rpc(env.JOBS, 'a:j', 'start', { id: 'r', input: {}, trigger: 'manual' })).toMatchObject({ duplicate: true });
+  expect(messages).toHaveLength(1);
+  await consume({ body: messages[0], ack() {} }, env, {});
+  expect((await rpc(env.JOBS, 'a:j', 'run', { id: 'r' })).status).toBe('failure');
+  expect(await call('account')).toMatchObject({ held_microdollars: 0 });
+});
+
+it('recovers a legacy outbox with metadata in a separate run row', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
+  const { env, job, messages } = await setup();
+  await rpc(env.JOBS, 'a:j', 'start', { id: 'r', input: {}, trigger: 'manual' });
+  const { pending, ...summary } = await job.storage.get('history:r');
+  await job.storage.put('run:r', { ...summary, ...pending, enqueued: false });
+  await job.storage.put('history:r', summary); messages.length = 0;
+  const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
+  env.JOBS.objects.set('a:j', cold);
+  await cold.alarm(); expect(messages).toHaveLength(1);
+  // The compact row supersedes the old body's stale enqueue flag.
+  await cold.alarm(); expect(messages).toHaveLength(1);
+  await consume({ body: messages[0], ack() {} }, env, {});
+  expect((await job.storage.get('run:r')).status).toBe('failure');
+});
+
+it('rolls back the completed log and index together and retries settlement once', async () => {
+  const { env, job, call } = await setup();
+  await rpc(env.JOBS, 'a:j', 'start', { id: 'r', input: {}, trigger: 'manual' });
+  const before = (await call('account')).balance_microdollars;
+  const put = job.storage.put.bind(job.storage);
+  const spy = vi.spyOn(job.storage, 'put').mockImplementation(async (key, value) => {
+    if (key === 'history:r' && value.status === 'success') throw new Error('index failure');
+    return put(key, value);
+  });
+  const args = { id: 'r', result: { status: 'success', response_body: 'ok' } };
+  await expect(job.result(args)).rejects.toThrow('index failure');
+  expect(await job.storage.get('run:r')).toBeUndefined();
+  expect((await job.summaries())[0].status).toBe('queued');
+  spy.mockRestore();
+  await job.result(args);
+  expect((await job.storage.get('run:r')).response_body).toBe('ok');
+  expect((await job.summaries())[0].status).toBe('success');
+  expect((await call('account')).balance_microdollars).toBe(before - 78);
 });
