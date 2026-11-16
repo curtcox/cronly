@@ -53,8 +53,14 @@ The HTTP bound includes 38 row writes, 30 DO requests, five Worker invocations a
 3,000 compact-index row reads, six Queue operations, CPU,
 awake time and 16 KB retained logs; orchestration caches compact summaries instead of loading log bodies. Read and change bounds include actual ledger,
 key-budget, audit and rate-counter bookkeeping rather than just one request.
-Permanent cost summaries and job/key budget counters share the account's two
-daily/monthly summary writes. Old standalone budget counters remain readable until
+Permanent cost summaries and job/key budget counters share the account's
+daily/monthly summaries. Active summaries now share the balance row, saving two
+writes on ordinary settlements. At UTC rollover the previous periods are archived;
+late settlements update their reserved periods. Summaries above 50,000 UTF-8 bytes
+stay standalone, bounding the compact state below the storage value limit. Each
+period still needs at most one separate write, so the worst-case allowance and
+prices remain unchanged. Legacy scalar balances and separate summaries migrate
+lazily; compact summaries take precedence over stale legacy rows in reporting. Old standalone budget counters remain readable until
 each job/key first settles in a period, preserving existing caps without bulk migration.
 
 The S4 audit counts the entire schedule/manual/action-test/webhook path, including

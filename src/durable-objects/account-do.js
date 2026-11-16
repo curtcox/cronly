@@ -7,6 +7,7 @@ import { price } from '../utils/pricing.js';
 import { parseScopes } from '../auth/scopes.js';
 import { funds, reserve, settle, deposit, charge } from './ledger.js';
 import { beginSecretRotation, finishSecretRotation } from './secret-rotation.js';
+import { accountMoney, accountMetric } from './account-money.js';
 
 /** Account definitions and money share one transactional, SQLite-backed object. */
 export class AccountDO {
@@ -32,7 +33,12 @@ export class AccountDO {
         }
         const profile = await tx.get('profile'); return { ...profile, needs_registration: !profile.platform_registered };
       }
-      case 'account': { const { holds, ...balance } = await funds(tx); return { ...await tx.get('profile'), ...balance, job_runtime: Object.fromEntries([...(await tx.list({ prefix: 'runtime:' }))].map(([key, value]) => [key.slice('runtime:'.length), value])), spend_by_job: (await tx.get(`spent:account:self:${new Date().toISOString().slice(0, 7)}`))?.by_job || {}, spend_today_by_job: (await tx.get(`spent:account:self:${new Date().toISOString().slice(0, 10)}`))?.by_job || {}, spent_today_microdollars: ((await tx.get(`spent:account:self:${new Date().toISOString().slice(0, 10)}`))?.spent_microdollars) || 0, spent_month_microdollars: ((await tx.get(`spent:account:self:${new Date().toISOString().slice(0, 7)}`))?.spent_microdollars) || 0, holds: holds.map(({ id, amount, expires_at }) => ({ id, amount, expires_at })) }; }
+      case 'account': {
+        const { holds, ...balance } = await funds(tx);
+        const state = await accountMoney(tx); const day = new Date().toISOString().slice(0, 10);
+        const daily = await accountMetric(tx, day, state); const monthly = await accountMetric(tx, day.slice(0, 7), state);
+        return { ...await tx.get('profile'), ...balance, job_runtime: Object.fromEntries([...(await tx.list({ prefix: 'runtime:' }))].map(([key, value]) => [key.slice('runtime:'.length), value])), spend_by_job: monthly?.by_job || {}, spend_today_by_job: daily?.by_job || {}, spent_today_microdollars: daily?.spent_microdollars || 0, spent_month_microdollars: monthly?.spent_microdollars || 0, holds: holds.map(({ id, amount, expires_at }) => ({ id, amount, expires_at })) };
+      }
       case 'reserve': return reserve(tx, { ...args, ...await keyBudget(tx, args.key_id) });
       case 'gateway-request': {
         const hold = await tx.get(`hold:${args.id}`);
@@ -50,7 +56,7 @@ export class AccountDO {
         if (JSON.stringify(prior) !== JSON.stringify(args.runtime)) await tx.put(`runtime:${args.name}`, args.runtime);
         return {};
       }
-      case 'metrics': return (await tx.get(`spent:account:self:${args.period}`)) || {};
+      case 'metrics': return (await accountMetric(tx, args.period)) || {};
       case 'resume-cost-jobs': {
         const profile = await tx.get('profile');
         for (const [key] of await tx.list({ prefix: 'def:jobs:' })) { const name = key.slice('def:jobs:'.length); await tx.put(`sync:${name}`, { name, account: profile.id, version: crypto.randomUUID() }); }
@@ -99,8 +105,8 @@ export class AccountDO {
         return { cost_microdollars: receipt.duplicate ? 0 : amount };
       }
       case 'activity': {
-        const counts = {};
-        for (let offset = 0; offset < 7; offset++) { const period = new Date(Date.now() - offset * 86400000).toISOString().slice(0, 10); const metric = await tx.get(`spent:account:self:${period}`); for (const [name, count] of Object.entries(metric?.run_count_by_job || {})) counts[name] = (counts[name] || 0) + count; }
+        const counts = {}; const state = await accountMoney(tx);
+        for (let offset = 0; offset < 7; offset++) { const period = new Date(Date.now() - offset * 86400000).toISOString().slice(0, 10); const metric = await accountMetric(tx, period, state); for (const [name, count] of Object.entries(metric?.run_count_by_job || {})) counts[name] = (counts[name] || 0) + count; }
         return { counts };
       }
       case 'read-plan': return { names: (await tx.get('recent-jobs')) || [] };
@@ -151,8 +157,10 @@ export class AccountDO {
       case 'costs': {
         const prefix = 'spent:account:self:'; const from = args.from || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10); const to = args.to || new Date().toISOString().slice(0, 10);
         assert(/^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) && Number.isFinite(Date.parse(from)) && Number.isFinite(Date.parse(to)) && Date.parse(to) >= Date.parse(from) && Date.parse(to) - Date.parse(from) <= 366 * 86400000, 'invalid_window', 'Costs use UTC dates YYYY-MM-DD, at most 366 days');
-        const rows = [...(await tx.list({ prefix, start: `${prefix}${from}`, end: `${prefix}${to}~`, limit: 1000 })).values()].filter(metric => metric.period?.length === 10);
-        return { items: rows, from, to };
+        const current = (await accountMoney(tx)).summaries.day;
+        const rows = [...(await tx.list({ prefix, start: `${prefix}${from}`, end: `${prefix}${to}~`, limit: 1000 })).values()].filter(metric => metric.period?.length === 10 && metric.period !== current?.period);
+        if (current && current.period >= from && current.period <= to) rows.push(current);
+        return { items: rows.sort((a, b) => a.period.localeCompare(b.period)), from, to };
       }
       case 'get': return (await tx.get(args.key)) || null;
       case 'authenticate-key': {

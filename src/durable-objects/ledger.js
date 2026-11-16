@@ -1,11 +1,12 @@
 import { worstCaseCost, COST_POLICY } from '../utils/cost-policy.js';
 import { PRICES } from '../utils/pricing.js';
 import { assert } from '../utils/errors.js';
+import { accountMoney, accountMetric, updateAccountMetric } from './account-money.js';
 /** Validate all money at the boundary; never use floating balances. */
 export function money(value) { assert(Number.isSafeInteger(value) && value >= 0, 'invalid_money', 'Expected nonnegative integer micro-dollars'); return value; }
 /** Read the account's spendable funds inside the same storage transaction. */
 export async function funds(tx) {
-  const balance = (await tx.get('balance')) || 0;
+  const { balance_microdollars: balance } = await accountMoney(tx);
   const holds = [...(await tx.list({ prefix: 'hold:' })).values()].filter(h => !h.settled);
   return { balance_microdollars: balance, held_microdollars: holds.reduce((sum, h) => sum + h.amount, 0), holds };
 }
@@ -27,7 +28,7 @@ async function reservation(tx, args, now) {
     for (const [window, period] of [['day', day], ['month', month]]) {
       const limit = budget[window]; if (limit === undefined || limit === null) continue;
       money(limit);
-      const metric = await tx.get(`spent:account:self:${period}`);
+      const metric = await accountMetric(tx, period);
       const spent = await budgetSpent(tx, metric, kind, id, period);
       const pending = holds.filter(h => h[kind === 'job' ? 'job' : 'key_id'] === id && h[window] === period).reduce((sum, h) => sum + h.amount, 0);
       assert(spent + pending + args.amount <= limit, `${kind === 'key' ? 'key_' : ''}budget_${window}`, `${kind} ${window} budget exceeded`, 402);
@@ -60,12 +61,12 @@ async function settleReservation(tx, hold, actual, now, immediate = false) {
   if (hold.settled) return hold;
   const id = hold.id;
   const amount = Math.min(hold.amount, actual, hold.actual_price ?? Infinity);
-  const balance = (await tx.get('balance')) || 0;
+  const state = await accountMoney(tx);
+  const balance = state.balance_microdollars;
   assert(balance >= amount, 'ledger_invariant', 'Invalid ledger state', 500);
-  await tx.put('balance', balance - amount);
+  state.balance_microdollars = balance - amount;
   for (const period of [hold.day, hold.month]) {
-    const key = `spent:account:self:${period}`;
-    const existing = await tx.get(key); const metric = typeof existing === 'number' ? { spent_microdollars: existing } : existing || {};
+    const existing = await accountMetric(tx, period, state); const metric = typeof existing === 'number' ? { spent_microdollars: existing } : existing || {};
     const budget_spent = { ...metric.budget_spent };
     for (const [kind, value] of [['job', hold.job], ['key', hold.key_id]]) {
       if (value) budget_spent[kind] = { ...budget_spent[kind], [value]: await budgetSpent(tx, metric, kind, value, period) + amount };
@@ -76,8 +77,10 @@ async function settleReservation(tx, hold, actual, now, immediate = false) {
     const by_job = { ...metric.by_job, [jobGroup]: ((metric.by_job || {})[jobGroup] || 0) + amount };
     const by_action = { ...metric.by_action, [actionGroup]: ((metric.by_action || {})[actionGroup] || 0) + amount };
     const run_count_by_job = { ...metric.run_count_by_job, [jobGroup]: ((metric.run_count_by_job || {})[jobGroup] || 0) + (hold.kind === 'run' ? 1 : 0) };
-    await tx.put(key, { period, budget_spent, run_count_by_job, by_job, by_action, spent_microdollars: (metric.spent_microdollars || 0) + amount, estimated_cost_microdollars: (metric.estimated_cost_microdollars || 0) + Math.ceil(estimate) });
+    await updateAccountMetric(tx, state, { period, budget_spent, run_count_by_job, by_job, by_action, spent_microdollars: (metric.spent_microdollars || 0) + amount, estimated_cost_microdollars: (metric.estimated_cost_microdollars || 0) + Math.ceil(estimate) });
   }
+  // The balance and active summaries always commit together, including deposits.
+  await tx.put('balance', state);
   const { execution: _execution, ...receipt } = hold;
   const result = { ...receipt, settled: true, charged: amount, settled_at: now };
   // The permanent receipt is also the reservation tombstone; duplicates cannot spend twice.
@@ -90,8 +93,9 @@ async function settleReservation(tx, hold, actual, now, immediate = false) {
 export async function deposit(tx, id, amount, now = Date.now()) {
   money(amount);
   if (await tx.get(`deposit:${id}`)) return { duplicate: true };
-  const balance = ((await tx.get('balance')) || 0) + amount; money(balance);
-  await tx.put('balance', balance); await tx.put(`deposit:${id}`, { amount, created_at: now });
+  const state = await accountMoney(tx);
+  const balance = state.balance_microdollars + amount; money(balance);
+  await tx.put('balance', { ...state, balance_microdollars: balance }); await tx.put(`deposit:${id}`, { amount, created_at: now });
   await tx.put(`ledger:${now}:deposit:${id}`, { id, kind: 'deposit', amount_microdollars: amount, created_at: now });
   return { balance_microdollars: balance };
 }

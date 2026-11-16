@@ -1,6 +1,7 @@
 import { it, expect, vi } from 'vitest';
 import { MemoryStorage } from '../../test-utils/storage.js';
 import { reserve, settle, deposit, funds, charge } from './ledger.js';
+import { accountMetric } from './account-money.js';
 
 const time = Date.parse('2026-11-30T23:59:00Z');
 async function setup() {
@@ -14,9 +15,9 @@ it('settles job and key budgets in the account summaries without separate counte
   await hold({ id: 'r', amount: 80, kind: 'run', job: 'j', key_id: 'k', budget: { day: 100 }, key_budget: { day: 100 } });
   const put = vi.spyOn(storage, 'put');
   await charge('r', 30);
-  expect(put).toHaveBeenCalledTimes(5); // Balance, two summaries, receipt and ledger.
+  expect(put).toHaveBeenCalledTimes(3); // Compact balance/summaries, receipt and ledger.
   expect(put.mock.calls.some(([key]) => key.startsWith('spent:job:') || key.startsWith('spent:key:'))).toBe(false);
-  for (const period of ['2026-11-30', '2026-11']) expect(await storage.get(`spent:account:self:${period}`)).toMatchObject({ budget_spent: { job: { j: 30 }, key: { k: 30 } }, spent_microdollars: 30 });
+  for (const period of ['2026-11-30', '2026-11']) expect(await accountMetric(storage, period)).toMatchObject({ budget_spent: { job: { j: 30 }, key: { k: 30 } }, spent_microdollars: 30 });
   put.mockClear(); await charge('r', 80); expect(put).not.toHaveBeenCalled();
   await hold({ id: 'pending', amount: 60, kind: 'run', job: 'j', key_id: 'k' });
   await expect(hold({ id: 'job-refused', amount: 11, job: 'j', budget: { day: 100 } })).rejects.toMatchObject({ code: 'budget_day' });
@@ -38,7 +39,7 @@ it('lazily carries forward legacy budgets independently of reporting groups', as
   await charge('r', 30);
   await hold({ id: 'change', amount: 100, kind: 'change', key_id: 'k' });
   await charge('change', 100);
-  for (const period of ['2026-11-30', '2026-11']) expect(await storage.get(`spent:account:self:${period}`)).toMatchObject({ budget_spent: { job: { change: 70 }, key: { k: 180 } }, by_job: { change: 630 } });
+  for (const period of ['2026-11-30', '2026-11']) expect(await accountMetric(storage, period)).toMatchObject({ budget_spent: { job: { change: 70 }, key: { k: 180 } }, by_job: { change: 630 } });
   await expect(hold({ id: 'month-refused', amount: 31, job: 'change', budget: { month: 100 } })).rejects.toMatchObject({ code: 'budget_month' });
   await expect(hold({ id: 'month-key-refused', amount: 21, key_id: 'k', key_budget: { month: 200 } })).rejects.toMatchObject({ code: 'key_budget_month' });
 });
@@ -51,8 +52,8 @@ it('charges expired work to its reserved UTC periods across a month boundary', a
   await storage.transaction(tx => reserve(tx, { ...args, id: 'new' }, next));
   await charge('old', 60, next);
   await charge('new', 20, next);
-  expect((await storage.get('spent:account:self:2026-11')).budget_spent).toEqual({ job: { j: 60 }, key: { k: 60 } });
-  expect((await storage.get('spent:account:self:2026-12')).budget_spent).toEqual({ job: { j: 20 }, key: { k: 20 } });
+  expect((await accountMetric(storage, '2026-11')).budget_spent).toEqual({ job: { j: 60 }, key: { k: 60 } });
+  expect((await accountMetric(storage, '2026-12')).budget_spent).toEqual({ job: { j: 20 }, key: { k: 20 } });
   expect(await funds(storage)).toMatchObject({ balance_microdollars: 9920, held_microdollars: 0 });
 });
 
@@ -61,11 +62,11 @@ it('rolls back summaries and money together if a settlement write fails', async 
   await hold({ id: 'r', amount: 60, kind: 'run', job: 'j', key_id: 'k' });
   const put = storage.put.bind(storage);
   vi.spyOn(storage, 'put').mockImplementation(async (key, value) => {
-    if (key === 'spent:account:self:2026-11') throw new Error('storage failure');
+    if (key === 'balance') throw new Error('storage failure');
     return put(key, value);
   });
   await expect(charge('r', 30)).rejects.toThrow('storage failure');
-  expect(await storage.get('spent:account:self:2026-11-30')).toBeUndefined();
+  expect(await accountMetric(storage, '2026-11-30')).toBeUndefined();
   expect(await storage.get('receipt:r')).toBeUndefined();
   expect(await funds(storage)).toMatchObject({ balance_microdollars: 10000, held_microdollars: 60 });
 });
@@ -79,7 +80,7 @@ it('charges transactional work once without a transient hold or expiry alarm', a
   const args = { id: 'read', amount: 20, kind: 'read', key_id: 'k', key_budget: { day: 100 } };
   const billed = await storage.transaction(tx => charge(tx, args, time));
   expect(billed).toMatchObject({ settled: true, charged: 20 });
-  expect(put).toHaveBeenCalledTimes(5);
+  expect(put).toHaveBeenCalledTimes(3);
   expect(remove).not.toHaveBeenCalled(); expect(setAlarm).not.toHaveBeenCalled();
   expect(await storage.getAlarm()).toBe(alarm);
   expect(await funds(storage)).toMatchObject({ balance_microdollars: 9980, held_microdollars: 80 });
@@ -101,7 +102,7 @@ it('rolls back an immediate charge when its definition write fails', async () =>
   })).rejects.toThrow('definition failure');
   expect(await funds(storage)).toMatchObject({ balance_microdollars: 10000, held_microdollars: 0 });
   expect(await storage.get('receipt:change')).toBeUndefined();
-  expect(await storage.get('spent:account:self:2026-11')).toBeUndefined();
+  expect(await accountMetric(storage, '2026-11')).toBeUndefined();
   expect(await storage.get('def:variables:value')).toBeUndefined();
   expect((await storage.list({ prefix: 'ledger:' })).size).toBe(1); // Original deposit only.
   expect(await storage.getAlarm()).toBeNull();
@@ -115,3 +116,51 @@ it('finishes an existing durable reservation through the immediate path', async 
   expect(await funds(storage)).toMatchObject({ balance_microdollars: 9980, held_microdollars: 0 });
   expect(await storage.get('hold:legacy')).toBeUndefined();
 });
+
+it('archives UTC windows once, preserves deposits and applies late settlements to the reserved periods', async () => {
+  const { storage, hold, charge: finish } = await setup();
+  await hold({ id: 'old', amount: 80, kind: 'run', job: 'j', key_id: 'k' });
+  await hold({ id: 'late', amount: 60, kind: 'run', job: 'j', key_id: 'k' });
+  await finish('old', 30);
+  const november = await accountMetric(storage, '2026-11');
+  const put = vi.spyOn(storage, 'put');
+  const next = Date.parse('2026-12-01T00:01:00Z');
+  await storage.transaction(tx => charge(tx, { id: 'new', amount: 20, kind: 'read', key_id: 'k', key_budget: { day: 20 } }, next));
+  expect(put).toHaveBeenCalledTimes(5); // Two archives plus compact state, receipt and ledger.
+  expect(await storage.get('spent:account:self:2026-11')).toEqual(november);
+  const december = await accountMetric(storage, '2026-12');
+  await storage.transaction(tx => deposit(tx, 'more', 100, next));
+  expect(await accountMetric(storage, '2026-12')).toEqual(december);
+  put.mockClear();
+  await finish('late', 50, next);
+  expect(put).toHaveBeenCalledTimes(5); // Late periods stay standalone.
+  expect(await accountMetric(storage, '2026-11')).toMatchObject({ spent_microdollars: 80, budget_spent: { job: { j: 80 }, key: { k: 80 } } });
+  expect(await accountMetric(storage, '2026-12')).toEqual(december);
+  expect(await funds(storage)).toMatchObject({ balance_microdollars: 10000, held_microdollars: 0 });
+  await expect(storage.transaction(tx => reserve(tx, { id: 'capped', amount: 1, key_id: 'k', key_budget: { day: 20 } }, next))).rejects.toMatchObject({ code: 'key_budget_day' });
+});
+
+for (const failure of ['spent:account:self:2026-11', 'receipt:new']) {
+  it(`rolls back money and rollover archives together when ${failure} fails`, async () => {
+    const { storage, hold, charge: finish } = await setup();
+    await hold({ id: 'old', amount: 80, kind: 'run' }); await finish('old', 30);
+    const before = await storage.get('balance');
+    const put = storage.put.bind(storage);
+    const spy = vi.spyOn(storage, 'put').mockImplementation(async (key, value) => {
+      if (key === failure) throw new Error('rollover failure');
+      return put(key, value);
+    });
+    const next = Date.parse('2026-12-01T00:01:00Z');
+    const bill = () => storage.transaction(tx => charge(tx, { id: 'new', amount: 20, kind: 'read' }, next));
+    await expect(bill()).rejects.toThrow('rollover failure');
+    expect(await storage.get('balance')).toEqual(before);
+    expect(await storage.get('spent:account:self:2026-11-30')).toBeUndefined();
+    expect(await storage.get('spent:account:self:2026-11')).toBeUndefined();
+    expect(await accountMetric(storage, '2026-12')).toBeUndefined();
+    spy.mockRestore();
+    await bill(); await bill();
+    expect(await funds(storage)).toMatchObject({ balance_microdollars: 9950, held_microdollars: 0 });
+    expect(await accountMetric(storage, '2026-11')).toMatchObject({ spent_microdollars: 30 });
+    expect(await accountMetric(storage, '2026-12')).toMatchObject({ spent_microdollars: 20 });
+  });
+}
