@@ -14,8 +14,8 @@ export async function funds(tx) {
 async function budgetSpent(tx, metric, kind, id, period) {
   return metric?.budget_spent?.[kind]?.[id] ?? (await tx.get(`spent:${kind}:${id}:${period}`)) ?? 0;
 }
-/** Reserve before any external work; budgets include every outstanding hold. */
-export async function reserve(tx, args, now = Date.now()) {
+// Both durable reservations and immediate charges enforce the same funds and caps.
+async function reservation(tx, args, now) {
   money(args.amount); assert(args.amount > 0, 'invalid_money', 'Reservation must be positive');
   const prior = await tx.get(`hold:${args.id}`) || await tx.get(`receipt:${args.id}`);
   if (prior) return { ...prior, duplicate: true };
@@ -33,7 +33,12 @@ export async function reserve(tx, args, now = Date.now()) {
       assert(spent + pending + args.amount <= limit, `${kind === 'key' ? 'key_' : ''}budget_${window}`, `${kind} ${window} budget exceeded`, 402);
     }
   }
-  const hold = { ...args, day, month, created_at: now, expires_at: now + (args.ttl_ms || 120000), settled: false };
+  return { ...args, day, month, created_at: now, expires_at: now + (args.ttl_ms || 120000), settled: false };
+}
+/** Reserve before any external work; budgets include every outstanding hold. */
+export async function reserve(tx, args, now = Date.now()) {
+  const hold = await reservation(tx, args, now);
+  if (hold.duplicate) return hold;
   await tx.put(`hold:${args.id}`, hold);
   const alarm = await tx.getAlarm();
   if (!alarm || alarm > hold.expires_at) await tx.setAlarm(hold.expires_at);
@@ -43,7 +48,17 @@ export async function reserve(tx, args, now = Date.now()) {
 export async function settle(tx, id, actual, now = Date.now()) {
   money(actual); const hold = await tx.get(`hold:${id}`) || await tx.get(`receipt:${id}`);
   assert(hold, 'unknown_hold', 'Reservation not found', 404);
+  return settleReservation(tx, hold, actual, now);
+}
+/** Bill work completed in this transaction, without writing a transient hold or alarm. */
+export async function charge(tx, args, now = Date.now()) {
+  assert(['read', 'change'].includes(args.kind), 'invalid_charge', 'External work requires a durable reservation');
+  const hold = await reservation(tx, args, now);
+  return settleReservation(tx, hold, hold.amount, now, !hold.duplicate);
+}
+async function settleReservation(tx, hold, actual, now, immediate = false) {
   if (hold.settled) return hold;
+  const id = hold.id;
   const amount = Math.min(hold.amount, actual, hold.actual_price ?? Infinity);
   const balance = (await tx.get('balance')) || 0;
   assert(balance >= amount, 'ledger_invariant', 'Invalid ledger state', 500);
@@ -66,7 +81,7 @@ export async function settle(tx, id, actual, now = Date.now()) {
   const { execution: _execution, ...receipt } = hold;
   const result = { ...receipt, settled: true, charged: amount, settled_at: now };
   // The permanent receipt is also the reservation tombstone; duplicates cannot spend twice.
-  await tx.delete(`hold:${id}`);
+  if (!immediate) await tx.delete(`hold:${id}`);
   await tx.put(`receipt:${id}`, result);
   await tx.put(`ledger:${String(now).padStart(13, '0')}:${id}`, { id, amount_microdollars: -amount, kind: hold.kind, job: hold.job, action: hold.action, created_at: now });
   return result;

@@ -79,7 +79,9 @@ These are conservative engineering estimates, not measured production costs. L12
 monitor distinguishes measured Worker/DO totals from a conservative ledger allowance
 for Queue/sandbox usage. Missing, truncated or stale analytics activates the brake.
 S3 recalibrates from actual bills. S4 has removed 2–4 separate budget-counter writes
-per run and avoids unchanged alarm/runtime/recent-job writes. Further hold/ledger
+per run and avoids unchanged alarm/runtime/recent-job writes. Transactional reads and changes also avoid writing/deleting a transient hold and
+scheduling its expiry alarm, while applying the same balance and budget checks in
+their atomic transaction. External work still requires durable holds. Further run-log
 compaction and safe price reductions remain pending; permanent receipt tombstones
 and the sortable ledger are still separate so outstanding-hold scans stay bounded.
 

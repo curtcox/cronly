@@ -1,6 +1,6 @@
 import { it, expect, vi } from 'vitest';
 import { MemoryStorage } from '../../test-utils/storage.js';
-import { reserve, settle, deposit, funds } from './ledger.js';
+import { reserve, settle, deposit, funds, charge } from './ledger.js';
 
 const time = Date.parse('2026-11-30T23:59:00Z');
 async function setup() {
@@ -68,4 +68,50 @@ it('rolls back summaries and money together if a settlement write fails', async 
   expect(await storage.get('spent:account:self:2026-11-30')).toBeUndefined();
   expect(await storage.get('receipt:r')).toBeUndefined();
   expect(await funds(storage)).toMatchObject({ balance_microdollars: 10000, held_microdollars: 60 });
+});
+
+it('charges transactional work once without a transient hold or expiry alarm', async () => {
+  const { storage, hold } = await setup();
+  await hold({ id: 'pending', amount: 80, kind: 'run', job: 'j', key_id: 'k' });
+  const alarm = await storage.getAlarm();
+  const put = vi.spyOn(storage, 'put'); const remove = vi.spyOn(storage, 'delete');
+  const setAlarm = vi.spyOn(storage, 'setAlarm');
+  const args = { id: 'read', amount: 20, kind: 'read', key_id: 'k', key_budget: { day: 100 } };
+  const billed = await storage.transaction(tx => charge(tx, args, time));
+  expect(billed).toMatchObject({ settled: true, charged: 20 });
+  expect(put).toHaveBeenCalledTimes(5);
+  expect(remove).not.toHaveBeenCalled(); expect(setAlarm).not.toHaveBeenCalled();
+  expect(await storage.getAlarm()).toBe(alarm);
+  expect(await funds(storage)).toMatchObject({ balance_microdollars: 9980, held_microdollars: 80 });
+  put.mockClear();
+  expect(await storage.transaction(tx => charge(tx, args, time))).toMatchObject({ duplicate: true, charged: 20 });
+  expect(await hold(args)).toMatchObject({ duplicate: true, settled: true });
+  expect(put).not.toHaveBeenCalled();
+  await expect(storage.transaction(tx => charge(tx, { ...args, id: 'capped', amount: 1 }, time))).rejects.toMatchObject({ code: 'key_budget_day' });
+  await expect(storage.transaction(tx => charge(tx, { id: 'unfunded', amount: 9901, kind: 'change' }, time))).rejects.toMatchObject({ code: 'insufficient_balance' });
+  await expect(storage.transaction(tx => charge(tx, { id: 'external', amount: 1, kind: 'run' }, time))).rejects.toMatchObject({ code: 'invalid_charge' });
+});
+
+it('rolls back an immediate charge when its definition write fails', async () => {
+  const { storage } = await setup();
+  await expect(storage.transaction(async tx => {
+    await charge(tx, { id: 'change', amount: 100, kind: 'change' }, time);
+    await tx.put('def:variables:value', 'new');
+    throw new Error('definition failure');
+  })).rejects.toThrow('definition failure');
+  expect(await funds(storage)).toMatchObject({ balance_microdollars: 10000, held_microdollars: 0 });
+  expect(await storage.get('receipt:change')).toBeUndefined();
+  expect(await storage.get('spent:account:self:2026-11')).toBeUndefined();
+  expect(await storage.get('def:variables:value')).toBeUndefined();
+  expect((await storage.list({ prefix: 'ledger:' })).size).toBe(1); // Original deposit only.
+  expect(await storage.getAlarm()).toBeNull();
+});
+
+it('finishes an existing durable reservation through the immediate path', async () => {
+  const { storage, hold } = await setup();
+  const args = { id: 'legacy', amount: 20, kind: 'read' };
+  await hold(args);
+  expect(await storage.transaction(tx => charge(tx, args, time))).toMatchObject({ settled: true, charged: 20 });
+  expect(await funds(storage)).toMatchObject({ balance_microdollars: 9980, held_microdollars: 0 });
+  expect(await storage.get('hold:legacy')).toBeUndefined();
 });

@@ -2,7 +2,7 @@ import { COLLECTIONS, normalize, validateConfig, validateName } from '../service
 import { assert } from '../utils/errors.js';
 import { encryptSecret, secretMetadata } from '../executor/secrets.js';
 import { digest } from '../auth/crypto.js';
-import { reserve, settle, funds } from './ledger.js';
+import { charge, funds } from './ledger.js';
 import { price } from '../utils/pricing.js';
 /** Assemble the bounded account graph from individually stored definitions. */
 export async function loadConfig(tx, publicView = false) {
@@ -49,7 +49,7 @@ export async function mutate(tx, args, env) {
   const quote = changes.length * price('change');
   const { balance_microdollars } = await funds(tx);
   if (args.dry_run) return { changes, quote_microdollars: quote, cost_microdollars: 0, balance_microdollars };
-  const hold = await reserve(tx, { id: `change:${args.id}:${args.key_id || 'session'}`, amount: quote, kind: 'change', ...await keyBudget(tx, args.key_id) });
+  await charge(tx, { id: `change:${args.id}:${args.key_id || 'session'}`, amount: quote, kind: 'change', ...await keyBudget(tx, args.key_id) });
   for (const operation of args.operations) {
     const { kind, name } = operation;
     if (kind === 'jobs') await tx.put(`job-index:${name}`, { name, account: args.account, updated_at: Date.now() });
@@ -62,7 +62,6 @@ export async function mutate(tx, args, env) {
     await tx.put(`def:jobs:${name}`, job); await tx.put(`sync:${name}`, { name, account: args.account, version: crypto.randomUUID() });
   }
   await tx.put(`audit:${Date.now()}:${args.id}`, { id: args.id, changes, created_at: Date.now(), key_id: args.key_id || null });
-  await settle(tx, hold.id, quote);
   const result = { changes, quote_microdollars: quote, cost_microdollars: quote, balance_microdollars: balance_microdollars - quote };
   await tx.put(receiptKey, { request_hash: requestHash, response: result });
   await tx.setAlarm(Date.now() + 1000);

@@ -5,7 +5,7 @@ import { loadConfig, mutate, keyBudget } from './definitions.js';
 import { rpc } from '../utils/rpc.js';
 import { price } from '../utils/pricing.js';
 import { parseScopes } from '../auth/scopes.js';
-import { funds, reserve, settle, deposit } from './ledger.js';
+import { funds, reserve, settle, deposit, charge } from './ledger.js';
 import { beginSecretRotation, finishSecretRotation } from './secret-rotation.js';
 
 /** Account definitions and money share one transactional, SQLite-backed object. */
@@ -94,9 +94,9 @@ export class AccountDO {
       }
       case 'bill-change': {
         const amount = price('change'); if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
-        const hold = await reserve(tx, { id: args.id, amount, kind: 'change', ...await keyBudget(tx, args.key_id) });
-        if (!hold.duplicate) { await settle(tx, hold.id, amount); await tx.put(`audit:${Date.now()}:${args.id}`, { id: args.id, kind: 'trigger', created_at: Date.now() }); }
-        return { cost_microdollars: hold.duplicate ? 0 : amount };
+        const receipt = await charge(tx, { id: args.id, amount, kind: 'change', ...await keyBudget(tx, args.key_id) });
+        if (!receipt.duplicate) { await tx.put(`audit:${Date.now()}:${args.id}`, { id: args.id, kind: 'trigger', created_at: Date.now() }); }
+        return { cost_microdollars: receipt.duplicate ? 0 : amount };
       }
       case 'activity': {
         const counts = {};
@@ -107,8 +107,8 @@ export class AccountDO {
       case 'run-route': { const hold = await tx.get(`hold:${args.id}`) || await tx.get(`receipt:${args.id}`); if (hold?.job) return { job: hold.job }; const profile = await tx.get('profile'); const prefix = `${profile.id}:`; assert(args.id.startsWith(prefix), 'not_found', 'Run not found', 404); const parts = args.id.slice(prefix.length).split(':'); const name = parts[0] === '_test' ? parts.slice(0, 2).join(':') : parts[0]; assert(await tx.get(`job-index:${name}`), 'not_found', 'Run not found', 404); return { job: name }; }
       case 'meter-read': {
         const names = args.resource === 'runs' ? (args.job ? [args.job] : (await tx.get('recent-jobs')) || []) : [];
-        const hold = await reserve(tx, { id: args.id, amount: price('read', { job_count: names.length }), read_job_count: names.length, kind: 'read', ...await keyBudget(tx, args.key_id) });
-        await settle(tx, hold.id, hold.amount); return { cost_microdollars: hold.amount, names };
+        const receipt = await charge(tx, { id: args.id, amount: price('read', { job_count: names.length }), read_job_count: names.length, kind: 'read', ...await keyBudget(tx, args.key_id) });
+        return { cost_microdollars: receipt.charged, names };
       }
       case 'rate-limit': {
         const key = `rate:${args.id}`; const now = Date.now();
@@ -126,9 +126,9 @@ export class AccountDO {
         const amount = price('change');
         if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
         assert((await tx.list({ prefix: 'key:' })).size < 100, 'key_limit', 'Maximum 100 API keys');
-        const hold = await reserve(tx, { id: `key:${args.id}`, amount, kind: 'change' });
+        await charge(tx, { id: `key:${args.id}`, amount, kind: 'change' });
         const record = { id: args.id, name: args.name, hash: args.hash, scopes, daily_spend_microdollars: args.daily_spend_microdollars, expires_at: args.expires_at, request_hash: args.request_hash };
-        await tx.put(`key:${args.id}`, record); await settle(tx, hold.id, amount);
+        await tx.put(`key:${args.id}`, record);
         await tx.put(`audit:${Date.now()}:${args.id}`, { kind: 'create_key', id: args.id, created_at: Date.now() });
         return { ...record, hash: undefined, cost_microdollars: amount };
       }
@@ -136,8 +136,8 @@ export class AccountDO {
         const key = await tx.get(`key:${args.id}`); assert(key, 'not_found', 'Key not found', 404);
         if (key.revoked) return { cost_microdollars: 0 };
         const amount = price('change'); if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
-        const hold = await reserve(tx, { id: `revoke:${args.id}`, amount, kind: 'change' });
-        await tx.put(`key:${args.id}`, { ...key, revoked: true }); await settle(tx, hold.id, amount);
+        await charge(tx, { id: `revoke:${args.id}`, amount, kind: 'change' });
+        await tx.put(`key:${args.id}`, { ...key, revoked: true });
         await tx.put(`audit:${Date.now()}:revoke:${args.id}`, { kind: 'revoke_key', id: args.id, created_at: Date.now() });
         return { cost_microdollars: amount };
       }

@@ -74,7 +74,7 @@ disagrees with it, this file wins and the other document is stale.
 | S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ✅ | Atomic versioned keyring, legacy reads, held per-secret re-encryption, edit/delete conflict protection, audit, scoped CLI and CI wiring verified. Persisted local Worker migrated v1 → v2 and executed a redacted JS run with v1 retired. [Operator procedure](docs/ops/secret-rotation.md). §3.3. |
 | S2 | Charge measured JS CPU instead of the configured limit | code | ⬜ | §3.4; needs per-invocation CPU data. |
 | S3 | Recalibrate prices from a month of real Cloudflare and Anthropic bills | ops/code | ⬜ | `docs/business/pricing.md`. |
-| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budget counters save 2–4 writes; unchanged alarms/runtime/recent-job indexes skip writes. Full-path HTTP cost guards cover redirects, cold history, pruning and safety. Corrected 34-write/24-request allowance requires an 80 µ$ run price; hold/ledger compaction and further reductions remain. [Cost audit](docs/business/pricing.md). |
+| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budget counters save 2–4 writes; unchanged alarms/runtime/recent-job indexes skip writes. Full-path HTTP cost guards cover redirects, cold history, pruning and safety. Corrected 34-write/24-request allowance requires an 80 µ$ run price; transactional reads/changes now skip transient holds and expiry alarms; run-log compaction and further reductions remain. [Cost audit](docs/business/pricing.md). |
 
 ## Backlog
 
@@ -128,3 +128,12 @@ calendar days of billed counts rather than sampling retained logs.
   quotes use the new 80 µ$ base; old holds retain their original maximum.
 - Hold/ledger compaction and further safe price reductions remain S4 work. No production
   deployment or live acceptance is claimed; L9–L14 owner steps remain unchanged.
+
+## S4 transactional billing acceptance — 2026-11-16
+
+- Reads and changes completed inside one AccountDO transaction use the same funds,
+  outstanding-hold and budget checks without writing/deleting a transient hold or
+  scheduling its expiry alarm. External work retains durable reservations.
+- Lint and 65 tests pass, including duplicate protection, pending holds and key caps,
+  insufficient balance, transaction rollback and existing reservation compatibility.
+- Permanent receipts, sortable ledger entries and published prices are preserved.
