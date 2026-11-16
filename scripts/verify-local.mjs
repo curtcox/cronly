@@ -33,6 +33,11 @@ while (Date.now() < deadline) {
 assert.equal(runs.length, 6);
 const details = await Promise.all(runs.map(run => api(`/api/runs/${encodeURIComponent(run.id)}`)));
 assert(!JSON.stringify(details).includes('acceptance-secret'));
+for (const { run } of details) {
+  const summary = runs.find(item => item.id === run.id);
+  for (const field of ['status', 'cost_microdollars', 'finished_at']) assert.equal(run[field], summary[field]);
+  for (const field of ['completion', 'settlement', 'pending', 'retry', 'key_id', 'input']) assert(!Object.hasOwn(run, field));
+}
 assert(details.find(result => result.run.job === 'js').run.console.includes('«secret:token»'));
 assert(details.find(result => result.run.job === 'gateway').run.return_value.includes('200'));
 assert.equal(details.find(result => result.run.job === 'gateway').run.subrequests, 1);

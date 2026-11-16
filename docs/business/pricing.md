@@ -11,12 +11,12 @@ constants as the API; historical numbers in the master plan are superseded here.
 
 | Operation | Price | Estimated worst-case marginal cost |
 |---|---|---|
-| HTTP run | 89 µ$ | ceil(policy run bound), currently 54 µ$ |
+| HTTP run | 87 µ$ | ceil(policy run bound), currently 53 µ$ |
 | Webhook run | HTTP/JS price + 5 µ$ | run bound + 2 µ$ |
 | Change: action, variable, secret (including key rotation), job, key, trigger | 100 µ$ | 20 µ$ |
 | API-key read | 21 µ$ base + 2 µ$ per job scanned for aggregate history | ceil(12 µ$ base + 1.2 µ$/job) |
 | Web session reads, cron explain, quotes, mutation dry runs | Free, rate-limited | Bounded fixed operating cost |
-| JavaScript run | 89 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
+| JavaScript run | 87 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
 | JS daily activation | 3,300 µ$ on first invocation of each action version per UTC day | 2,000 µ$ provider activation |
 | Prose | ceil(1.64 × actual model-token cost) + 500 µ$ | actual tokens + bookkeeping |
 
@@ -26,7 +26,7 @@ configuration contribute to the content hash. CPU is billed at the configured li
 until per-invocation measured CPU is available (S2). Retries are separately reserved
 and charged as runs. Queue redelivery never repeats a claimed outbound operation.
 
-A regular hourly HTTP job is about $0.06408 per 30 days; a minutely job is $3.8448. These
+A regular hourly HTTP job is about $0.06264 per 30 days; a minutely job is $3.7584. These
 are run charges only. Changes, API polling, prose and JS activation are additional.
 
 ## Units and deposits
@@ -49,7 +49,7 @@ reviewed Terms and applicable law.
 
 Rates live only in `src/utils/cost-policy.js`; prices only in `src/utils/pricing.js`;
 model rates only in `src/utils/llm-policy.js`. Included allowances are ignored.
-The HTTP bound includes 38 row writes, 30 DO requests, five Worker invocations and
+The HTTP bound includes 37 row writes, 30 DO requests, five Worker invocations and
 3,000 compact-index row reads, six Queue operations, CPU,
 awake time and 16 KB retained logs; orchestration caches compact summaries instead of loading log bodies. Read and change bounds include actual ledger,
 key-budget, audit and rate-counter bookkeeping rather than just one request.
@@ -81,10 +81,10 @@ outbox cleanup, plus the pause when a retry exceeds its budget. Results are stag
 durably before settlement; recovery completes the same outcome and charges once.
 A failed run's retry context stays private until its
 deterministic child is reserved/enqueued or refused by its job/key budget. The 144 checks repeat these paths with compact and standalone reservations, compact summaries, UTC day/month rollovers
-and oversized standalone summaries. The same
-38-write/30-DO-request/five-invocation allowance covers these tested paths; separately
+and oversized standalone summaries. The current
+37-write/30-DO-request/five-invocation allowance covers these tested paths; separately
 billed retries each contribute their own allowance. Refused retries have no separate
-charge, so the paid parent includes their pause/log/cleanup overhead. The audit raises
+charge, so the paid parent includes their pause/log/cleanup overhead. The recovery audit initially raised
 the 80 µ$ base to 89 µ$ to retain the approved floor after rounding costs up.
 
 This corrects the earlier 24-write/12-request allowance, which omitted some of that
@@ -92,7 +92,7 @@ bookkeeping. The prior 60 µ$ run price fails the audited floor. Compact pending
 removed one write per run and initially reduced the corrected 80 µ$ default to 78 µ$.
 The subsequent redelivery audit includes recovery RPCs and all consumer invocations,
 which required 80 µ$. Staged-result recovery and the previously uncounted retry-refusal
-path now require 89 µ$. Persisted job quotes follow the current price;
+path required 89 µ$ before the staged-log finalization saving below. Persisted job quotes follow the current price;
 already-held runs settle within their original maximum.
 
 Tests assert `price × 0.92 >= 1.5 × ceil(worstCaseCost)` for every operation and JS extremes.
@@ -139,9 +139,20 @@ summaries and ledger it fits below the storage value limit. Large snapshots and
 legacy holds remain standalone, without migration writes. Funds, budgets, account
 concurrency, job overlap and expiry include both formats. Permanent receipts remain
 separate and never expose execution snapshots. The full-path audit checks both
-formats and requires compact runs to use one fewer write; standalone runs retain
-the 38-write bound and therefore the same 89 µ$ price. Further worst-case write
-reductions remain S4 work.
+formats and requires compact runs to use one fewer write; standalone runs retained
+the then-current 38-write bound and 89 µ$ price.
+
+Completed runs now retain their original durable staged body. Finalization commits
+only the compact history index, authoritative billing/subrequest metadata and any
+changed outcome settings. Full reads combine the saved outcome with that committed
+metadata; legacy completed bodies remain readable. Recovery and public privacy
+checks apply to both formats. This removes a body rewrite even for large standalone
+reservations, full ledger buffers, UTC rollovers and refused retries. The 144 checks
+now enforce 37 writes per standalone run and 36 per compact run, with the existing
+request/read allowances. The rounded HTTP cost falls from 54 to 53 µ$, reducing the
+base HTTP/JS run price from 89 to 87 µ$ while preserving the approved margin. Already
+reserved runs retain their original maximum. Further worst-case write reductions
+remain S4 work.
 
 ## Verified provider sources
 

@@ -54,7 +54,7 @@ disagrees with it, this file wins and the other document is stale.
 |----|------|-------|--------|-------------------|
 | L1 | Scaffold: wrangler (prod + local), Vitest, ESLint, `dev:local`, CI, `/health` | code | ✅ | Wrangler prod/local, pinned dependencies, lint, CI, health and gated LocalDev/deposits verified. Master plan §10.1. Copy hashbin's local mode and CI shape. |
 | L2 | Accounts and auth: Clerk sessions, Clerk webhook → AccountDO, API keys with scopes and daily spend caps, `API_ROUTES` access test | code | ✅ | Clerk/LocalDev auth, signed hashed scoped keys, revocation, daily caps and Clerk webhook; access coverage tests. §4.1. Port hashbin `src/auth/`. |
-| L3 | Money: µ$ ledger, reserve/settle/expire holds, Stripe deposits, history, `cost-policy.js`, `pricing.js`, price-floor tests, `/api/quote` | code | 🟨 | Transactional ledger/holds, signed Stripe webhook, itemized Checkout and quotes tested; S4 recovery/refused-retry audit and rounded floors set HTTP price to 89 µ$ and reads to 21 µ$ plus 2 µ$/job. Existing holds keep their maximum. Real deposit remains L14. §6, `docs/business/pricing.md`. Needs D4, D6. |
+| L3 | Money: µ$ ledger, reserve/settle/expire holds, Stripe deposits, history, `cost-policy.js`, `pricing.js`, price-floor tests, `/api/quote` | code | 🟨 | Transactional ledger/holds, signed Stripe webhook, itemized Checkout and quotes tested; S4 recovery/refused-retry audit and rounded floors set HTTP price to 87 µ$ and reads to 21 µ$ plus 2 µ$/job. Existing holds keep their maximum. Real deposit remains L14. §6, `docs/business/pricing.md`. Needs D4, D6. |
 | L4 | Definitions: variables, secrets (AES-GCM, write-only), HTTP actions, templates, change billing, audit log, dry run, idempotency | code | ✅ | Atomic billed CRUD, reference checks, AES-GCM write-only secrets, dry runs, audit and idempotency tested. §2, §3.3, §4.2. |
 | L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | ✅ | Real local Worker/Queue HTTP path verified; retries, missed/overlap, budgets, duplicate delivery, held snapshots, refusal pause and recovery tested. Initial pending runs and recovery alarms commit atomically. Replayed starts recover original deadlines, trigger/input and key identity from the reservation after a lost response/pending/alarm write; expired reservations never enqueue. Observed results stage before settlement; Queue redelivery/alarms recover completion and private retry dispatch after restart without repeating external work or charges. Retry input/key caps survive settlement; budget refusals clear the retry. §3, §3.1, §2.3. |
 | L6 | Runs, costs, upcoming, projection APIs; retention pruning | code | ✅ | Retained/deleted-job history, NDJSON, permanent UTC cost aggregates, ledger cursors, bounded upcoming, fast cron/DST projections and byte/retention bounds tested. §4.3, §6, §7. |
@@ -74,7 +74,7 @@ disagrees with it, this file wins and the other document is stale.
 | S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ✅ | Atomic versioned keyring, legacy reads, held per-secret re-encryption, edit/delete conflict protection, audit, scoped CLI and CI wiring verified. Persisted local Worker migrated v1 → v2 and executed a redacted JS run with v1 retired. [Operator procedure](docs/ops/secret-rotation.md). §3.3. |
 | S2 | Charge measured JS CPU instead of the configured limit | code | ⬜ | §3.4; needs per-invocation CPU data. |
 | S3 | Recalibrate prices from a month of real Cloudflare and Anthropic bills | ops/code | ⬜ | `docs/business/pricing.md`. |
-| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budgets, active money summaries and ledger buffering reduce ordinary writes; unchanged alarms/runtime/recent-job indexes and completion settings skip writes. Transactional reads/changes skip transient holds. Ledger pages retain legacy cursors and permanent receipts. Small durable reservations share the balance row, avoiding their settlement delete; large/legacy snapshots stay standalone. Both formats pass real local SQLite/Queue acceptance. Finalization reuses the durable staged log, removing a completion-body rewrite; final cost recalibration is pending. The 144-path audit includes ledger archival, compact/rollover/large-period money summaries and unfunded-retry pauses: 38 writes, 30 DO requests/five Worker invocations at 89 µ$/run after rounded floors. Large-snapshot and worst-case write reductions remain. [Cost audit](docs/business/pricing.md). |
+| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budgets, active money summaries and ledger buffering reduce ordinary writes; unchanged alarms/runtime/recent-job indexes and completion settings skip writes. Transactional reads/changes skip transient holds. Ledger pages retain legacy cursors and permanent receipts. Small durable reservations share the balance row, avoiding their settlement delete; large/legacy snapshots stay standalone. Both formats pass real local SQLite/Queue acceptance. Finalization reuses the durable staged log, removing a completion-body rewrite. The 144-path audit includes ledger archival, compact/rollover/large-period money summaries and unfunded-retry pauses: 37 writes, 30 DO requests/five Worker invocations at 87 µ$/run after rounded floors. Large-snapshot and worst-case write reductions remain. [Cost audit](docs/business/pricing.md). |
 
 ## Backlog
 
@@ -327,3 +327,20 @@ calendar days of billed counts rather than sampling retained logs.
 - Price recalibration and local Worker/Queue acceptance for this reduction follow;
   the conservative 38-write allowance and 89 µ$ price are unchanged at this point.
   L9–L14 live acceptance and owner/legal work remain open.
+
+## S4 staged-log price reduction acceptance — 2026-11-16
+
+- All 144 full-path cost checks pass with a 37-write standalone / 36-write compact
+  reservation allowance, including full ledger archival, UTC rollovers, oversized
+  summaries, redirects, Queue redelivery, recovery and refused-retry pauses.
+- The rounded worst-case HTTP cost is 53 µ$. The base HTTP/JS run price falls from
+  89 to 87 µ$, preserving the approved revenue haircut and 1.5× cost floor. Existing
+  reservations keep their original maximum; current job quotes use the new price.
+- Lint, all 279 unit/integration tests, all three browser flows and the production
+  Worker dry-run build pass. Real local SQLite/Queue acceptance verifies HTTP,
+  small/large JS snapshots, secret redaction, native network denial, counted gateway,
+  funded retries, ledger/cost agreement, archival and duplicate deposits. The verifier
+  now also checks summary/detail billing agreement and private-field filtering for
+  every completed run.
+- Further S4 reductions remain; L9–L14 live acceptance and owner/legal work are still
+  outstanding. Nothing was deployed to production and no live credentials changed.
