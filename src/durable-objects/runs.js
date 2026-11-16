@@ -1,5 +1,4 @@
-import { digest } from '../auth/crypto.js';
-import { SANDBOX_WRAPPER } from '../executor/javascript.js';
+import { javascriptVersion } from '../executor/javascript.js';
 import { PRICES } from '../utils/pricing.js';
 import { assert } from '../utils/errors.js';
 import { reserve } from './ledger.js';
@@ -48,7 +47,7 @@ export async function prepareRun(tx, args, env = {}) {
   const amount = price(args.trigger === 'webhook' ? 'hook' : 'run', action);
   if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
   if (args.test_action) await tx.put(`job-index:${args.name}`, { name: args.name, account: args.account, updated_at: Date.now() });
-  const hold = await reserve(tx, { id: args.id, amount, job: args.name, action: job.action, kind: 'run', budget: job.budget, ...await keyBudget(tx, args.key_id), execution: { version: action.type === 'javascript' ? await digest(JSON.stringify([SANDBOX_WRAPPER, action])) : null, action, vars, secrets, job, input: args.input, trigger: args.trigger, scheduled_at: args.scheduled_at, attempt: args.attempt || 0 }, ttl_ms: 120000 });
+  const hold = await reserve(tx, { id: args.id, amount, job: args.name, action: job.action, kind: 'run', budget: job.budget, ...await keyBudget(tx, args.key_id), execution: { version: action.type === 'javascript' ? await javascriptVersion(action) : null, action, vars, secrets, job, input: args.input, trigger: args.trigger, scheduled_at: args.scheduled_at, attempt: args.attempt || 0 }, ttl_ms: 120000 });
   await recordRun(tx, args.name, now, activity);
   return prepared(hold);
 }

@@ -11,14 +11,14 @@ await api('/api/dev/deposit', 'POST', { amount_microdollars: 5000000 }, 'fund');
 const before = await api('/api/account');
 await api('/api/variables/token?dry_run=1', 'PUT', { value: 'test' });
 assert.equal((await api('/api/account')).balance_microdollars, before.balance_microdollars);
-await api('/api/secrets/token', 'PUT', { value: 'acceptance-secret' });
+await api('/api/secrets/token', 'PUT', { value: 'acceptance-secret-"quoted"\\path\n\t雪' });
 for (const [name, action] of Object.entries({
   http: { url: 'https://example.com' },
   // A UTF-8 snapshot above the compact-hold limit exercises standalone SQLite
   // reservations alongside the small HTTP, gateway and retry snapshots below.
-  js: { type: 'javascript', source: 'export default async ctx => { console.log(ctx.secrets.token); return { ok: true }; }\n/*' + '😀'.repeat(2200) + '*/', cpu_ms: 100, subrequests: 0 },
+  js: { type: 'javascript', source: 'export default async ctx => { console.log("x".repeat(5980) + ctx.secrets.token); return "y".repeat(5980) + ctx.secrets.token; }\n/*' + '😀'.repeat(2200) + '*/', cpu_ms: 100, subrequests: 0 },
   blocked: { type: 'javascript', source: 'export default async () => { await fetch("https://example.com"); }', cpu_ms: 100, subrequests: 0 },
-  gateway: { type: 'javascript', source: 'export default async ctx => { const result = await ctx.fetch("https://example.com"); return { status: result.status }; }', cpu_ms: 100, subrequests: 1 },
+  gateway: { type: 'javascript', source: 'export default async ctx => { console.log({ token: ctx.secrets.token }); const result = await ctx.fetch("https://example.com"); return { status: result.status }; }', cpu_ms: 100, subrequests: 1 },
   retry: { type: 'javascript', source: 'export default async ctx => { if (!ctx.run.id.endsWith(":retry")) throw new Error("retry"); return { event: ctx.input.event }; }', cpu_ms: 100, subrequests: 0 }
 })) {
   await api(`/api/actions/${name}`, 'PUT', action); await api(`/api/jobs/${name}`, 'PUT', { action: name, cron: null, retries: name === 'retry' ? 1 : 0, ...(name === 'http' ? { overlap: 'allow' } : {}) });
@@ -43,6 +43,8 @@ for (const { run } of details) {
   for (const field of ['completion', 'settlement', 'pending', 'retry', 'key_id', 'input']) assert(!Object.hasOwn(run, field));
 }
 assert(details.find(result => result.run.job === 'js').run.console.includes('«secret:token»'));
+assert(details.find(result => result.run.job === 'js').run.return_value.includes('«secret:token»'));
+assert(details.find(result => result.run.job === 'gateway').run.console.includes('«secret:token»'));
 assert(details.find(result => result.run.job === 'gateway').run.return_value.includes('200'));
 assert.equal(details.find(result => result.run.job === 'gateway').run.subrequests, 1);
 for (const name of ['http', 'js', 'gateway']) assert.equal(runs.find(r => r.job === name).status, 'success', `${name} did not succeed`);
@@ -84,4 +86,4 @@ assert.equal((await api('/api/account')).balance_microdollars, account.balance_m
 assert.equal((await api('/api/costs')).total_microdollars, spent);
 await api('/api/dev/deposit', 'POST', { amount_microdollars: 1 }, archiveId(0));
 assert.deepEqual((await api('/api/transactions')).items, archived);
-console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, cross-job cooldowns and duplicate runs, redaction, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
+console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, cross-job cooldowns and duplicate runs, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');

@@ -1,6 +1,7 @@
 import { base64url, unbase64url, digest } from '../auth/crypto.js';
 import { secretKeyring, secretMaster } from './secret-keys.js';
 import { assert } from '../utils/errors.js';
+import { createRedactor } from './redaction.js';
 const enc = new TextEncoder();
 async function key(master, account, info = 'cronly:secrets:v1') {
   if (!master) throw new Error('Missing master key');
@@ -29,14 +30,5 @@ export async function decryptSecret(env, account, name, record) {
 export function secretMetadata(record) { return { fingerprint: record.fingerprint, updated_at: record.updated_at, version: record.version, key_version: record.key_version || 'v1' }; }
 /** Redact raw, encoded and JSON-escaped secret representations before storage. */
 export function redact(text, secrets) {
-  let result = String(text);
-  const replacements = Object.entries(secrets).flatMap(([name, value]) => {
-    const bytes = new TextEncoder().encode(value); const base64 = btoa(String.fromCharCode(...bytes));
-    const patterns = [value, encodeURIComponent(new TextDecoder().decode(bytes)), base64, base64url(bytes)];
-    // Request logs and JS object output contain JSON escapes rather than the raw
-    // secret. Match those before a later excerpt/size bound can split the value.
-    return [...new Set(patterns.flatMap(pattern => [pattern, JSON.stringify(pattern).slice(1, -1)]))].filter(Boolean).map(pattern => ({ pattern, name }));
-  }).sort((a, b) => b.pattern.length - a.pattern.length);
-  for (const { pattern, name } of replacements) result = result.split(pattern).join(`«secret:${name}»`);
-  return result;
+  return createRedactor(secrets)(text);
 }

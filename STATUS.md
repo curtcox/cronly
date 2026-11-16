@@ -61,7 +61,7 @@ disagrees with it, this file wins and the other document is stale.
 | L7 | Triggers: run now, trigger tokens, `/hook/*`, per-token rate limits, CORS, `{{input.*}}` | code | ✅ | Manual runs, signed job-only tokens, revocation, token limits, input validation and hook-only CORS tested. §4.1. |
 | L8 | Web UI with balance + runway header on every signed-in page; Playwright tests | code | ✅ | All workspace pages, runtime status/runway, direct action tests, quote dialogs and logo implemented; mobile and browser save/run/escaping/cron flows pass. §5. |
 | L9 | Prose: free cron explain; Claude to-cron, ask, change proposals + apply; holds and billing; to-cron eval | code/ops | 🟨 | Structured client, held read-only conversations, usage billing, separate stale-checked proposals and 100-case two-model eval implemented. Live eval requires owner Anthropic access. §3.5. Needs D3 and an Anthropic API key (ops). |
-| L10 | JavaScript actions: sandbox, outbound gateway, CPU/subrequest limits and pricing, editor | code/ops | 🟨 | Content-addressed Worker Loader, blocked native networking, counted gateway, daily activation settlement and editor implemented; real local JS succeeds. Live CPU-limit acceptance required. §2.2, §3.4. Needs D2. |
+| L10 | JavaScript actions: sandbox, outbound gateway, CPU/subrequest limits and pricing, editor | code/ops | 🟨 | Content-addressed Worker Loader, blocked native networking, counted gateway, daily activation settlement and editor implemented; real local JS succeeds. Shared redaction runs inside the sandbox before console/return truncation; its code participates in version/activation hashing. Live CPU-limit acceptance required. §2.2, §3.4. Needs D2. |
 | L11 | Agent surface: OpenAPI + drift test, `llms.txt`, agent docs, MCP server, `/api/config`, browser snippet | code | ✅ | Atomic config with conflict checks, OpenAPI drift test, scoped MCP protocol tests, llms.txt/agent docs and immutable SHA-384 SRI trigger SDK verified. §4.4, §4.5. |
 | L12 | Abuse and cost safety: limits, destination rules, rate-limit rules, daily cost reconciliation and brake, invite-only sign-up | code/ops | 🟨 | Account/job/destination caps, native ingress limiter, destination checks, conservative daily analytics reconciliation and stale-report brake implemented. Live schema/WAF/billing alerts and Clerk Restricted mode remain owner steps. §8. |
 | L13 | Terms of Service and Privacy Policy (acceptable use, refunds, suspension) | legal | 🟨 | Service-specific drafts prepared; owner directed shared entity/jurisdiction with hashbin and separate contacts, approving placeholders for now. Offline profile renders escaped facts into both drafts with drift checks; approved-launch deploys require complete pinned facts. Actual facts, cronly contacts and policy approval remain. Checkout is gated by launch approval. |
@@ -371,3 +371,19 @@ calendar days of billed counts rather than sampling retained logs.
 - Lint and all 290 unit/integration tests pass, including serialized quotes,
   backslashes, control characters, Unicode and HTTP log capture. JS truncation
   before redaction is a separate follow-up; prices and live acceptance are unchanged.
+
+## L5/L10 redaction before JS truncation — 2026-11-16
+
+- A shared pure redactor now runs inside the sandbox before console and return-value
+  cutoffs, including serialized object values. Long secrets and secrets crossing
+  the remaining console budget cannot leave their prefixes in retained excerpts.
+  Each invocation keeps its own secret set, including failure logs.
+- The sandbox receives the redactor as an isolated ES module. Its source participates
+  in the content hash used by both reservations/activation billing and Worker Loader.
+  No encryption or master-key dependencies are supplied to the sandbox.
+- Lint, all 296 unit/integration tests, all three browser flows and the production
+  dry-run build pass. Real local SQLite/Queue acceptance verifies escaped object
+  output, console/return boundary redaction, native network denial, counted gateway,
+  compact/standalone reservations, retry billing, ledger archival and cost totals.
+- Prices and existing reservation maxima are unchanged. L9–L14 live/owner/legal
+  acceptance and S4 reductions remain open; nothing was deployed to production.

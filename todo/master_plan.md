@@ -172,7 +172,9 @@ On-demand runs (UI, API, webhook) enter at step 2 with a fresh run id.
 - Decrypted only inside the executor for the run that needs it or a separately reserved
   key-rotation operation.
 - Redaction: before anything is logged, every secret value used by the run (and its URL- and
-  base64-encoded forms) is replaced with `«secret:NAME»`.
+  base64-encoded forms, including JSON escapes) is replaced with `«secret:NAME»`.
+  Scrub complete values before excerpt/size limits; JS console and return-value
+  capture apply the same redactor inside the sandbox before truncating output.
 - Key rotation is S1 (re-encrypt under a new master key version), not launch. The
   implementation uses an atomic `SECRETS_KEYRING` binding and a separately held,
   `secrets:write`-scoped rotation endpoint. See [operator procedure](../docs/ops/secret-rotation.md).
