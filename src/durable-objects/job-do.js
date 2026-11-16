@@ -19,9 +19,10 @@ export class JobDO {
     switch (args.op) {
       case 'configure': {
         const prior = await this.storage.get('settings');
-        const settings = { account: args.account, name: args.name, job: args.job, paused: null };
+        const settings = { account: args.account, name: args.name, job: args.job, paused: null, ...(prior?.last_outcome ? { last_outcome: prior.last_outcome } : {}) };
         settings.next_fire = args.job?.enabled && args.job.cron ? (prior?.job?.cron === args.job.cron && prior?.job?.timezone === args.job.timezone && prior.next_fire > Date.now() ? prior.next_fire : Date.parse(nextFires(args.job.cron, args.job.timezone, 1)[0])) : null;
-        await this.storage.put('settings', settings); await this.publish(settings); await this.arm(); return settings;
+        if (JSON.stringify(prior) !== JSON.stringify(settings)) await this.storage.put('settings', settings);
+        await this.publish(settings); await this.arm(); return settings;
       }
       case 'triggers': return { items: [...(await this.storage.list({ prefix: 'trigger:' })).values()].map(({ id, rate, revoked }) => ({ id, rate_per_minute: rate, revoked })) };
       case 'change-trigger': {
@@ -55,7 +56,8 @@ export class JobDO {
       }
       case 'wake': {
         const settings = await this.storage.get('settings'); if (!settings?.job) return {};
-        if (settings.paused === 'insufficient_balance' || args.force) { settings.paused = null; await this.storage.put('settings', settings); await this.reconcile(); }
+        if (settings.paused === 'insufficient_balance' || args.force) await this.reconcile();
+        else await this.publish(settings);
         return {};
       }
       case 'runs': {
@@ -88,10 +90,11 @@ export class JobDO {
   async reconcile() {
     const settings = await this.storage.get('settings'); if (!settings) return;
     const config = await rpc(this.env.ACCOUNTS, settings.account, 'config');
+    settings.paused = null; delete settings.resume_at;
     settings.job = Object.hasOwn(config.jobs, settings.name) ? config.jobs[settings.name] : null;
     if (!settings.job) { settings.next_fire = null; settings.paused = 'deleted'; }
     if (settings.job?.enabled && settings.job.cron && !settings.paused) settings.next_fire = Date.parse(nextFires(settings.job.cron, settings.job.timezone, 1)[0]);
-    await this.storage.put('settings', settings); await this.arm();
+    await this.storage.put('settings', settings); await this.publish(settings); await this.arm();
   }
   async start(args) {
     assert(this.env.COST_SAFETY_HARD_STOP !== 'true', 'cost_brake', 'Runs are paused by the operator', 503);
