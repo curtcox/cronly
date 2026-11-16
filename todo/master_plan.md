@@ -380,6 +380,8 @@ Detailed derivation in [`docs/business/pricing.md`](../docs/business/pricing.md)
   (redacted), response headers and the first 8 KB of the body (redacted), JS return value and
   console output (8 KB), CPU ms, subrequests, cost.
 - Kept 30 days or the last 1,000 runs per job, whichever is fewer; pruned by the JobDO alarm.
+  Pending runs and retry outboxes survive these limits until recovery finishes;
+  completed log bodies and indexes are then pruned atomically.
   The run price includes this storage. Ledger rows and the change audit log are kept for the
   life of the account (they are small and needed for billing disputes).
 - Export: `GET /api/runs?format=ndjson`.

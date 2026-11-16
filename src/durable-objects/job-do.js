@@ -235,7 +235,16 @@ export class JobDO {
   }
   async prune() {
     const records = (await this.summaries()).map(r => [`history:${r.id}`, r]).sort(([, a], [, b]) => b.created_at - a.created_at);
-    for (const [index, [key, run]] of records.entries()) if (index >= 1000 || run.created_at < Date.now() - 30 * DAY) { await this.storage.delete(`run:${run.id}`); await this.storage.delete(key); this.historyCache = this.historyCache.filter(r => r.id !== run.id); }
+    for (const [index, [key, run]] of records.entries()) {
+      // These rows are also recovery outboxes. Retention must not discard paid
+      // work or a retry that has not yet been reserved, even after a long outage.
+      if (['queued', 'running'].includes(run.status) || run.retry?.dispatch) continue;
+      if (index < 1000 && run.created_at >= Date.now() - 30 * DAY) continue;
+      await this.storage.transaction(async tx => {
+        await tx.delete(`run:${run.id}`); await tx.delete(key);
+      });
+      this.historyCache = this.historyCache.filter(r => r.id !== run.id);
+    }
   }
   async alarm() {
     return this.ctx.blockConcurrencyWhile(async () => {
