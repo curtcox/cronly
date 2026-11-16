@@ -503,5 +503,8 @@ calendar days of billed counts rather than sampling retained logs.
 - Lint, all 497 unit/integration tests, all four browser flows and the production
   dry-run build pass. The expanded 288-path cost audit includes activity eviction
   alongside archival, rollovers, oversized summaries and failed recovery writes.
+- Real local SQLite/Queue acceptance passes with compact and standalone HTTP/JS
+  reservations, shared activation, separately charged retries, cooldowns across
+  jobs, duplicate runs, ledger archival and matching costs/balance with no holds.
 - Conservative cost bounds and the 87 µ$ price remain unchanged. Further S4
   reductions and L9–L14 live/owner/legal steps remain open; nothing was deployed.
