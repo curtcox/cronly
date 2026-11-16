@@ -76,16 +76,17 @@ for (const failure of ['enqueue', 'acknowledgement']) {
   });
 }
 
-it('commits a healthy report and all resume outboxes atomically', async () => {
+it('commits a healthy report and its recovery scan atomically', async () => {
   const env = await recoverySetup(); const safety = env.SAFETY.get('global');
   const put = safety.storage.put.bind(safety.storage);
   const fault = vi.spyOn(safety.storage, 'put').mockImplementation(async (key, value) => {
-    if (key === 'resume:b') throw new Error('storage unavailable');
+    if (key === 'recovery') throw new Error('storage unavailable');
     return put(key, value);
   });
   await expect(runCostMonitor(env)).rejects.toMatchObject({ status: 500 });
   expect((await rpc(env.SAFETY, 'global', 'status')).brake).toBe(true);
   expect((await rpc(env.SAFETY, 'global', 'resume-accounts')).items).toEqual([]);
+  expect(await safety.storage.get('recovery')).toBeUndefined();
   fault.mockRestore();
   expect((await runCostMonitor(env)).brake).toBe(false);
   expect((await rpc(env.SAFETY, 'global', 'resume-accounts')).items).toEqual([]);
@@ -122,3 +123,66 @@ it('recovers from stale or malformed reports and leaves pending work through a n
   expect((await runCostMonitor(env)).brake).toBe(false);
   expect((await safety('resume-accounts')).items).toEqual([]);
 });
+
+async function largeRegistry() {
+  const env = await recoverySetup();
+  const safety = env.SAFETY.get('global');
+  for (const key of [...safety.storage.rows.keys()]) if (key.startsWith('account:')) await safety.storage.delete(key);
+  const names = Array.from({ length: 1001 }, (_, index) => `a${String(index).padStart(4, '0')}`);
+  for (const account of names) await safety.storage.put(`account:${account}`, { account });
+  const calls = { metrics: [], maintenance: [], resumed: [] }; let failure;
+  env.ACCOUNTS = { idFromName: id => id, get: account => ({ fetch: async request => {
+    const { op, period } = await request.json();
+    if (failure?.account === account && failure.op === op) return Response.json({ error: 'Account unavailable', code: 'unavailable' }, { status: 503 });
+    if (op === 'metrics') { calls.metrics.push([account, period]); return Response.json({ spent_microdollars: 100, estimated_cost_microdollars: 50 }); }
+    if (op === 'maintenance') calls.maintenance.push(account);
+    else if (op === 'resume-cost-jobs') calls.resumed.push(account);
+    return Response.json({});
+  } }) };
+  return { env, safety, names, calls, fail: value => { failure = value; } };
+}
+
+it('reconciles and resumes every account beyond the original 1,000-account limit', async () => {
+  const { env, calls, names } = await largeRegistry();
+  const report = await runCostMonitor(env);
+  expect(report).toMatchObject({ brake: false, revenue_microdollars: 100100, estimated_microdollars: 50050 });
+  expect(calls.metrics).toEqual(names.map(account => [account, '2026-11-15']));
+  expect(calls.maintenance).toEqual(names); expect(calls.resumed).toEqual(names);
+  expect((await rpc(env.SAFETY, 'global', 'resume-accounts')).items).toEqual([]);
+});
+
+it('fails closed when reconciliation loses an account on a later registry page', async () => {
+  const { env, calls, fail } = await largeRegistry();
+  fail({ account: 'a0101', op: 'metrics' });
+  expect((await runCostMonitor(env)).brake).toBe(true);
+  expect(calls.metrics).toHaveLength(101); expect(calls.resumed).toEqual([]);
+  fail(null);
+  expect((await runCostMonitor(env)).brake).toBe(false);
+  expect(calls.resumed).toHaveLength(1001);
+});
+
+for (const failure of ['enqueue', 'acknowledgement']) {
+  it(`recovers a later-page ${failure} failure after a cold restart without repeating acknowledged accounts`, async () => {
+    const { env, safety, names, calls, fail } = await largeRegistry();
+    let fault;
+    if (failure === 'enqueue') fail({ account: 'a0101', op: 'resume-cost-jobs' });
+    else {
+      const remove = safety.storage.delete.bind(safety.storage);
+      fault = vi.spyOn(safety.storage, 'delete').mockImplementation(async key => {
+        if (key === 'resume:a0101') throw new Error('Acknowledgement lost');
+        return remove(key);
+      });
+    }
+    await expect(runCostMonitor(env)).rejects.toMatchObject({ status: failure === 'enqueue' ? 503 : 500 });
+    expect(await safety.storage.get('recovery')).toMatchObject({ cursor: 'account:a0199' });
+    expect(await safety.storage.get('resume:a0101')).toBeDefined();
+    fail(null); fault?.mockRestore();
+    env.SAFETY.objects.set('global', new SafetyDO({ storage: safety.storage }, env));
+    expect((await runCostMonitor(env)).brake).toBe(false);
+    expect([...new Set(calls.resumed)]).toEqual(names);
+    const expected = [...names]; if (failure === 'acknowledgement') expected.splice(102, 0, 'a0101');
+    expect(calls.resumed).toEqual(expected);
+    expect(await safety.storage.get('recovery')).toBeUndefined();
+    expect((await rpc(env.SAFETY, 'global', 'resume-accounts')).items).toEqual([]);
+  });
+}

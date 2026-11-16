@@ -63,7 +63,7 @@ disagrees with it, this file wins and the other document is stale.
 | L9 | Prose: free cron explain; Claude to-cron, ask, change proposals + apply; holds and billing; to-cron eval | code/ops | 🟨 | Structured client, held read-only conversations, usage billing, separate stale-checked proposals and 100-case two-model eval implemented. Live eval requires owner Anthropic access. §3.5. Needs D3 and an Anthropic API key (ops). |
 | L10 | JavaScript actions: sandbox, outbound gateway, CPU/subrequest limits and pricing, editor | code/ops | 🟨 | Content-addressed Worker Loader, blocked native networking, counted gateway, daily activation settlement and editor implemented; real local JS succeeds. Activation follows the claim's UTC day and discounts only settled payments, including concurrent claims and safety refunds; reserved budget periods stay unchanged. Real SQLite/Queue verifies one activation across three jobs sharing a version. Shared redaction runs inside the sandbox before console/return truncation; its code participates in version/activation hashing. Live CPU-limit acceptance required. §2.2, §3.4. Needs D2. |
 | L11 | Agent surface: OpenAPI + drift test, `llms.txt`, agent docs, MCP server, `/api/config`, browser snippet | code | ✅ | Atomic config with conflict checks, OpenAPI drift test, scoped MCP protocol tests, llms.txt/agent docs and immutable SHA-384 SRI trigger SDK verified. §4.4, §4.5. |
-| L12 | Abuse and cost safety: limits, destination rules, rate-limit rules, daily cost reconciliation and brake, invite-only sign-up | code/ops | 🟨 | Account/job/destination caps, native ingress limiter, destination checks, conservative daily analytics reconciliation and stale-report brake implemented. Brake recovery uses versioned durable account outboxes, surviving partial enqueue/ack failures and cold restarts. Analytics pauses publish runtime and repeated refusals skip settings writes. Live schema/WAF/billing alerts and Clerk Restricted mode remain owner steps. §8. |
+| L12 | Abuse and cost safety: limits, destination rules, rate-limit rules, daily cost reconciliation and brake, invite-only sign-up | code/ops | 🟨 | Account/job/destination caps, native ingress limiter, destination checks, conservative daily analytics reconciliation and stale-report brake implemented. Registry reconciliation and recovery scan bounded pages beyond 1,000 accounts; versioned durable scan cursors/outboxes survive partial enqueue/ack failures and cold restarts. Analytics pauses publish runtime and repeated refusals skip settings writes. Live schema/WAF/billing alerts and Clerk Restricted mode remain owner steps. §8. |
 | L13 | Terms of Service and Privacy Policy (acceptable use, refunds, suspension) | legal | 🟨 | Service-specific drafts prepared; owner directed shared entity/jurisdiction with hashbin and separate contacts, approving placeholders for now. Offline profile renders escaped facts into both drafts with drift checks; approved-launch deploys require complete pinned facts. Actual facts, cronly contacts and policy approval remain. Checkout is gated by launch approval. |
 | L14 | Production: cronly.org DNS and custom domain, live Clerk and Stripe, secrets, end-to-end test with a real deposit, `verify:production` | ops | 🟨 | Custom-domain config, guarded CI deploy, secret upload, production verifier and live sandbox acceptance script prepared; provision credentials/DNS and perform real deposit/live acceptance per docs/ops/launch.md. §10.13. |
 
@@ -387,6 +387,21 @@ calendar days of billed counts rather than sampling retained logs.
   compact/standalone reservations, retry billing, ledger archival and cost totals.
 - Prices and existing reservation maxima are unchanged. L9–L14 live/owner/legal
   acceptance and S4 reductions remain open; nothing was deployed to production.
+
+## L12 paginated cost reconciliation and recovery — 2026-11-16
+
+- Registry reads and brake-recovery staging use 100-account pages, removing the
+  old reconciliation refusal at 1,000 accounts. Every page contributes its revenue,
+  cost estimate and maintenance before a healthy report can be published.
+- A healthy report commits its versioned recovery scan atomically. Each staged
+  outbox page commits with the scan cursor; cold restarts retain unfinished work.
+  Legacy outboxes remain readable and late acknowledgements cannot delete newer
+  recovery work. Account failures on later reconciliation pages still fail closed.
+- Lint, all 350 unit/integration tests and the production Worker dry-run build pass.
+  Coverage includes 1,001-account reconciliation/recovery, exact page boundaries,
+  staging rollback, second-page enqueue/ack failures and cold restarts.
+- Published prices are unchanged. S4 reductions and L9–L14 live/owner/legal
+  acceptance remain open; no production deployment or credentials changed.
 
 ## L3/L5/L6/L7/L8 customer-name correctness — 2026-11-16
 

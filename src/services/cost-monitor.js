@@ -30,14 +30,18 @@ export async function runCostMonitor(env, now = Date.now()) {
     const response = await (env.ANALYTICS_FETCH || fetch)('https://api.cloudflare.com/client/v4/graphql', { method: 'POST', headers: { Authorization: `Bearer ${env.CLOUDFLARE_ANALYTICS_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ query: USAGE_QUERY, variables: { account: env.CLOUDFLARE_ACCOUNT_ID, start, end, scripts: ['cronly'], namespaces: env.COST_SAFETY_DO_NAMESPACES.split(',') } }), signal: AbortSignal.timeout(15000) });
     const data = await response.json(); assert(response.ok && !data.errors?.length && data.data?.viewer?.accounts?.[0], 'analytics_unavailable', 'Cloudflare analytics unavailable', 503);
     const observed = measuredCost(data.data.viewer.accounts[0]);
-    const accounts = await rpc(env.SAFETY, 'global', 'accounts'); assert(accounts.items.length < 1000, 'registry_limit', 'Account registry requires pagination before expansion', 503);
     let revenue = 0; let estimated = 0;
     const day = new Date(now - 86400000).toISOString().slice(0, 10);
-    for (const { account } of accounts.items) {
-      const metric = await rpc(env.ACCOUNTS, account, 'metrics', { period: day });
-      revenue += metric.spent_microdollars || 0; estimated += metric.estimated_cost_microdollars || 0;
-      await rpc(env.ACCOUNTS, account, 'maintenance');
-    }
+    let cursor;
+    do {
+      const page = await rpc(env.SAFETY, 'global', 'accounts', { cursor });
+      for (const { account } of page.items) {
+        const metric = await rpc(env.ACCOUNTS, account, 'metrics', { period: day });
+        revenue += metric.spent_microdollars || 0; estimated += metric.estimated_cost_microdollars || 0;
+        await rpc(env.ACCOUNTS, account, 'maintenance');
+      }
+      cursor = page.next_cursor;
+    } while (cursor);
     // The ledger estimate includes Queue operations and sandbox activation; take the
     // higher total until all billable datasets are available in the operator account.
     const cost = Math.max(observed, estimated); const projectedLoss = Math.max(0, (cost - revenue * C.revenueKept) * 30);
@@ -45,11 +49,14 @@ export async function runCostMonitor(env, now = Date.now()) {
   } catch { report = { checked_at: now, brake: true, reason: 'Analytics missing, incomplete or unavailable; operator must investigate' }; }
   await rpc(env.SAFETY, 'global', 'record', { report });
   if (!report.brake) {
-    const pending = await rpc(env.SAFETY, 'global', 'resume-accounts');
-    for (const { account, version } of pending.items) {
-      await rpc(env.ACCOUNTS, account, 'resume-cost-jobs');
-      await rpc(env.SAFETY, 'global', 'resumed-account', { account, version });
-    }
+    let pending;
+    do {
+      pending = await rpc(env.SAFETY, 'global', 'resume-accounts');
+      for (const { account, version } of pending.items) {
+        await rpc(env.ACCOUNTS, account, 'resume-cost-jobs');
+        await rpc(env.SAFETY, 'global', 'resumed-account', { account, version });
+      }
+    } while (pending.more);
   }
   if (report.brake && env.ALERT_WEBHOOK_URL) await fetch(env.ALERT_WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'cronly cost safety brake is active. Inspect the private safety report.' }), signal: AbortSignal.timeout(10000) });
   return report;
