@@ -74,7 +74,7 @@ disagrees with it, this file wins and the other document is stale.
 | S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ✅ | Atomic versioned keyring, legacy reads, held per-secret re-encryption, edit/delete conflict protection, audit, scoped CLI and CI wiring verified. Persisted local Worker migrated v1 → v2 and executed a redacted JS run with v1 retired. [Operator procedure](docs/ops/secret-rotation.md). §3.3. |
 | S2 | Charge measured JS CPU instead of the configured limit | code | ⬜ | §3.4; needs per-invocation CPU data. |
 | S3 | Recalibrate prices from a month of real Cloudflare and Anthropic bills | ops/code | ⬜ | `docs/business/pricing.md`. |
-| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budgets, active money summaries and ledger buffering reduce ordinary writes; unchanged alarms/runtime/recent-job indexes and completion settings skip writes. Transactional reads/changes skip transient holds. Ledger pages retain legacy cursors and permanent receipts. Small durable reservations share the balance row, avoiding their settlement delete; large/legacy snapshots stay standalone. Both formats pass real local SQLite/Queue acceptance. The 144-path audit includes ledger archival, compact/rollover/large-period money summaries and unfunded-retry pauses: 38 writes, 30 DO requests/five Worker invocations at 89 µ$/run after rounded floors. Large-snapshot and worst-case write reductions remain. [Cost audit](docs/business/pricing.md). |
+| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budgets, active money summaries and ledger buffering reduce ordinary writes; unchanged alarms/runtime/recent-job indexes and completion settings skip writes. Transactional reads/changes skip transient holds. Ledger pages retain legacy cursors and permanent receipts. Small durable reservations share the balance row, avoiding their settlement delete; large/legacy snapshots stay standalone. Both formats pass real local SQLite/Queue acceptance. Finalization reuses the durable staged log, removing a completion-body rewrite; final cost recalibration is pending. The 144-path audit includes ledger archival, compact/rollover/large-period money summaries and unfunded-retry pauses: 38 writes, 30 DO requests/five Worker invocations at 89 µ$/run after rounded floors. Large-snapshot and worst-case write reductions remain. [Cost audit](docs/business/pricing.md). |
 
 ## Backlog
 
@@ -313,3 +313,17 @@ calendar days of billed counts rather than sampling retained logs.
 - The worst-case 38-write allowance and 89 µ$ price are unchanged. Further S4
   worst-case reductions and L9–L14 owner/live acceptance remain open. Nothing was
   deployed to production and no live credentials were changed.
+
+## S4 immutable staged logs — 2026-11-16
+
+- Finalization commits billing metadata, the compact history index and changed job
+  settings without rewriting the already-durable observed result. Full run reads
+  reconstruct that body with authoritative charged amounts and gateway counts.
+- Legacy completed bodies and pending outboxes remain readable. Staged outcomes,
+  private retry context and key identity stay out of public run responses.
+- Lint and all 279 unit/integration tests pass, including pre-settlement log failure,
+  completion/settings rollback, cold restart, duplicate delivery, JS activation
+  discounts and gateway counts, plus the existing 144 full-path cost checks.
+- Price recalibration and local Worker/Queue acceptance for this reduction follow;
+  the conservative 38-write allowance and 89 µ$ price are unchanged at this point.
+  L9–L14 live acceptance and owner/legal work remain open.

@@ -81,7 +81,7 @@ it('recovers a failed queue send from its prepaid outbox without another hold', 
   await consume({ body: messages[0], ack() {} }, env, {});
   await job.alarm(); expect(messages).toHaveLength(1);
   expect(await call('account')).toMatchObject({ held_microdollars: 0 });
-  expect((await job.storage.get('run:r')).cost_microdollars).toBe(PRICES.run);
+  expect((await job.readRun('r')).cost_microdollars).toBe(PRICES.run);
 });
 
 it('keeps an expired outcome when the same alarm advances the schedule', async () => {
@@ -130,10 +130,10 @@ it('recovers a legacy outbox with metadata in a separate run row', async () => {
   // The compact row supersedes the old body's stale enqueue flag.
   await cold.alarm(); expect(messages).toHaveLength(1);
   await consume({ body: messages[0], ack() {} }, env, {});
-  expect((await job.storage.get('run:r')).status).toBe('failure');
+  expect((await job.readRun('r')).status).toBe('failure');
 });
 
-it('rolls back the completed log and index together and retries settlement once', async () => {
+it('rolls back final metadata and retries settlement once without rewriting the staged log', async () => {
   const { env, job, call } = await setup();
   await rpc(env.JOBS, 'a:j', 'start', { id: 'r', input: {}, trigger: 'manual' });
   const before = (await call('account')).balance_microdollars;
@@ -148,7 +148,7 @@ it('rolls back the completed log and index together and retries settlement once'
   expect((await job.summaries())[0].status).toBe('queued');
   spy.mockRestore();
   await job.result(args);
-  expect((await job.storage.get('run:r')).response_body).toBe('ok');
+  expect((await job.readRun('r')).response_body).toBe('ok');
   expect((await job.summaries())[0].status).toBe('success');
   expect((await call('account')).balance_microdollars).toBe(before - PRICES.run);
 });
@@ -233,7 +233,7 @@ it('repairs a lost completion publication after restart without billing again', 
   const publication = vi.spyOn(job, 'publish').mockRejectedValueOnce(new Error('account unavailable'));
   const args = { id: 'r', result: { status: 'success' } };
   await expect(job.result(args)).rejects.toThrow('account unavailable');
-  expect((await job.storage.get('run:r')).status).toBe('success');
+  expect((await job.readRun('r')).status).toBe('success');
   expect((await call('account')).job_runtime.j.last_outcome).toBe(null);
   publication.mockRestore();
   const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
@@ -246,4 +246,72 @@ it('repairs a lost completion publication after restart without billing again', 
   await job.storage.put('settings', { ...settings, last_outcome: 'failure' });
   await cold.result(args);
   expect((await call('account')).job_runtime.j.last_outcome).toBe('failure');
+});
+
+it('finalizes a staged log once and overlays authoritative billing after restart', async () => {
+  const { env, job, call } = await setup();
+  await rpc(env.JOBS, 'a:j', 'start', { id: 'r', input: {}, trigger: 'manual' });
+  const put = vi.spyOn(job.storage, 'put');
+  // Billing clamps to the original maximum, even if a reported charge is higher.
+  const outcome = { status: 'success', response_excerpt: 'retained output', subrequests: 6, charge_microdollars: PRICES.run + 100 };
+  const result = await job.result({ id: 'r', result: outcome });
+  expect(result).toMatchObject({ status: 'success', cost_microdollars: PRICES.run, subrequests: 6 });
+  expect(put.mock.calls.filter(([key]) => key === 'run:r')).toHaveLength(1);
+  const staged = await job.storage.get('run:r');
+  expect(staged).toMatchObject({ status: 'queued', completion: outcome });
+  const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
+  const record = await cold.readRun('r');
+  expect(record).toEqual(result);
+  for (const options of [{}, { summary: true }]) {
+    const items = (await cold.dispatch({ op: 'runs', ...options })).items;
+    expect(items[0]).toMatchObject({ status: 'success', cost_microdollars: PRICES.run });
+    for (const field of ['completion', 'settlement', 'pending', 'retry', 'key_id', 'input']) expect(items[0]).not.toHaveProperty(field);
+  }
+  await cold.result({ id: 'r', result: { status: 'failure' } });
+  expect(await job.storage.get('run:r')).toEqual(staged);
+  expect((await call('list', { prefix: 'ledger:' })).items.filter(row => row.id === 'r')).toHaveLength(1);
+});
+
+it('reads legacy completed bodies beside finalized staged logs', async () => {
+  const { job } = await setup();
+  const legacy = { id: 'legacy', job: 'j', status: 'success', created_at: Date.now() - 1000, cost_microdollars: 60, subrequests: 3, response_excerpt: 'old output' };
+  await job.storage.put('run:legacy', legacy); await job.history(legacy);
+  const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, job.env);
+  expect(await cold.readRun('legacy')).toEqual(legacy);
+  expect((await cold.dispatch({ op: 'runs' })).items).toEqual([legacy]);
+});
+
+it('does not bill before the observed result is durable', async () => {
+  const { env, job, call, messages } = await setup();
+  await rpc(env.JOBS, 'a:j', 'start', { id: 'r', input: {}, trigger: 'manual' });
+  const before = await call('account');
+  const original = job.storage.put.bind(job.storage);
+  const fault = vi.spyOn(job.storage, 'put').mockImplementation(async (key, value) => {
+    if (key === 'run:r') throw new Error('log unavailable');
+    return original(key, value);
+  });
+  await expect(consume({ body: messages[0], ack() {} }, env, {})).rejects.toMatchObject({ status: 500 });
+  expect(await job.storage.get('run:r')).toBeUndefined();
+  expect(await call('account')).toMatchObject({ balance_microdollars: before.balance_microdollars, held_microdollars: PRICES.run });
+  fault.mockRestore();
+  // An unrecorded external outcome remains uncertain; expiry charges the hold.
+  await job.result({ id: 'r', result: { status: 'expired' } });
+  expect(await job.readRun('r')).toMatchObject({ status: 'expired', cost_microdollars: PRICES.run });
+});
+
+it('uses settled gateway counts and discounted activation in finalized JS logs', async () => {
+  const { env, job, call } = await setup();
+  await call('mutate', { account: 'a', id: 'js', operations: [{ kind: 'actions', name: 'ping', value: { type: 'javascript', source: 'export default () => 1', cpu_ms: 10, subrequests: 2 } }] });
+  const charges = [];
+  for (const id of ['first-js', 'second-js']) {
+    await rpc(env.JOBS, 'a:j', 'start', { id, input: {}, trigger: 'manual', retry: true });
+    const execution = await call('claim-run', { id });
+    await call('gateway-request', { id, host: 'example.com' });
+    const result = await job.result({ id, result: { status: 'success', return_value: '1', subrequests: 99 } });
+    const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
+    expect(await cold.readRun(id)).toEqual(result);
+    expect(result).toMatchObject({ subrequests: 1, cost_microdollars: execution.actual_price });
+    charges.push(result.cost_microdollars);
+  }
+  expect(charges[0] - charges[1]).toBe(PRICES.jsActivation);
 });

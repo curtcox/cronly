@@ -71,7 +71,7 @@ it('recovers committed completion publication on Queue redelivery after restart'
   const ack = vi.fn(); const message = { body: messages[0], ack };
   await expect(consume(message, env, {})).rejects.toMatchObject({ status: 500 });
   expect(ack).not.toHaveBeenCalled();
-  expect((await job.storage.get(`run:${message.body.id}`)).status).toBe('success');
+  expect((await job.readRun(message.body.id)).status).toBe('success');
   const before = await api('/api/account');
   expect(before.held_microdollars).toBe(0);
   expect(before.job_runtime.pinger.last_outcome).toBe(null);

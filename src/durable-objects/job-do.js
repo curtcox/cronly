@@ -61,7 +61,7 @@ export class JobDO {
       case 'runs': {
         const limit = Math.min(args.limit || 100, 100); const before = args.before || Infinity;
         const entries = (await this.summaries()).filter(r => r.created_at < before && (!args.status || r.status === args.status) && (!args.from || r.created_at >= args.from) && (!args.to || r.created_at <= args.to)).sort((a, b) => b.created_at - a.created_at);
-        const page = entries.slice(0, limit); const items = args.summary ? page.map(({ pending: _pending, retry: _retry, ...summary }) => summary) : await Promise.all(page.map(r => this.record(r)));
+        const page = entries.slice(0, limit); const items = args.summary ? page.map(({ pending: _pending, retry: _retry, settlement: _settlement, ...summary }) => summary) : await Promise.all(page.map(r => this.record(r)));
         return { items: items.filter(Boolean), next_before: entries.length > limit ? page.at(-1).created_at : null };
       }
       case 'run': return (await this.readRun(args.id)) || {};
@@ -184,24 +184,30 @@ export class JobDO {
     return summary ? this.record(summary) : this.storage.get(`run:${id}`);
   }
   async record(summary) {
-    const { pending, retry: _retry, ...publicSummary } = summary;
+    const { pending, retry: _retry, settlement, ...publicSummary } = summary;
     // Older pending records kept their full metadata in a separate run row.
     if (pending) return { ...publicSummary, ...pending };
-    const { completion: _completion, ...body } = (await this.storage.get(`run:${summary.id}`)) || publicSummary;
+    const { completion, ...body } = (await this.storage.get(`run:${summary.id}`)) || publicSummary;
+    // Finalization commits only the compact index. The immutable staged body is
+    // already durable before billing; overlay the committed settlement metadata.
+    if (settlement && completion) {
+      const { input: _input, key_id: _key, ...result } = { ...body, ...completion, ...publicSummary, ...settlement };
+      return result;
+    }
     return body;
   }
-  async history(run, full = false, settings = null, retry) {
+  async history(run, finalized = false, settings = null, retry) {
     const { id, job, status, created_at, trigger, scheduled_at, finished_at, cost_microdollars, http_status, reason } = run;
     const summary = { id, job, status, created_at, trigger, scheduled_at, finished_at, cost_microdollars, http_status, reason };
     if (retry) summary.retry = retry;
+    if (finalized) summary.settlement = { subrequests: run.subrequests };
     // Pending metadata fits in the compact index; only completed logs need a body row.
     if (status === 'queued' || status === 'running') {
       const { expires_at, reserved_microdollars, attempt, key_id, enqueued } = run;
       summary.pending = { expires_at, reserved_microdollars, attempt, key_id, enqueued };
     }
     const wake = summary.pending && !summary.pending.enqueued;
-    if (full || wake) await this.storage.transaction(async tx => {
-      if (full) await tx.put(`run:${id}`, run);
+    if (finalized || wake) await this.storage.transaction(async tx => {
       await tx.put(`history:${id}`, summary);
       if (settings) await tx.put('settings', settings);
       // A pending outbox must never commit without a wakeup. The enqueue can fail
