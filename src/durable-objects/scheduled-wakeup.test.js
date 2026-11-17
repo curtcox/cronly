@@ -23,7 +23,7 @@ async function setup() {
   ] });
   await account('sync-jobs');
   const job = env.JOBS.get('a:j'); const settings = await job.storage.get('settings');
-  settings.next_fire = Date.now(); await job.storage.put('settings', settings);
+  settings.next_fire = Date.now(); await job.storage.put('settings', settings); await job.publish(settings);
   await job.storage.deleteAlarm();
   return { env, account, job, messages, due: settings.next_fire };
 }
@@ -38,11 +38,12 @@ it('rearms scheduled dispatch once after advancement while preserving the atomic
   expect((await job.readRun(messages[0].id)).expires_at).toBe(due + 120000);
 });
 
-for (const failure of ['enqueue', 'advancement', 'rearm']) {
+for (const failure of ['enqueue', 'publication', 'advancement', 'rearm']) {
   it(`recovers scheduled dispatch after failed ${failure} and restart without another reservation`, async () => {
     const { env, account, job, messages, due } = await setup();
     let fault;
     if (failure === 'enqueue') fault = vi.spyOn(env.RUN_QUEUE, 'send').mockRejectedValueOnce(new Error('queue unavailable'));
+    else if (failure === 'publication') fault = vi.spyOn(job, 'publish').mockRejectedValueOnce(new Error('runtime unavailable'));
     else if (failure === 'rearm') fault = vi.spyOn(job, 'arm').mockRejectedValueOnce(new Error('alarm unavailable'));
     else {
       const put = job.storage.put.bind(job.storage);
@@ -59,9 +60,54 @@ for (const failure of ['enqueue', 'advancement', 'rearm']) {
     env.JOBS.objects.set('a:j', cold); await cold.alarm();
     expect(messages).toHaveLength(1);
     expect((await cold.storage.get('settings')).next_fire).toBe(due + 60000);
+    expect((await account('account')).job_runtime.j.next_fire).toBe(due + 60000);
     expect(await cold.storage.getAlarm()).toBe(due + 60000);
     expect((await account('account')).held_microdollars).toBe(PRICES.run);
     await cold.result({ id: messages[0].id, result: { status: 'success' } });
     expect(await account('account')).toMatchObject({ held_microdollars: 0, spent_today_microdollars: 200 + PRICES.run });
   });
 }
+
+for (const failure of ['publication', 'advancement']) {
+  it(`retries a missed-run skip after failed ${failure} without losing its runtime update`, async () => {
+    const { env, account, job, messages, due } = await setup();
+    const settings = await job.storage.get('settings'); settings.job.missed = 'skip';
+    await job.storage.put('settings', settings);
+    vi.setSystemTime(due + 300000);
+    let fault;
+    if (failure === 'publication') fault = vi.spyOn(job, 'publish').mockRejectedValueOnce(new Error('runtime unavailable'));
+    else {
+      const put = job.storage.put.bind(job.storage);
+      fault = vi.spyOn(job.storage, 'put').mockImplementation(async (key, value) => {
+        if (key === 'settings' && value.next_fire > due) throw new Error('advancement unavailable');
+        return put(key, value);
+      });
+    }
+    await expect(job.alarm()).rejects.toThrow(); fault.mockRestore();
+    // The old due time remains the durable instruction to retry publication,
+    // even when there is no paid pending run to publish a completion later.
+    expect((await job.storage.get('settings')).next_fire).toBe(due);
+    const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
+    env.JOBS.objects.set('a:j', cold); await cold.alarm();
+    expect((await account('account')).job_runtime.j.next_fire).toBe(due + 360000);
+    expect((await cold.storage.get('settings')).next_fire).toBe(due + 360000);
+    expect(await cold.storage.getAlarm()).toBe(due + 360000);
+    expect(messages).toHaveLength(0);
+    expect((await account('account')).held_microdollars).toBe(0);
+  });
+}
+
+it('does not rewrite or republish a refusal pause after scheduled dispatch returns', async () => {
+  const { account, job, messages, due } = await setup();
+  await account('mutate', { account: 'a', id: 'budget', operations: [
+    { kind: 'jobs', name: 'j', value: { action: 'ping', cron: '* * * * *', budget: { day: 0 } } }
+  ] });
+  // Keep this already-due alarm while the account enforces the edited budget.
+  const put = vi.spyOn(job.storage, 'put'); const publish = vi.spyOn(job, 'publish');
+  await job.alarm();
+  expect(put.mock.calls.filter(([key]) => key === 'settings')).toHaveLength(1);
+  expect(publish).toHaveBeenCalledTimes(1);
+  expect((await account('account')).job_runtime.j.paused).toBe('budget_day');
+  expect(await job.storage.get('settings')).toMatchObject({ paused: 'budget_day', next_fire: due });
+  expect(messages).toHaveLength(0);
+});

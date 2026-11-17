@@ -199,7 +199,11 @@ still commits with a recovery alarm before queue dispatch; failed dispatch,
 advancement or final rearming recovers after restart without a second hold or
 execution. This skips a redundant history scan and avoids moving the intermediate
 alarm forward during dispatch. Manual runs and retries retain immediate rearming.
-The conservative bound and prices are unchanged.
+Next-fire publication happens before durable advancement, so a failed publication
+retries even when a missed run was skipped without creating an outbox. A scheduled
+budget/balance refusal also reuses its existing committed pause instead of writing
+settings and publishing runtime a second time. The conservative bound and prices
+are unchanged.
 
 ## Verified provider sources
 

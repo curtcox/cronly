@@ -284,8 +284,13 @@ export class JobDO {
           catch (error) { if (![402, 409, 429, 503].includes(error.status)) throw error; }
         }
         settings = await this.storage.get('settings');
-        if (!settings.paused) settings.next_fire = Date.parse(nextFires(settings.job.cron, settings.job.timezone, 1)[0]);
-        await this.storage.put('settings', settings); await this.publish(settings);
+        // Refusal handling already committed and published any pause. Otherwise
+        // publish before advancing durably: the old due time makes a failed
+        // publication retryable, including skipped runs with no pending outbox.
+        if (!settings.paused) {
+          settings.next_fire = Date.parse(nextFires(settings.job.cron, settings.job.timezone, 1)[0]);
+          await this.publish(settings); await this.storage.put('settings', settings);
+        }
       }
       await this.prune(); await this.arm();
     });

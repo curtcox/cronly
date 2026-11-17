@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { price, PRICES } from '../src/utils/pricing.js';
 const origin = process.env.CRONLY_ORIGIN || 'http://localhost:8787';
-const user = `acceptance-${crypto.randomUUID()}`;
-async function api(path, method = 'GET', body, idempotency, expectedStatus = 200) {
-  const response = await fetch(`${origin}${path}`, { method, signal: AbortSignal.timeout(15000), headers: { Authorization: `LocalDev ${user}`, 'Content-Type': 'application/json', ...(idempotency ? { 'Idempotency-Key': idempotency } : {}) }, body: body && JSON.stringify(body) });
-  const data = await response.json(); assert.equal(response.status, expectedStatus, `${path}: ${JSON.stringify(data)}`); return data;
+function localClient(user) {
+  return async function api(path, method = 'GET', body, idempotency, expectedStatus = 200) {
+    const response = await fetch(`${origin}${path}`, { method, signal: AbortSignal.timeout(15000), headers: { Authorization: `LocalDev ${user}`, 'Content-Type': 'application/json', ...(idempotency ? { 'Idempotency-Key': idempotency } : {}) }, body: body && JSON.stringify(body) });
+    const data = await response.json(); assert.equal(response.status, expectedStatus, `${path}: ${JSON.stringify(data)}`); return data;
+  };
 }
+const api = localClient(`acceptance-${crypto.randomUUID()}`);
 assert.equal((await api('/health')).environment, 'local');
 await api('/api/dev/deposit', 'POST', { amount_microdollars: 5000000 }, 'fund');
 const before = await api('/api/account');
@@ -110,4 +112,30 @@ await api('/api/actions/http', 'PUT', { url: 'https://example.com/edited' });
 const synced = await api('/api/account');
 for (const name of ['http', 'js', 'gateway']) assert.equal(synced.job_runtime[name].last_outcome, 'success');
 assert.equal(synced.job_runtime.blocked.last_outcome, 'failure'); assert.equal(synced.held_microdollars, 0);
-console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, one settled activation across three jobs sharing an action version, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries, one log for repeated budget refusals and preserved outcomes after configuration sync. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
+// Exercise a real JobDO alarm, not just manual queue dispatch. Its budget bounds
+// spending if acceptance fails before the final disable mutation can run. A fresh
+// account keeps polling independent of the preceding ledger audit's rate window.
+const scheduledApi = localClient(`schedule-${crypto.randomUUID()}`);
+await scheduledApi('/api/dev/deposit', 'POST', { amount_microdollars: 10000 }, 'fund');
+await scheduledApi('/api/actions/ping', 'PUT', { url: 'https://example.com' });
+await scheduledApi('/api/jobs/scheduled', 'PUT', { action: 'ping', cron: '* * * * *', budget: { day: PRICES.run } });
+const scheduledAt = (await scheduledApi('/api/account')).job_runtime.scheduled.next_fire;
+const scheduledDeadline = scheduledAt + 30000;
+let scheduled;
+while (Date.now() < scheduledDeadline) {
+  scheduled = (await scheduledApi('/api/runs?job=scheduled')).items;
+  if (scheduled.some(run => run.status === 'success')) break;
+  await new Promise(resolve => setTimeout(resolve, 1000));
+}
+assert.equal(scheduled.length, 1); assert.equal(scheduled[0].status, 'success');
+assert.equal(scheduled[0].trigger, 'schedule'); assert.equal(Date.parse(scheduled[0].scheduled_at), scheduledAt);
+assert.equal(scheduled[0].cost_microdollars, PRICES.run);
+const scheduledAccount = await scheduledApi('/api/account');
+assert.equal(scheduledAccount.job_runtime.scheduled.next_fire, scheduledAt + 60000);
+assert.equal(scheduledAccount.job_runtime.scheduled.last_outcome, 'success');
+assert.equal(scheduledAccount.held_microdollars, 0);
+const scheduledLedger = (await scheduledApi('/api/transactions')).items.filter(row => row.kind === 'run' && row.job === 'scheduled');
+assert.equal(scheduledLedger.length, 1); assert.equal(scheduledLedger[0].amount_microdollars, -PRICES.run);
+await scheduledApi('/api/jobs/scheduled', 'PUT', { action: 'ping', cron: '* * * * *', enabled: false, budget: { day: PRICES.run } });
+assert.equal((await scheduledApi('/api/account')).job_runtime.scheduled.next_fire, null);
+console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, one settled activation across three jobs sharing an action version, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries, one log for repeated budget refusals, preserved outcomes after configuration sync, and a real scheduled alarm with one charge, next-fire publication and final disable. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
