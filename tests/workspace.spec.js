@@ -429,3 +429,46 @@ test.describe('upcoming windows in a non-UTC browser', () => {
   });
 
 });
+
+test('shows job pause reasons and settled UTC budget usage on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const jobs = Object.fromEntries(['constructor', 'scheduled', 'disabled', 'balance', 'day', 'month', 'safety', 'input', 'unknown'].map(name => [name, {
+    action: 'ping', cron: name === 'constructor' ? null : '0 * * * *', timezone: 'UTC', enabled: name !== 'disabled',
+    budget: name === 'constructor' ? {} : { day: 1000, month: 20000 }
+  }]));
+  jobs.month.budget.month = 0;
+  let spent = false;
+  const pauses = { balance: 'insufficient_balance', day: 'budget_day', month: 'budget_month', safety: 'cost_brake', input: 'missing_input', unknown: '<b>unsafe</b>' };
+  await page.route('**/api/config', route => route.fulfill({ json: { config: { jobs, actions: {}, variables: {}, secrets: {} } } }));
+  await page.route('**/api/account', route => route.fulfill({ json: {
+    id: 'budget-browser', balance_microdollars: 5000000, held_microdollars: 85,
+    spend_today_by_job: spent ? { constructor: 85, day: 900 } : {}, spend_by_job: spent ? { constructor: 170, day: 1900 } : {},
+    job_runtime: Object.fromEntries(Object.entries(pauses).map(([name, paused]) => [name, { paused, next_fire: '2026-11-18T12:00:00Z', last_outcome: 'failure' }]))
+  } }));
+  await page.route('**/api/projection', route => route.fulfill({ json: { daily_microdollars: 0, monthly_microdollars: 0, runway_days: null, jobs: [] } }));
+  await page.getByRole('link', { name: 'Jobs', exact: true }).click();
+  const row = name => page.locator('.list li').filter({ has: page.locator('.list-title', { hasText: new RegExp(`^${name}$`) }) });
+  await expect(row('constructor')).toContainText('On demand / webhook only');
+  await expect(row('constructor')).toContainText('Today: $0.00 / no daily cap');
+  await expect(row('constructor')).toContainText('This month: $0.00 / no monthly cap');
+  await expect(row('scheduled').locator('.tag')).toHaveText('Scheduled');
+  await expect(row('disabled').locator('.tag')).toHaveText('Disabled');
+  for (const [name, pause] of Object.entries(pauses)) {
+    await expect(row(name).locator('.tag')).toHaveText(`Paused: ${pause.replaceAll('_', ' ')}`);
+    await expect(row(name)).toContainText('Next: — · Last: failure');
+  }
+  await expect(row('unknown').locator('b')).toHaveCount(0);
+  await expect(row('month')).toContainText('This month: $0.00 / $0.00');
+  await expect(page.locator('#content')).toContainText('Spend uses UTC days and months. Pending holds also count toward budget enforcement.');
+  spent = true;
+  await page.getByRole('link', { name: 'Variables', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Variables', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Jobs', exact: true }).click();
+  await expect(row('constructor')).toContainText('Today: $0.000085 / no daily cap');
+  await expect(row('constructor')).toContainText('This month: $0.00017 / no monthly cap');
+  await expect(row('day')).toContainText('Today: $0.0009 / $0.001');
+  await expect(row('day')).toContainText('This month: $0.0019 / $0.02');
+  await expect(page.locator('.list')).not.toContainText('NaN');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
