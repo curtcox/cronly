@@ -7,7 +7,7 @@ export const COST_POLICY = Object.freeze({
   maxJobs: 100, newAccountMaxJobs: 10, concurrency: 10,
   destinationRequestsPerMinute: 60, projectionBrakeCents: 5000,
   // Includes redirects, test-job setup, alarms, pruning, refused retries and redelivery.
-  runRowWrites: 37, runDoRequests: 30, runWorkerRequests: 5
+  runRowWrites: 37, runDoRequests: 27, runWorkerRequests: 5
 });
 /** Gross up the credit to itemize payment costs, ported from hashbin. */
 export function grossUp(creditCents) {

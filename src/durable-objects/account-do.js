@@ -151,14 +151,16 @@ export class AccountDO {
         return { cost_microdollars: amount };
       }
       case 'settle': {
-        const receipt = await settle(tx, args.id, args.actual);
         // Completion visibility shares billing's commit, so JobDO can finalize
-        // without a second request or a publication outbox write.
+        // without a second request or a publication outbox write. Publish first
+        // so a failed runtime row does not replay all the ledger/rollover writes.
         if (args.runtime) {
-          assert(receipt.kind === 'run' && receipt.job, 'invalid_runtime', 'Runtime requires a job run');
-          await this.dispatch(tx, { op: 'job-runtime', name: receipt.job, runtime: args.runtime });
+          const hold = await getHold(tx, args.id) || await tx.get(`receipt:${args.id}`);
+          assert(hold, 'unknown_hold', 'Reservation not found', 404);
+          assert(hold.kind === 'run' && hold.job, 'invalid_runtime', 'Runtime requires a job run');
+          await this.dispatch(tx, { op: 'job-runtime', name: hold.job, runtime: args.runtime });
         }
-        return receipt;
+        return settle(tx, args.id, args.actual);
       }
       case 'deposit': { const result = await deposit(tx, args.id, args.amount); if (!result.duplicate) await this.nudge(tx); return result; }
       case 'dev-deposit': assert(this.env.ENVIRONMENT === 'local', 'not_found', 'Not found', 404); { const result = await deposit(tx, args.id, args.amount); if (!result.duplicate) await this.nudge(tx); return result; }

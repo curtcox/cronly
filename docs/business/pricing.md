@@ -11,12 +11,12 @@ constants as the API; historical numbers in the master plan are superseded here.
 
 | Operation | Price | Estimated worst-case marginal cost |
 |---|---|---|
-| HTTP run | 87 µ$ | ceil(policy run bound), currently 53 µ$ |
+| HTTP run | 85 µ$ | ceil(policy run bound), currently 52 µ$ |
 | Webhook run | HTTP/JS price + 5 µ$ | run bound + 2 µ$ |
 | Change: action, variable, secret (including key rotation), job, key, trigger | 100 µ$ | 20 µ$ |
 | API-key read | 21 µ$ base + 2 µ$ per job scanned for aggregate history | ceil(12 µ$ base + 1.2 µ$/job) |
 | Web session reads, cron explain, quotes, mutation dry runs | Free, rate-limited | Bounded fixed operating cost |
-| JavaScript run | 87 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
+| JavaScript run | 85 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
 | JS daily activation | 3,300 µ$ on first invocation of each action version per UTC day | 2,000 µ$ provider activation |
 | Prose | ceil(1.64 × actual model-token cost) + 500 µ$ | actual tokens + bookkeeping |
 
@@ -37,7 +37,7 @@ rollback and cold restarts are covered for compact and standalone reservations.
 Real local Worker/Queue acceptance also verifies one activation charge across
 three jobs sharing a version, with matching run logs, ledger, costs and balance.
 
-A regular hourly HTTP job is about $0.06264 per 30 days; a minutely job is $3.7584. These
+A regular hourly HTTP job is about $0.06120 per 30 days; a minutely job is $3.6720. These
 are run charges only. Changes, API polling, prose and JS activation are additional.
 
 ## Units and deposits
@@ -60,7 +60,7 @@ reviewed Terms and applicable law.
 
 Rates live only in `src/utils/cost-policy.js`; prices only in `src/utils/pricing.js`;
 model rates only in `src/utils/llm-policy.js`. Included allowances are ignored.
-The HTTP bound includes 37 row writes, 30 DO requests, five Worker invocations and
+The HTTP bound includes 37 row writes, 27 DO requests, five Worker invocations and
 3,000 compact-index row reads, six Queue operations, CPU,
 awake time and 16 KB retained logs; orchestration caches compact summaries instead of loading log bodies. Read and change bounds include actual ledger,
 key-budget, audit and rate-counter bookkeeping rather than just one request.
@@ -93,7 +93,7 @@ durably before settlement; recovery completes the same outcome and charges once.
 A failed run's retry context stays private until its
 deterministic child is reserved/enqueued or refused by its job/key budget. The 144 checks repeat these paths with compact and standalone reservations, compact summaries, UTC day/month rollovers
 and oversized standalone summaries. The current
-37-write/30-DO-request/five-invocation allowance covers these tested paths; separately
+37-write/27-DO-request/five-invocation allowance covers these tested paths; separately
 billed retries each contribute their own allowance. Refused retries have no separate
 charge, so the paid parent includes their pause/log/cleanup overhead. The recovery audit initially raised
 the 80 µ$ base to 89 µ$ to retain the approved floor after rounding costs up.
@@ -204,6 +204,22 @@ retries even when a missed run was skipped without creating an outbox. A schedul
 budget/balance refusal also reuses its existing committed pause instead of writing
 settings and publishing runtime a second time. The conservative bound and prices
 are unchanged.
+
+Completion runtime publication now shares the account settlement transaction.
+The runtime row is written before ledger changes, so a failed runtime write avoids
+repeating ledger pages and period archives. A later billing failure rolls runtime
+back with the charge. New completed runs retain a private publication marker in
+their existing history index and skip runtime RPCs on Queue redelivery; legacy
+completions retain publication repair. Lost settlement responses and failed job
+finalization recover the staged outcome without another execution or charge.
+
+The expanded 456-path audit includes runtime-write and settlement-response failures,
+including when the recovered run's retry is refused by its budget. Those cases
+need a conservative 27 DO requests rather than 30, with the existing 37-write,
+five-invocation and 3,000-read allowances. The rounded HTTP cost falls from 53 to
+52 µ$, reducing the base HTTP/JS run price from 87 to 85 µ$. Existing reservations
+keep their original maximum; persisted job quotes use the current price. Further
+S4 reductions and live/owner launch acceptance remain open.
 
 ## Verified provider sources
 

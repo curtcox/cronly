@@ -100,7 +100,7 @@ it('recovers legacy completion publication on Queue redelivery after restart', a
   expect(list.mock.calls.some(([options]) => options?.prefix === 'history:')).toBe(false);
 });
 
-it('rolls back billing when completion runtime fails and recovers the outcome and retry together', async () => {
+for (const failureAt of ['runtime:pinger', 'receipt']) it(`rolls back runtime and billing when ${failureAt} fails and recovers the outcome and retry together`, async () => {
   const { api, messages, env } = await setup();
   await api('/api/jobs/pinger', 'PUT', { action: 'ping', cron: '* * * * *', retries: 1 });
   env.OUTBOUND_FETCH.mockImplementation(async () => new Response('failed', { status: 500 }));
@@ -108,7 +108,7 @@ it('rolls back billing when completion runtime fails and recovers the outcome an
   const job = env.JOBS.get('a:pinger');
   const storage = env.ACCOUNTS.get('a').storage; const put = storage.put.bind(storage);
   const fault = vi.spyOn(storage, 'put').mockImplementation(async (key, value) => {
-    if (key === 'runtime:pinger') throw new Error('runtime unavailable');
+    if (key === (failureAt === 'receipt' ? `receipt:${messages[0].id}` : failureAt)) throw new Error('completion unavailable');
     return put(key, value);
   });
   const ack = vi.fn(); const message = { body: messages[0], ack };

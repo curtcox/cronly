@@ -37,11 +37,11 @@ function meter(ns, usage) {
 
 for (const activityMode of ['ordinary', 'eviction']) for (const holdMode of ['compact', 'standalone']) for (const summaryMode of ['compact', 'rollover', 'large-periods']) {
   for (const mode of ['schedule', 'manual', 'test', 'hook']) {
-    for (const recovery of ['normal', 'settlement', 'completion', ...(mode === 'test' ? [] : ['retry', 'retry-dispatch', 'retry-cleanup', 'retry-budget'])]) {
+    for (const recovery of ['normal', 'settlement', 'runtime', 'settlement-response', 'completion', ...(mode === 'test' ? [] : ['retry', 'retry-dispatch', 'retry-cleanup', 'retry-budget', 'retry-budget-runtime', 'retry-budget-settlement-response'])]) {
       it(`bounds full ${mode}/${recovery}/${summaryMode}/${holdMode}/${activityMode} bookkeeping with redirects, redelivery, cold history and pruning`, async () => {
         vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-30T23:59:00Z'));
         const usage = { writes: 0, requests: 0, reads: 0, workerRequests: 0 }; const messages = []; let fetches = 0;
-        const withRetry = recovery.startsWith('retry');
+        const withRetry = recovery.startsWith('retry'); const refusedRetry = recovery.startsWith('retry-budget');
         const env = { ENVIRONMENT: 'local', TOKEN_SIGNING_KEY: 'test', APP_ORIGIN: 'https://cronly.org', RUN_QUEUE: { send: async body => messages.push(body) }, OUTBOUND_FETCH: async () => ++fetches % 6 ? new Response(null, { status: 302, headers: { location: `https://example.com/${fetches}` } }) : new Response('ok', { status: withRetry && fetches === 6 ? 500 : 200 }) };
         env.ACCOUNTS = namespace(AccountDO, env); env.JOBS = namespace(JobDO, env);
         env.SAFETY = namespace(SafetyDO, env);
@@ -54,7 +54,7 @@ for (const activityMode of ['ordinary', 'eviction']) for (const holdMode of ['co
           expect(response.status).toBe(200); return response.json();
         };
         await account('init', { account: 'a' }); await account('deposit', { id: 'fund', amount: 100000 });
-        await account('mutate', { account: 'a', id: 'defs', operations: [{ kind: 'actions', name: 'ping', value: { url: 'https://example.com', follow_redirects: true, ...(holdMode === 'standalone' ? { method: 'POST', body: 'x'.repeat(9000) } : {}) } }, { kind: 'jobs', name: 'j', value: { action: 'ping', cron: '* * * * *', retries: withRetry ? 1 : 0, ...(recovery === 'retry-budget' ? { budget: { day: PRICES.run + (mode === 'hook' ? PRICES.hook : 0) } } : {}) } }] });
+        await account('mutate', { account: 'a', id: 'defs', operations: [{ kind: 'actions', name: 'ping', value: { url: 'https://example.com', follow_redirects: true, ...(holdMode === 'standalone' ? { method: 'POST', body: 'x'.repeat(9000) } : {}) } }, { kind: 'jobs', name: 'j', value: { action: 'ping', cron: '* * * * *', retries: withRetry ? 1 : 0, ...(refusedRetry ? { budget: { day: PRICES.run + (mode === 'hook' ? PRICES.hook : 0) } } : {}) } }] });
         await account('sync-jobs');
         const token = mode === 'hook' ? (await api('/api/jobs/j/triggers')).token : null;
         if (summaryMode !== 'compact') vi.setSystemTime(new Date('2026-12-01T00:01:00Z'));
@@ -104,6 +104,19 @@ for (const activityMode of ['ordinary', 'eviction']) for (const holdMode of ['co
             if (args.op === 'settle') throw new Error('settlement unavailable');
             return dispatch(tx, args);
           });
+        } else if (recovery.endsWith('runtime')) {
+          const storage = env.ACCOUNTS.get('a').storage; const put = storage.put.bind(storage);
+          fault = vi.spyOn(storage, 'put').mockImplementation(async (key, value) => {
+            if (key === `runtime:${name}`) throw new Error('runtime unavailable');
+            return put(key, value);
+          });
+        } else if (recovery.endsWith('settlement-response')) {
+          const object = env.ACCOUNTS.get('a'); const fetch = object.fetch.bind(object);
+          fault = vi.spyOn(object, 'fetch').mockImplementation(async request => {
+            const { op } = await request.clone().json(); const response = await fetch(request);
+            if (op === 'settle' && response.ok) throw new Error('settlement response lost');
+            return response;
+          });
         } else if (recovery === 'retry-dispatch') {
           const start = job.start.bind(job);
           fault = vi.spyOn(job, 'start').mockImplementation(async args => {
@@ -123,7 +136,7 @@ for (const activityMode of ['ordinary', 'eviction']) for (const holdMode of ['co
           if (fault) { await expect(delivery).rejects.toMatchObject({ status: 500 }); fault.mockRestore(); fault = null; }
           else await delivery;
         }
-        const runs = withRetry && recovery !== 'retry-budget' ? 2 : 1;
+        const runs = withRetry && !refusedRetry ? 2 : 1;
         expect(messages).toHaveLength(runs); expect(fetches).toBe(6 * runs);
         const measured = { ...usage };
         expect(measured.writes, JSON.stringify(measured)).toBeLessThanOrEqual(runs * (COST_POLICY.runRowWrites - (holdMode === 'compact' ? 2 : 0)) + (mode === 'hook' ? 1 : 0) + (activityMode === 'eviction' ? 1 : 0));
