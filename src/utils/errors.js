@@ -27,10 +27,13 @@ export async function readText(request, maxBytes = 300000) {
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
   return new TextDecoder().decode(bytes);
 }
-/** Parse bounded JSON without trusting Content-Length. */
+/** Parse a bounded request object without trusting Content-Length. */
 export async function readJson(request, maxBytes = 300000) {
   if (!request.body) return {};
   const text = await readText(request, maxBytes);
-  try { return JSON.parse(text); }
+  let value;
+  try { value = JSON.parse(text); }
   catch { throw new ApiError(400, 'invalid_json', 'Invalid JSON'); }
+  assert(value !== null && typeof value === 'object' && !Array.isArray(value), 'invalid_json', 'Expected a JSON object');
+  return value;
 }

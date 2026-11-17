@@ -8,6 +8,7 @@ import { price } from '../utils/pricing.js';
 import { COST_POLICY } from '../utils/cost-policy.js';
 import { getHold, listHolds, putHold } from './hold-storage.js';
 import { runActivity, lastRun } from './run-activity.js';
+import { validateRunInput } from '../services/run-input.js';
 
 // Recovery must use the original reservation, even if a response or JobDO write
 // was lost. Return only orchestration data, never the frozen credentials/code.
@@ -21,7 +22,7 @@ function prepared(hold) {
 }
 /** Freeze the action and only the referenced credentials inside the prepaid hold. */
 export async function prepareRun(tx, args, env = {}) {
-  assert(args.input && typeof args.input === 'object' && !Array.isArray(args.input) && Object.keys(args.input).length <= 32 && Object.entries(args.input).every(([k, v]) => /^[a-zA-Z0-9_-]{1,64}$/.test(k) && typeof v === 'string' && v.length <= 2048), 'invalid_input', 'Webhook input must be a small object of strings');
+  validateRunInput(args.input);
   const prior = await getHold(tx, args.id) || await tx.get(`receipt:${args.id}`);
   if (prior) return { ...prepared(prior), duplicate: true };
   const job = args.test_action ? { action: args.test_action, enabled: true, overlap: 'allow', retries: 0, budget: {}, cron: null } : await tx.get(`def:jobs:${args.name}`);

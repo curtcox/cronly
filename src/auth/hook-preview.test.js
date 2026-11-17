@@ -27,7 +27,7 @@ async function setup() {
   return { env, account, trigger, call };
 }
 
-for (const [input, code] of [[{}, 'missing_input'], [{ message: 1 }, 'invalid_input'], [[], 'invalid_input'], [{ message: 'x'.repeat(2049) }, 'invalid_input']]) {
+for (const [input, code] of [[{}, 'missing_input'], [{ message: 1 }, 'invalid_input'], [[], 'invalid_json'], [{ message: 'x'.repeat(2049) }, 'invalid_input']]) {
   it(`validates hook preview input (${code}, ${Array.isArray(input) ? 'array' : typeof input.message}) without changing durable state`, async () => {
     const { env, call } = await setup();
     const stores = [env.ACCOUNTS.get('a').storage, env.JOBS.get('a:j').storage];
