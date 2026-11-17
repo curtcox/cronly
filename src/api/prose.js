@@ -7,6 +7,22 @@ import { digest } from '../auth/crypto.js';
 import { retainedRuns } from './reporting.js';
 import { projection } from '../services/reporting.js';
 import { compareRuns } from '../services/run-pagination.js';
+import { normalize } from '../services/definitions.js';
+
+// Review the same frozen definitions the model saw, including normalized defaults.
+// Apply still checks the snapshot hash; a later edit cannot silently change this diff.
+function proposalDiff(config, operations) {
+  const definitions = Object.fromEntries(['variables', 'actions', 'jobs'].map(kind => [kind, { ...config[kind] }]));
+  return operations.map(({ kind, name, delete: deleting, value }) => {
+    const exists = Object.hasOwn(definitions[kind], name);
+    let before = exists ? definitions[kind][name] : null;
+    // Run prices are derived from actions, rather than saved job settings.
+    if (kind === 'jobs' && before) { before = { ...before }; delete before.max_run_microdollars; }
+    const after = deleting ? null : normalize(kind, value);
+    if (deleting) delete definitions[kind][name]; else definitions[kind][name] = after;
+    return { kind, name, operation: deleting ? 'delete' : exists ? 'update' : 'create', before, after };
+  });
+}
 /** Reserve the whole conversation before a provider call; retries never repeat a billed call. */
 export async function prose(route, request, env, auth) {
   const mode = route.params.mode; assert(['to-cron', 'ask', 'change'].includes(mode), 'not_found', 'Unknown prose endpoint', 404);
@@ -48,7 +64,7 @@ export async function prose(route, request, env, auth) {
       assert(Array.isArray(value.operations), 'invalid_proposal', 'Invalid change proposal', 502);
       const operations = value.operations.map(op => { assert(['variables', 'actions', 'jobs'].includes(op.kind), 'invalid_proposal', 'Unsupported proposed change'); return { kind: op.kind, name: op.name, delete: op.delete, value: op.delete ? undefined : JSON.parse(op.value_json) }; });
       const proposal = await rpc(env.ACCOUNTS, auth.account, 'save-proposal', { id, operations, base_hash, explanation: value.explanation });
-      value = { ...proposal, explanation: value.explanation };
+      value = { ...proposal, explanation: value.explanation, diff: proposalDiff(config, operations) };
     }
     response = { ...value, quote_microdollars: mode === 'change' ? value.quote_microdollars : quote, maximum_prose_microdollars: quote, token_cost_microdollars: result.token_cost_microdollars, cost_microdollars: Math.min(quote, result.cost_microdollars) };
   } catch (error) {

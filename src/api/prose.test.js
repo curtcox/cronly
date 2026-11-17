@@ -50,6 +50,53 @@ it('proposes without mutating and requires a separate application against an unc
   expect((await api(`/api/changes/${encodeURIComponent(stale.id)}/apply`, 'POST', {})).status).toBe(409);
 });
 
+it('returns normalized before/after changes from the reserved snapshot and replays the original diff', async () => {
+  const { api, env, output } = setup();
+  await api('/api/dev/deposit', 'POST', { amount_microdollars: 5000000 });
+  await api('/api/variables/constructor', 'PUT', { value: 'original' });
+  await api('/api/variables/remove', 'PUT', { value: 'obsolete' });
+  output({ explanation: 'Review these changes', operations: [
+    { kind: 'variables', name: 'constructor', delete: false, value_json: '{"value":"updated"}' },
+    { kind: 'variables', name: 'remove', delete: true, value_json: '{}' },
+    { kind: 'actions', name: 'ping', delete: false, value_json: '{"url":"https://example.com"}' },
+    { kind: 'jobs', name: 'pinger', delete: false, value_json: '{"action":"ping","cron":null}' },
+    { kind: 'variables', name: 'constructor', delete: false, value_json: '{"value":"final"}' }
+  ] });
+  const headers = { 'Idempotency-Key': 'diff' };
+  const proposal = await api('/api/prose/change', 'POST', { text: 'Update my definitions' }, headers);
+  expect(proposal).toMatchObject({ status: 200, quote_microdollars: 500, diff: [
+    { kind: 'variables', name: 'constructor', operation: 'update', before: 'original', after: 'updated' },
+    { kind: 'variables', name: 'remove', operation: 'delete', before: 'obsolete', after: null },
+    { kind: 'actions', name: 'ping', operation: 'create', before: null, after: { type: 'http', method: 'GET', timeout_seconds: 10, body: '', url: 'https://example.com' } },
+    { kind: 'jobs', name: 'pinger', operation: 'create', before: null, after: { action: 'ping', cron: null, enabled: true, timezone: 'UTC', retries: 0 } },
+    { kind: 'variables', name: 'constructor', operation: 'update', before: 'updated', after: 'final' }
+  ] });
+  expect((await api('/api/variables/constructor')).value).toBe('original');
+  expect((await api('/api/variables/remove')).value).toBe('obsolete');
+  expect((await api('/api/actions/ping')).status).toBe(404);
+  await api('/api/variables/constructor', 'PUT', { value: 'edited later' });
+  const replay = await api('/api/prose/change', 'POST', { text: 'Update my definitions' }, headers);
+  expect(replay).toMatchObject({ id: proposal.id, diff: proposal.diff, quote_microdollars: proposal.quote_microdollars, cost_microdollars: proposal.cost_microdollars });
+  expect(env.LLM_FETCH).toHaveBeenCalledTimes(1);
+  expect((await api(`/api/changes/${encodeURIComponent(proposal.id)}/apply`, 'POST', { quote_microdollars: 500 })).code).toBe('stale_proposal');
+});
+
+it('keeps proposal review values tied to the snapshot when definitions change during generation', async () => {
+  const { api, env, output } = setup();
+  await api('/api/dev/deposit', 'POST', { amount_microdollars: 5000000 });
+  await api('/api/variables/greeting', 'PUT', { value: 'snapshot value' });
+  output({ explanation: 'Update greeting', operations: [{ kind: 'variables', name: 'greeting', delete: false, value_json: '{"value":"proposed"}' }] });
+  const fetchModel = env.LLM_FETCH.getMockImplementation();
+  env.LLM_FETCH.mockImplementation(async (...args) => {
+    await api('/api/variables/greeting', 'PUT', { value: 'concurrent edit' });
+    return fetchModel(...args);
+  });
+  const proposal = await api('/api/prose/change', 'POST', { text: 'Update greeting' });
+  expect(proposal).toMatchObject({ status: 200, diff: [{ kind: 'variables', name: 'greeting', before: 'snapshot value', after: 'proposed' }] });
+  expect((await api('/api/variables/greeting')).value).toBe('concurrent edit');
+  expect((await api(`/api/changes/${encodeURIComponent(proposal.id)}/apply`, 'POST', {})).code).toBe('stale_proposal');
+});
+
 it('refuses invalid translation time zones before billing, including previews and unfunded accounts', async () => {
   const { api, env } = setup();
   const headers = { 'Idempotency-Key': 'translation-timezone' };
