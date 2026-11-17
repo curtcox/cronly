@@ -69,7 +69,7 @@ for (const failure of ['settings', 'history:first', 'alarm']) {
   });
 }
 
-it('repairs failed pause publication on another refusal without another pause log', async () => {
+it('retries a failed pause publication before durably recording one pause', async () => {
   const { env, account, start, object } = await setup('budget_day');
   const accountObject = env.ACCOUNTS.get('a'); const dispatch = accountObject.dispatch.bind(accountObject);
   const fault = vi.spyOn(accountObject, 'dispatch').mockImplementation(async (tx, args) => {
@@ -77,9 +77,11 @@ it('repairs failed pause publication on another refusal without another pause lo
     return dispatch(tx, args);
   });
   await expect(start('first')).rejects.toMatchObject({ status: 500 }); fault.mockRestore();
+  expect((await object.storage.get('settings')).paused).toBe(null);
+  expect(await object.summaries()).toEqual([]);
   await expect(start('again')).rejects.toMatchObject({ code: 'budget_day' });
   expect((await account('account')).job_runtime.j.paused).toBe('budget_day');
-  expect((await object.summaries()).map(run => run.id)).toEqual(['first']);
+  expect((await object.summaries()).map(run => run.id)).toEqual(['again']);
 });
 
 it('records a new pause reason and resumes at the next budget window', async () => {

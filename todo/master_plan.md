@@ -146,6 +146,12 @@ Runs start within a few seconds of the scheduled minute; the docs say so plainly
    edits. Delivery targets its own pause reason, preserves other pauses/schedules and
    retries safely after partial delivery or restart without delaying hold expiry.
    Pausing instead of logging every skipped run keeps a broke account from costing anything.
+   HTTP schedules that require `{{input.FIELD}}` also pause (`missing_input`) with
+   one unpaid log, since cron cannot supply webhook input. Correct the action and
+   save its job to resume, or leave cron blank for manual/webhook-only use. Manual
+   runs with supplied input remain available while the schedule is paused.
+   Publish the pause before committing it in JobDO so a failed publication leaves
+   the due schedule available for alarm redelivery without requiring a paid hold.
 4. JobDO computes the next fire time, sets its alarm, and enqueues the run.
 5. Executor runs the action and posts the result (status, timing, excerpts, CPU used,
    subrequests) to the JobDO.
@@ -154,7 +160,8 @@ Runs start within a few seconds of the scheduled minute; the docs say so plainly
    before settlement; Queue redelivery or the pending alarm can finish a staged completion
    after an outage without repeating external work. Configured retries use a private durable
    outbox with the original input and key cap, a deterministic child run id and a separate
-   reservation. Budget refusals end that retry; transient dispatch failures remain recoverable.
+   reservation. Budget, revoked/expired-key and invalid-input refusals end that
+   retry; transient dispatch failures remain recoverable.
 7. A hold older than the maximum run time + margin is settled at the full held amount by an
    AccountDO alarm (the run's result was lost; we did the work, or may have).
 

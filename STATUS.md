@@ -56,7 +56,7 @@ disagrees with it, this file wins and the other document is stale.
 | L2 | Accounts and auth: Clerk sessions, Clerk webhook → AccountDO, API keys with scopes and daily spend caps, `API_ROUTES` access test | code | ✅ | Clerk/LocalDev auth, signed hashed scoped keys, revocation, daily caps and Clerk webhook; access coverage tests. §4.1. Port hashbin `src/auth/`. |
 | L3 | Money: µ$ ledger, reserve/settle/expire holds, Stripe deposits, history, `cost-policy.js`, `pricing.js`, price-floor tests, `/api/quote` | code | 🟨 | Transactional ledger/holds, signed Stripe webhook, itemized Checkout and quotes tested; S4 recovery/refused-retry audit and rounded floors set HTTP price to 85 µ$ and reads to 21 µ$ plus 2 µ$/job. Valid `constructor` names retain numeric summaries and enforce current/legacy budgets without inherited-property lookups. Existing holds keep their maximum. Signed payment fulfillment acknowledges credited payments during wake outages; durable delivery resumes balance pauses. Real deposit remains L14. §6, `docs/business/pricing.md`. Needs D4, D6. |
 | L4 | Definitions: variables, secrets (AES-GCM, write-only), HTTP actions, templates, change billing, audit log, dry run, idempotency | code | ✅ | Atomic billed CRUD, reference checks, AES-GCM write-only secrets, dry runs, audit and idempotency tested. Action changes no longer rewrite/resynchronize all jobs: quotes and new reservations resolve the current action; held snapshots, pauses and schedules remain durable. Non-job edits avoid account wakeups; job edits retain earlier hold-expiry alarms. Log redaction also covers JSON-escaped secret values and unpaired surrogates. §2, §3.3, §4.2. |
-| L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | ✅ | Real local Worker/Queue HTTP path verified; retries, missed/overlap, budgets, duplicate delivery, held snapshots, refusal pause and recovery tested. Initial pending runs and recovery alarms commit atomically. Replayed starts recover original deadlines, trigger/input and key identity from the reservation after a lost response/pending/alarm write; expired reservations never enqueue. Observed results stage before settlement; Queue redelivery/alarms recover completion and private retry dispatch after restart without repeating external work or charges. Retry input/key caps survive settlement; budget, revoked/expired-key and invalid-input refusals clear the retry rather than recurring unpaid. Configuration sync preserves last outcomes and skips unchanged settings; balance wakes publish resumed runtime and repair failed publication. Reconciliation preserves deletion of prototype-named jobs. Scheduled next-fire publication retries before durable advancement, including missed-run skips without a pending run. Account synchronization retries preserve earlier hold-expiry wakeups, including reservations arriving during synchronization. Reason-specific job wakes retain unrelated pauses and recover publication, settings and alarm failures after restart. §3, §3.1, §2.3. |
+| L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | ✅ | Real local Worker/Queue HTTP path verified; retries, missed/overlap, budgets, duplicate delivery, held snapshots, refusal pause and recovery tested. Initial pending runs and recovery alarms commit atomically. Replayed starts recover original deadlines, trigger/input and key identity from the reservation after a lost response/pending/alarm write; expired reservations never enqueue. Observed results stage before settlement; Queue redelivery/alarms recover completion and private retry dispatch after restart without repeating external work or charges. Retry input/key caps survive settlement; budget, revoked/expired-key and invalid-input refusals clear the retry rather than recurring unpaid. Input-dependent HTTP schedules pause once with `missing_input`; pause publication failures retain the due schedule for alarm recovery. Configuration sync preserves last outcomes and skips unchanged settings; balance wakes publish resumed runtime and repair failed publication. Reconciliation preserves deletion of prototype-named jobs. Scheduled next-fire publication retries before durable advancement, including missed-run skips without a pending run. Account synchronization retries preserve earlier hold-expiry wakeups, including reservations arriving during synchronization. Reason-specific job wakes retain unrelated pauses and recover publication, settings and alarm failures after restart. §3, §3.1, §2.3. |
 | L6 | Runs, costs, upcoming, projection APIs; retention pruning | code | ✅ | Retained/deleted-job history, NDJSON, permanent UTC cost aggregates, ledger cursors, bounded upcoming, fast cron/DST projections and byte/retention bounds tested. Stable timestamp/ID run cursors prevent skipped retries at page boundaries, survive retention/restarts and support NDJSON; legacy timestamp paging remains supported. Pruning preserves pending runs/retry outboxes until recovery finishes and deletes completed bodies/indexes atomically. Constructor-named jobs/actions have numeric grouped costs, seven-day activity and forecasts across UTC rollovers/restarts. §4.3, §6, §7. |
 | L7 | Triggers: run now, trigger tokens, `/hook/*`, per-token rate limits, CORS, `{{input.*}}` | code | ✅ | Manual runs, signed job-only tokens, revocation, token limits, input validation and hook-only CORS tested. Run/test/trigger/quote guards reject absent prototype-named definitions before job dispatch. §4.1. |
 | L8 | Web UI with balance + runway header on every signed-in page; Playwright tests | code | ✅ | All workspace pages, runtime status/runway, direct action tests, quote dialogs and logo implemented; mobile and browser save/run/escaping/cron flows pass. Run-history paging uses stable cursors and preserves visible job/outcome/date filters. §5. |
@@ -74,7 +74,7 @@ disagrees with it, this file wins and the other document is stale.
 | S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ✅ | Atomic versioned keyring, legacy reads, held per-secret re-encryption, edit/delete conflict protection, audit, scoped CLI and CI wiring verified. Persisted local Worker migrated v1 → v2 and executed a redacted JS run with v1 retired. [Operator procedure](docs/ops/secret-rotation.md). §3.3. |
 | S2 | Charge measured JS CPU instead of the configured limit | code | ⬜ | §3.4; needs per-invocation CPU data. |
 | S3 | Recalibrate prices from a month of real Cloudflare and Anthropic bills | ops/code | ⬜ | `docs/business/pricing.md`. |
-| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budgets, active money summaries and ledger buffering reduce ordinary writes; unchanged alarms/runtime indexes and completion settings skip writes. Transactional reads/changes skip transient holds. Ledger pages retain legacy cursors and permanent receipts. Small durable reservations share the balance row; large/legacy snapshots stay standalone. Finalization reuses the durable staged log. Cooldowns/recent-job activity now share the reservation balance write, saving another ordinary compact-run write; evicted cooldowns remain standalone and larger legacy hold arrays migrate after draining. Repeated balance/budget refusals skip writes after one atomic pause/log/reset-wakeup transition; unchanged configuration replay skips settings writes. The 456-path audit includes activity eviction, ledger archival, compact/rollover/large-period summaries, unfunded-retry pauses, runtime-write failures and lost settlement responses: conservative 37 writes, 27 DO requests/five Worker invocations at 85 µ$/run after rounded floors. Scheduled dispatch rearms once after schedule advancement, retaining its atomic pending wakeup; advancement publication survives failures and refusal pauses skip duplicate writes. Completion runtime publication now shares settlement’s account transaction; new completed deliveries skip publication calls while legacy completions retain recovery. Deposits and cost-brake recovery use one versioned wake batch per cause (100 healthy jobs: five deposit/account writes including acknowledgement), preserving unrelated pauses and earlier holds. Further worst-case reductions remain. [Cost audit](docs/business/pricing.md). |
+| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budgets, active money summaries and ledger buffering reduce ordinary writes; unchanged alarms/runtime indexes and completion settings skip writes. Transactional reads/changes skip transient holds. Ledger pages retain legacy cursors and permanent receipts. Small durable reservations share the balance row; large/legacy snapshots stay standalone. Finalization reuses the durable staged log. Cooldowns/recent-job activity now share the reservation balance write, saving another ordinary compact-run write; evicted cooldowns remain standalone and larger legacy hold arrays migrate after draining. Repeated balance/budget refusals skip writes after one atomic pause/log/reset-wakeup transition; unchanged configuration replay skips settings writes. The 456-path audit includes activity eviction, ledger archival, compact/rollover/large-period summaries, unfunded-retry pauses, runtime-write failures and lost settlement responses: conservative 37 writes, 27 DO requests/five Worker invocations at 85 µ$/run after rounded floors. Scheduled dispatch rearms once after schedule advancement, retaining its atomic pending wakeup; advancement publication survives failures and refusal pauses skip duplicate writes. Completion runtime publication now shares settlement’s account transaction; new completed deliveries skip publication calls while legacy completions retain recovery. Deposits and cost-brake recovery use one versioned wake batch per cause (100 healthy jobs: five deposit/account writes including acknowledgement), preserving unrelated pauses and earlier holds. Terminal credential/input refusals clear retry outboxes, and input-dependent schedules pause once instead of recurring unpaid. Further worst-case reductions remain. [Cost audit](docs/business/pricing.md). |
 
 ## Backlog
 
@@ -289,19 +289,6 @@ calendar days of billed counts rather than sampling retained logs.
 - Archival retains the previous worst-case allowance, so the 89 µ$ price is unchanged.
   Further durable hold compaction and L9–L14 live acceptance/owner steps remain open;
   nothing was deployed to production.
-
-## L2/L5/S4 terminal retry refusals — 2026-11-16
-
-- A revoked or expired API key ends an unreserved retry instead of retaining an
-  outbox that wakes every second. Invalid retry input after an action edit also
-  ends the retry. Infrastructure failures still retain their recovery outbox.
-- Twelve regressions cover compact/standalone reservations, both credential
-  refusals, changed input requirements, failed cleanup and cold restart. The
-  original run executes and charges once; retry cleanup preserves the job's
-  schedule without pausing it or exposing private input.
-- Lint and all 764 unit/integration tests pass, including the 456 full-path cost
-  checks. Prices and conservative cost allowances are unchanged; further S4 work
-  and L9–L14 live/owner/legal acceptance remain open.
 
 ## S4 compact durable reservations acceptance — 2026-11-16
 
@@ -679,3 +666,35 @@ calendar days of billed counts rather than sampling retained logs.
 - These administrative savings leave the conservative 85 µ$ run price unchanged.
   Further S4 reductions and L9–L14 live/owner acceptance remain outstanding;
   nothing was deployed to production.
+
+## L2/L5/S4 terminal retry refusals — 2026-11-16
+
+- A revoked or expired API key ends an unreserved retry instead of retaining an
+  outbox that wakes every second. Invalid retry input after an action edit also
+  ends the retry. Infrastructure failures still retain their recovery outbox.
+- Twelve regressions cover compact/standalone reservations, both credential
+  refusals, changed input requirements, failed cleanup and cold restart. The
+  original run executes and charges once; retry cleanup preserves the job's
+  schedule without pausing it or exposing private input.
+- Lint and all 764 unit/integration tests pass, including the 456 full-path cost
+  checks. Prices and conservative cost allowances are unchanged; further S4 work
+  and L9–L14 live/owner/legal acceptance remain open.
+
+## L5/S4 input-dependent schedule pauses — 2026-11-16
+
+- An HTTP cron schedule that requires webhook input pauses with `missing_input`
+  and one unpaid history entry instead of repeatedly failing its alarm. Manual
+  runs can supply input while the schedule stays paused. Deposits and cost-brake
+  recovery preserve that pause; correcting the action and saving its job resumes.
+- Pause publication now precedes the durable pause. A publication outage leaves
+  the due schedule available for retry without a paid hold; settings, history and
+  alarm failures also recover after restart. Eighteen new regressions cover these
+  paths for input, balance, daily-budget and monthly-budget refusals.
+- Lint, all 782 unit/integration tests (including 456 full-path cost checks), all
+  five browser flows and the production dry-run bundle pass. Real local
+  SQLite/Queue acceptance verifies the actual missing-input alarm, its single
+  free log, no run charge, preservation after deposit and correction/resumption,
+  alongside the existing HTTP/JS, retry, redaction, accounting and schedule checks.
+- Public docs and the master plan describe recovery. Conservative cost allowances
+  and the 85 µ$ run price are unchanged. Further S4 reductions and L9–L14
+  live/owner/legal acceptance remain open; no production deployment occurred.

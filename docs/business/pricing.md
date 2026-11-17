@@ -251,6 +251,16 @@ immediate wake delivery fails. Configuration replay also ignores property order
 rather than rewriting identical settings after completion. These are administrative
 savings; the conservative run bound and 85 µ$ price are unchanged.
 
+
+Retries refused by expired/revoked API keys or invalid input now discard their
+private outbox instead of waking an unreserved retry every second. HTTP cron
+schedules that require webhook input similarly pause once with one free history
+entry. Manual input refusals do not pause a schedule; deposits and cost recovery
+preserve input pauses. Correcting the action and saving its job resumes scheduling.
+Pause publication precedes the durable pause so an outage can retry from the due
+schedule without requiring a held run. These changes bound unpaid recovery work;
+the paid-run cost allowances and 85 µ$ base price are unchanged.
+
 ## Verified provider sources
 
 - [Workers](https://developers.cloudflare.com/workers/platform/pricing/)

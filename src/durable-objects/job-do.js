@@ -118,20 +118,24 @@ export class JobDO {
     try {
       reservation = await rpc(this.env.ACCOUNTS, settings.account, 'prepare-run', { ...args, name: settings.name, account: settings.account, test_action: settings.job.test_action });
     } catch (error) {
-      if (error.status === 402 && ['insufficient_balance', 'budget_day', 'budget_month'].includes(error.code)) {
+      const moneyRefusal = error.status === 402 && ['insufficient_balance', 'budget_day', 'budget_month'].includes(error.code);
+      const scheduledInputRefusal = error.code === 'missing_input' && args.trigger === 'schedule';
+      if (moneyRefusal || scheduledInputRefusal) {
         const prior = JSON.stringify(settings);
         settings.paused = error.code;
         delete settings.resume_at;
         if (error.code === 'budget_day') settings.resume_at = Date.parse(new Date(Date.now() + DAY).toISOString().slice(0, 10));
         if (error.code === 'budget_month') { const date = new Date(); settings.resume_at = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1); }
-        // One durable log records each pause transition. Repeated unfunded
-        // attempts must not keep writing history for an account that cannot pay.
+        // Publish before committing the pause: a failed publication must leave
+        // the due schedule available for alarm redelivery, even without a hold.
+        await this.publish(settings);
+        // One durable log records each transition. An input-dependent schedule
+        // cannot supply its own input, so it must not keep retrying unpaid.
         if (JSON.stringify(settings) !== prior) {
           const pausedRun = { id: args.id, status: 'paused', reason: error.code, created_at: Date.now(), cost_microdollars: 0, job: settings.name };
           await this.history(pausedRun, false, settings);
         }
         await this.arm();
-        await this.publish(settings);
       }
       throw error;
     }
@@ -287,7 +291,7 @@ export class JobDO {
         const late = Date.now() - due > 60000;
         if (!late || settings.job.missed === 'run_once') {
           try { await this.start({ id: `${settings.account}:${settings.name}:${due}`, trigger: 'schedule', scheduled_at: new Date(due).toISOString(), input: {} }, false); }
-          catch (error) { if (![402, 409, 429, 503].includes(error.status)) throw error; }
+          catch (error) { if (![402, 409, 429, 503].includes(error.status) && error.code !== 'missing_input') throw error; }
         }
         settings = await this.storage.get('settings');
         // Refusal handling already committed and published any pause. Otherwise

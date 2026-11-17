@@ -9,6 +9,13 @@ function localClient(user) {
 }
 const api = localClient(`acceptance-${crypto.randomUUID()}`);
 assert.equal((await api('/health')).environment, 'local');
+// Start this independent alarm early so the rest of acceptance can run while it
+// reaches its scheduled minute. Its zero budget also bounds an unexpected run.
+const inputApi = localClient(`input-${crypto.randomUUID()}`);
+await inputApi('/api/dev/deposit', 'POST', { amount_microdollars: 1000 }, 'fund');
+await inputApi('/api/actions/needs-input', 'PUT', { url: 'https://example.com/{{input.event}}' });
+await inputApi('/api/jobs/needs-input', 'PUT', { action: 'needs-input', cron: '* * * * *', budget: { day: 0 } });
+const inputAt = (await inputApi('/api/account')).job_runtime['needs-input'].next_fire;
 await api('/api/dev/deposit', 'POST', { amount_microdollars: 5000000 }, 'fund');
 const before = await api('/api/account');
 await api('/api/variables/token?dry_run=1', 'PUT', { value: 'test' });
@@ -168,4 +175,23 @@ const scheduledLedger = (await scheduledApi('/api/transactions')).items.filter(r
 assert.equal(scheduledLedger.length, 1); assert.equal(scheduledLedger[0].amount_microdollars, -PRICES.run);
 await scheduledApi('/api/jobs/scheduled', 'PUT', { action: 'ping', cron: '* * * * *', enabled: false, budget: { day: PRICES.run } });
 assert.equal((await scheduledApi('/api/account')).job_runtime.scheduled.next_fire, null);
-console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, one settled activation across three jobs sharing an action version, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries, one log for repeated budget refusals, preserved outcomes after configuration sync, durable deposit resumption without clearing a budget pause, and a real scheduled alarm with one charge, next-fire publication and final disable. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
+let inputAccount;
+do {
+  inputAccount = await inputApi('/api/account');
+  if (inputAccount.job_runtime['needs-input'].paused === 'missing_input') break;
+  await new Promise(resolve => setTimeout(resolve, 1000));
+} while (Date.now() < inputAt + 30000);
+assert.equal(inputAccount.job_runtime['needs-input'].paused, 'missing_input');
+assert.equal(inputAccount.balance_microdollars, 800); assert.equal(inputAccount.held_microdollars, 0);
+const inputPauses = (await inputApi('/api/runs?job=needs-input')).items;
+assert.equal(inputPauses.length, 1); assert.equal(inputPauses[0].status, 'paused');
+assert.equal(inputPauses[0].reason, 'missing_input'); assert.equal(inputPauses[0].cost_microdollars, 0);
+assert.equal((await inputApi('/api/transactions')).items.filter(row => row.kind === 'run').length, 0);
+await inputApi('/api/dev/deposit', 'POST', { amount_microdollars: 100 }, 'top-up');
+await new Promise(resolve => setTimeout(resolve, 1500));
+assert.equal((await inputApi('/api/account')).job_runtime['needs-input'].paused, 'missing_input');
+assert.deepEqual((await inputApi('/api/runs?job=needs-input')).items, inputPauses);
+await inputApi('/api/actions/needs-input', 'PUT', { url: 'https://example.com/corrected' });
+await inputApi('/api/jobs/needs-input', 'PUT', { action: 'needs-input', cron: null, budget: { day: 0 } });
+assert.equal((await inputApi('/api/account')).job_runtime['needs-input'].paused, null);
+console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, one settled activation across three jobs sharing an action version, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries, one log for repeated budget refusals, preserved outcomes after configuration sync, durable deposit resumption without clearing a budget pause, a real scheduled alarm with one charge, next-fire publication and final disable, and one unpaid missing-input schedule pause that survives a deposit and resumes after correction. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
