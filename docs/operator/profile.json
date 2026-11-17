@@ -13,7 +13,7 @@
     },
     "apps": {
       "hashbin.org": { "support_email": null, "privacy_email": null },
-      "cronly.org": { "support_email": null, "privacy_email": null }
+      "cronly.org": { "support_email": "support@cronly.org", "privacy_email": null }
     }
   }
 }
