@@ -66,7 +66,7 @@ for (const failure of ['enqueue', 'acknowledgement']) {
     expect(first.mock.calls.filter(([, args]) => args.op === 'resume-cost-jobs')).toHaveLength(1);
     for (const name of ['a', 'b', 'c']) {
       const object = env.ACCOUNTS.get(name);
-      expect(await object.storage.get('sync:j')).toBeDefined();
+      expect(await object.storage.get('wake:cost_brake')).toBeDefined();
       await object.alarm();
       expect(await rpc(env.JOBS, `${name}:j`, 'status')).toMatchObject({ paused: null });
       expect((await rpc(env.ACCOUNTS, name, 'account')).job_runtime.j.paused).toBe(null);

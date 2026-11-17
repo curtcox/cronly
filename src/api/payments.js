@@ -40,8 +40,8 @@ export async function stripeWebhook(request, env) {
   await rpc(env.ACCOUNTS, session.client_reference_id, 'init', { account: session.client_reference_id });
   const deposit = await rpc(env.ACCOUNTS, session.client_reference_id, 'deposit', { id: session.id, amount: credit * 10000 });
   if (deposit.duplicate) return { received: true };
-  // Balance-paused jobs are nudged; their next reservation remains authoritative.
-  const config = await rpc(env.ACCOUNTS, session.client_reference_id, 'config');
-  for (const name of Object.keys(config.jobs)) await rpc(env.JOBS, `${session.client_reference_id}:${name}`, 'wake', {});
+  // The credited transaction already persisted its wakeup. Fast-path delivery
+  // can fail without rejecting a fulfilled payment; the account alarm retries.
+  try { await rpc(env.ACCOUNTS, session.client_reference_id, 'sync-jobs'); } catch { /* Durable outbox retries. */ }
   return { received: true };
 }

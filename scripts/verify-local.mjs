@@ -114,6 +114,34 @@ for (const name of ['http', 'js', 'gateway']) assert.equal(synced.job_runtime[na
 assert.equal(synced.job_runtime.blocked.last_outcome, 'failure'); assert.equal(synced.held_microdollars, 0);
 assert.equal(synced.job_runtime['no-budget'].paused, 'budget_day');
 assert.deepEqual((await api('/api/runs?job=no-budget')).items, pauses);
+// Observe the account alarm delivering a real deposit wakeup. A budget-paused
+// job sorts before the balance-paused one, so successful resumption also proves
+// the batch preserved the earlier job's pause instead of reconfiguring it.
+const recoveryApi = localClient(`recovery-${crypto.randomUUID()}`);
+await recoveryApi('/api/dev/deposit', 'POST', { amount_microdollars: 400 }, 'fund');
+await recoveryApi('/api/actions/ping', 'PUT', { url: 'https://example.com' });
+await recoveryApi('/api/jobs/budget', 'PUT', { action: 'ping', cron: null, budget: { day: 0 } });
+await recoveryApi('/api/jobs/resume', 'PUT', { action: 'ping', cron: '0 0 1 1 *' });
+assert.equal((await recoveryApi('/api/jobs/budget/run', 'POST', {}, 'budget-pause', 402)).code, 'budget_day');
+await recoveryApi('/api/variables/drain', 'PUT', { value: 'spend remaining credit' });
+assert.equal((await recoveryApi('/api/jobs/resume/run', 'POST', {}, 'balance-pause', 402)).code, 'insufficient_balance');
+const recoveryBefore = await recoveryApi('/api/account');
+assert.equal(recoveryBefore.balance_microdollars, 0);
+await recoveryApi('/api/dev/deposit', 'POST', { amount_microdollars: 1000 }, 'recover');
+await recoveryApi('/api/dev/deposit', 'POST', { amount_microdollars: 1000 }, 'recover');
+const recoveryDeadline = Date.now() + 10000;
+let recovered;
+do {
+  recovered = await recoveryApi('/api/account');
+  assert.deepEqual(recovered.job_runtime.budget, recoveryBefore.job_runtime.budget);
+  if (recovered.job_runtime.resume.paused === null) break;
+  await new Promise(resolve => setTimeout(resolve, 250));
+} while (Date.now() < recoveryDeadline);
+assert.equal(recovered.job_runtime.resume.paused, null);
+assert(recovered.job_runtime.resume.next_fire > Date.now());
+assert.equal(recovered.balance_microdollars, 1000); assert.equal(recovered.held_microdollars, 0);
+assert.equal((await recoveryApi('/api/runs?job=budget')).items.length, 1);
+assert.equal((await recoveryApi('/api/runs?job=resume')).items.length, 1);
 // Exercise a real JobDO alarm, not just manual queue dispatch. Its budget bounds
 // spending if acceptance fails before the final disable mutation can run. A fresh
 // account keeps polling independent of the preceding ledger audit's rate window.
@@ -140,4 +168,4 @@ const scheduledLedger = (await scheduledApi('/api/transactions')).items.filter(r
 assert.equal(scheduledLedger.length, 1); assert.equal(scheduledLedger[0].amount_microdollars, -PRICES.run);
 await scheduledApi('/api/jobs/scheduled', 'PUT', { action: 'ping', cron: '* * * * *', enabled: false, budget: { day: PRICES.run } });
 assert.equal((await scheduledApi('/api/account')).job_runtime.scheduled.next_fire, null);
-console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, one settled activation across three jobs sharing an action version, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries, one log for repeated budget refusals, preserved outcomes after configuration sync, and a real scheduled alarm with one charge, next-fire publication and final disable. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
+console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, one settled activation across three jobs sharing an action version, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries, one log for repeated budget refusals, preserved outcomes after configuration sync, durable deposit resumption without clearing a budget pause, and a real scheduled alarm with one charge, next-fire publication and final disable. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');

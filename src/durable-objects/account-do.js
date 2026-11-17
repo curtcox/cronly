@@ -61,7 +61,7 @@ export class AccountDO {
       }
       case 'metrics': return (await accountMetric(tx, args.period)) || {};
       case 'resume-cost-jobs': {
-        await this.nudge(tx); return {};
+        await this.nudge(tx, 'cost_brake'); return {};
       }
       case 'maintenance': {
         const now = Date.now();
@@ -184,10 +184,14 @@ export class AccountDO {
       default: assert(false, 'unknown_operation', 'Unknown internal operation', 404);
     }
   }
-  async nudge(tx) {
+  async nudge(tx, reason = 'insufficient_balance') {
     const profile = await tx.get('profile'); if (!profile) return;
-    for (const [key] of await tx.list({ prefix: 'def:jobs:' })) { const name = key.slice('def:jobs:'.length); await tx.put(`sync:${name}`, { name, account: profile.id, version: crypto.randomUUID() }); }
-    if ((await tx.list({ prefix: 'sync:' })).size) {
+    const names = [...(await tx.list({ prefix: 'def:jobs:' })).keys()].map(key => key.slice('def:jobs:'.length));
+    // One bounded outbox per cause replaces an account-wide row-write fanout.
+    // Keep definition synchronization separate: a deposit must not clear a
+    // budget/cost pause or supersede an unacknowledged edit or deletion.
+    if (names.length) await tx.put(`wake:${reason}`, { account: profile.id, names, reason, version: crypto.randomUUID() });
+    if (names.length || (await tx.list({ prefix: 'sync:' })).size || (await tx.list({ prefix: 'wake:' })).size) {
       const next = Date.now() + 1000; const alarm = await tx.getAlarm();
       if (alarm === null || alarm > next) await tx.setAlarm(next);
     }
@@ -196,6 +200,12 @@ export class AccountDO {
     for (const [key, item] of await this.storage.list({ prefix: 'sync:' })) {
       const job = await this.storage.get(`def:jobs:${item.name}`);
       await rpc(this.env.JOBS, `${item.account}:${item.name}`, 'configure', { account: item.account, name: item.name, job: job || null });
+      await this.storage.transaction(async tx => { const current = await tx.get(key); if (current?.version === item.version) await tx.delete(key); });
+    }
+    for (const [key, item] of await this.storage.list({ prefix: 'wake:' })) {
+      for (const name of item.names) await rpc(this.env.JOBS, `${item.account}:${name}`, 'wake', { reason: item.reason });
+      // Partial delivery can replay safely. A concurrent deposit/recovery gets
+      // a new version, so an older batch cannot acknowledge its wakeup.
       await this.storage.transaction(async tx => { const current = await tx.get(key); if (current?.version === item.version) await tx.delete(key); });
     }
   }

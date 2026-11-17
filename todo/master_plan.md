@@ -139,8 +139,12 @@ Runs start within a few seconds of the scheduled minute; the docs say so plainly
    transaction: balance − holds ≥ price, job's daily and monthly budget not exceeded, reservation
    id not already used. On success it records a hold.
 3. On refusal the JobDO **pauses the job** (`paused: insufficient_balance` or
-   `paused: budget_day` / `budget_month`), writes one log entry, and sets no further alarm.
-   A deposit, a budget change, or the next budget window (daily/monthly reset alarm) resumes it.
+   `paused: budget_day` / `budget_month`), writes one log entry, and stops scheduling runs while paused.
+   A deposit resumes a balance pause; a budget change or the next budget window
+   (daily/monthly reset alarm) resumes a budget pause. Deposits and cost-brake recovery
+   each persist one bounded, versioned account wake batch, separate from definition
+   edits. Delivery targets its own pause reason, preserves other pauses/schedules and
+   retries safely after partial delivery or restart without delaying hold expiry.
    Pausing instead of logging every skipped run keeps a broke account from costing anything.
 4. JobDO computes the next fire time, sets its alarm, and enqueues the run.
 5. Executor runs the action and posts the result (status, timing, excerpts, CPU used,

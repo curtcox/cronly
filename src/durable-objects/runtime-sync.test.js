@@ -143,3 +143,15 @@ for (const paused of ['budget_day', 'budget_month', 'cost_brake', 'deleted']) {
     expect(put).not.toHaveBeenCalled(); expect(alarm).not.toHaveBeenCalled();
   });
 }
+
+it('ignores property ordering in configuration replay while persisting real job changes', async () => {
+  const { job, object } = await setup();
+  const settings = await job('status');
+  const reordered = Object.fromEntries(Object.entries(settings.job).reverse());
+  const put = vi.spyOn(object.storage, 'put');
+  await job('configure', { account: 'a', name: 'j', job: reordered });
+  expect(put).not.toHaveBeenCalled();
+  await job('configure', { account: 'a', name: 'j', job: { ...reordered, budget: { day: 100 } } });
+  expect(put.mock.calls.filter(([key]) => key === 'settings')).toHaveLength(1);
+  expect(await job('status')).toMatchObject({ job: { budget: { day: 100 } }, last_outcome: 'success' });
+});

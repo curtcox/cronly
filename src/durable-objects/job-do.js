@@ -3,6 +3,7 @@ import { rpc } from '../utils/rpc.js';
 import { price } from '../utils/pricing.js';
 import { nextFires } from '../services/cron.js';
 import { compareRuns, runCursor, parseRunCursor } from '../services/run-pagination.js';
+import { sameRecord } from '../utils/records.js';
 
 const DAY = 86400000;
 /** Per-job alarm and run log. Never waits for customer HTTP inside the DO. */
@@ -22,7 +23,7 @@ export class JobDO {
         const prior = await this.storage.get('settings');
         const settings = { account: args.account, name: args.name, job: args.job, paused: null, ...(prior?.last_outcome ? { last_outcome: prior.last_outcome } : {}) };
         settings.next_fire = args.job?.enabled && args.job.cron ? (prior?.job?.cron === args.job.cron && prior?.job?.timezone === args.job.timezone && prior.next_fire > Date.now() ? prior.next_fire : Date.parse(nextFires(args.job.cron, args.job.timezone, 1)[0])) : null;
-        if (JSON.stringify(prior) !== JSON.stringify(settings)) await this.storage.put('settings', settings);
+        if (!sameRecord(prior, settings)) await this.storage.put('settings', settings);
         await this.publish(settings); await this.arm(); return settings;
       }
       case 'triggers': return { items: [...(await this.storage.list({ prefix: 'trigger:' })).values()].map(({ id, rate, revoked }) => ({ id, rate_per_minute: rate, revoked })) };

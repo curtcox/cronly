@@ -237,6 +237,20 @@ reserved while the cross-object call was in flight. The retry's alarm comparison
 transactional with any concurrent reservations. These administrative savings leave
 paid-run prices unchanged.
 
+Deposit and cost-brake recovery now persist one bounded wake batch per cause
+instead of writing and acknowledging a synchronization row for every job. An
+ordinary deposit with 100 healthy jobs needs five account row/alarm writes,
+including its ledger/balance, receipt, batch, wakeup and acknowledgement; recovery
+without a deposit needs three. Healthy jobs preserve settings and schedules.
+Balance recovery leaves budget/cost pauses intact; cost recovery leaves
+budget/balance pauses intact. Explicit definition edits and deletions retain their
+separate synchronization outboxes. Version checks prevent an older batch from
+acknowledging a newer deposit; partial delivery and acknowledgement failures replay
+after restart. Signed Stripe fulfillment acknowledges durable credit even when
+immediate wake delivery fails. Configuration replay also ignores property order
+rather than rewriting identical settings after completion. These are administrative
+savings; the conservative run bound and 85 µ$ price are unchanged.
+
 ## Verified provider sources
 
 - [Workers](https://developers.cloudflare.com/workers/platform/pricing/)
