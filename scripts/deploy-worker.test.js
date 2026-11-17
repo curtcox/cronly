@@ -32,3 +32,9 @@ it('refuses malformed stop controls instead of silently clearing the stop', () =
 it('requires an identifiable release before starting a deployment', () => {
   for (const sha of [undefined, '', 'main', 'a'.repeat(39)]) expect(() => deploymentArgs({ ...release, GITHUB_SHA: sha })).toThrow('A full deployment GITHUB_SHA is required.');
 });
+
+it('deploys the dedicated Stripe catalog instead of retaining a stale dashboard product', () => {
+  const args = deploymentArgs({ ...release, STRIPE_CREDIT_PRODUCT_ID: 'prod_credit', STRIPE_CARD_COST_PRODUCT_ID: 'prod_cardcost' });
+  expect(args).toContain('STRIPE_CREDIT_PRODUCT_ID:prod_credit');
+  expect(args).toContain('STRIPE_CARD_COST_PRODUCT_ID:prod_cardcost');
+});

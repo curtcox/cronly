@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 export function deploymentArgs(env) {
   const sha = env.GITHUB_SHA; assert(/^[a-f0-9]{40}$/.test(sha || ''), 'A full deployment GITHUB_SHA is required.');
   const variables = { GIT_SHA: sha, COST_SAFETY_DO_NAMESPACES: env.COST_SAFETY_DO_NAMESPACES || '', LAUNCH_APPROVED: env.LAUNCH_APPROVED === 'true' ? 'true' : 'false', JS_LIVE_ACCEPTED: env.JS_LIVE_ACCEPTED === 'true' ? 'true' : 'false' };
+  for (const name of ['STRIPE_CREDIT_PRODUCT_ID', 'STRIPE_CARD_COST_PRODUCT_ID']) variables[name] = env[name] || '';
   // An unset CI control must preserve a stop set directly during an incident.
   // Clearing it requires the explicit string "false"; typos cannot clear it.
   if (env.COST_SAFETY_HARD_STOP) {

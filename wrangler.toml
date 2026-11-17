@@ -26,6 +26,8 @@ APP_ORIGIN = "https://cronly.org"
 # JS_ACCEPTANCE_ACCOUNT allows the owner to perform live acceptance; JS_LIVE_ACCEPTED=true unlocks JS after acceptance.
 # COST_SAFETY_HARD_STOP=true provides an immediate operator brake.
 # CI preserves dashboard variables; CRONLY_COST_SAFETY_HARD_STOP explicitly sets/clears this brake.
+# Required payment catalog vars: STRIPE_CREDIT_PRODUCT_ID, STRIPE_CARD_COST_PRODUCT_ID.
+# CI maps these from CRONLY_STRIPE_CREDIT_PRODUCT_ID and CRONLY_STRIPE_CARD_COST_PRODUCT_ID.
 
 [[durable_objects.bindings]]
 name = "ACCOUNTS"
