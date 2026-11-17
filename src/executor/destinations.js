@@ -1,10 +1,12 @@
 import { isIP } from 'node:net';
 import { assert } from '../utils/errors.js';
+/** Use one rate bucket for DNS names with or without the root-label dot. */
+export function destinationHostname(url) { return url.hostname.toLowerCase().replace(/\.$/, ''); }
 /** Deny local/private literals, internal hosts and cronly loops on every redirect. */
 export function validateDestination(value) {
   let url; try { url = new URL(value); } catch { assert(false, 'invalid_destination', 'Expected an absolute HTTP URL'); }
   assert(['http:', 'https:'].includes(url.protocol) && !url.username && !url.password, 'invalid_destination', 'Only HTTP(S) URLs without credentials are allowed');
-  const host = url.hostname.toLowerCase().replace(/\.$/, '').replace(/^\[|\]$/g, '');
+  const host = destinationHostname(url).replace(/^\[|\]$/g, '');
   assert(!['localhost', 'cronly.org', 'cloudflare', 'metadata.google.internal'].includes(host) && !['.cronly.org', '.localhost', '.local', '.internal', '.cloudflare.com', '.workers.dev'].some(suffix => host.endsWith(suffix)), 'blocked_destination', 'Destination is blocked');
   const ip = isIP(host);
   if (ip === 4) {

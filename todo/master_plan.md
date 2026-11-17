@@ -407,6 +407,8 @@ cronly makes outbound requests on a schedule, so it can be pointed at someone el
 - Per account: max jobs (100 to start; raise on request), max 1 run/minute/job, max
   concurrent runs (10).
 - Per destination host per account: max 60 requests/minute across all jobs.
+  HTTP actions and JavaScript gateway requests share the same bucket; DNS names
+  with a trailing root-label dot use the same bucket as their undotted spelling.
 - New accounts: first deposit cap (like hashbin's `newAccountDepositCapCents`), job limit 10
   for the first week.
 - Blocked destinations: cronly's own hosts (no loops through hooks; use "run now"),

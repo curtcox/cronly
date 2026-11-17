@@ -1,4 +1,4 @@
-import { validateDestination } from './destinations.js';
+import { destinationHostname, validateDestination } from './destinations.js';
 import { render } from './templates.js';
 import { redact } from './secrets.js';
 import { rpc } from '../utils/rpc.js';
@@ -20,7 +20,7 @@ export async function guardedFetch(request, env, account, signal, redirects = 0,
   let current = request;
   for (let index = 0; ; index++) {
     const url = validateDestination(current.url);
-    await rpc(env.ACCOUNTS, account, 'rate-limit', { id: `destination:${url.hostname}`, limit: 60 });
+    await rpc(env.ACCOUNTS, account, 'rate-limit', { id: `destination:${destinationHostname(url)}`, limit: 60 });
     assert(index < maxRequests, 'subrequest_limit', 'Subrequest limit reached');
     const replayBody = ['GET', 'HEAD'].includes(current.method) ? undefined : await current.clone().arrayBuffer();
     const response = await (env.OUTBOUND_FETCH || fetch)(current, { redirect: 'manual', signal });
