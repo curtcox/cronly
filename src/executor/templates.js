@@ -11,7 +11,7 @@ export function references(value) {
 /** Fail at save time for unknown variables, secrets or built-ins. */
 export function validateTemplates(action, config) {
   for (const { type, name } of references([action.url, action.headers, action.body])) {
-    assert(type === 'input' || (type === 'var' && Object.hasOwn(config.variables, name)) || (type === 'secret' && Object.hasOwn(config.secrets, name)) || BUILTINS[type]?.includes(name), 'unknown_template', `Unknown template: ${type}.${name}`);
+    assert(type === 'input' || (type === 'var' && Object.hasOwn(config.variables, name)) || (type === 'secret' && Object.hasOwn(config.secrets, name)) || (Object.hasOwn(BUILTINS, type) && BUILTINS[type].includes(name)), 'unknown_template', `Unknown template: ${type}.${name}`);
   }
 }
 /** Render values as text only; templates never evaluate code. */

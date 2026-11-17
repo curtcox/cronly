@@ -26,6 +26,19 @@ it('dry runs validate references, charge nothing, and writes are idempotent', as
   expect((await api('/api/actions/ping', 'PUT', { url: '{{var.base}}/ping' })).status).toBe(200);
   expect((await api('/api/variables/base', 'DELETE')).status).toBe(400);
 });
+
+for (const dryRun of [false, true]) {
+  it(`rejects an inherited template namespace with a client error and no charge${dryRun ? ' on dry run' : ''}`, async () => {
+    const { api, env } = setup();
+    await api('/api/dev/deposit', 'POST', { amount_microdollars: 1000 });
+    const result = await api(`/api/actions/ping${dryRun ? '?dry_run=1' : ''}`, 'PUT', { url: 'https://example.com/{{constructor.name}}' });
+    expect(result).toMatchObject({ status: 400, code: 'unknown_template', error: 'Unknown template: constructor.name' });
+    expect((await rpc(env.ACCOUNTS, 'alice', 'account')).balance_microdollars).toBe(1000);
+    expect((await rpc(env.ACCOUNTS, 'alice', 'list', { prefix: 'audit:' })).items).toEqual([]);
+    expect((await rpc(env.ACCOUNTS, 'alice', 'config')).actions).toEqual({});
+  });
+}
+
 it('encrypts write-only secrets and binds ciphertext to account and name', async () => {
   const { api, env } = setup(); await api('/api/dev/deposit', 'POST', { amount_microdollars: 1000 });
   await api('/api/secrets/token', 'PUT', { value: 'secret-value' });
