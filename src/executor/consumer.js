@@ -21,16 +21,16 @@ export async function consume(message, env, ctx) {
   }
   let result;
   try {
-    if (env.SAFETY && (await rpc(env.SAFETY, 'global', 'status')).brake) {
-      await rpc(env.JOBS, `${account}:${name}`, 'result', { id, result: { status: 'failure', error: 'Paused by cost safety brake', charge_microdollars: 0 } }); message.ack(); return;
+    if (env.COST_SAFETY_HARD_STOP === 'true' || (env.SAFETY && (await rpc(env.SAFETY, 'global', 'status')).brake)) {
+      result = { status: 'failure', error: 'Paused by cost safety brake', charge_microdollars: 0 };
+    } else {
+      const secrets = {};
+      for (const [name, record] of Object.entries(execution.secrets)) secrets[name] = await decryptSecret(env, account, name, record);
+      const context = { var: execution.vars, secret: secrets, input: execution.input, run: { id, scheduled_at: execution.scheduled_at, trigger: execution.trigger }, job: { name }, account: { id: account } };
+      if (execution.action.type === 'javascript') {
+        const { executeJavaScript } = await import('./javascript.js'); result = await executeJavaScript(execution, context, env, ctx, secrets);
+      } else result = await executeHttp(execution, context, env, secrets);
     }
-    const secrets = {};
-    for (const [name, record] of Object.entries(execution.secrets)) secrets[name] = await decryptSecret(env, account, name, record);
-    const context = { var: execution.vars, secret: secrets, input: execution.input, run: { id, scheduled_at: execution.scheduled_at, trigger: execution.trigger }, job: { name }, account: { id: account } };
-    if (env.COST_SAFETY_HARD_STOP === 'true') throw new Error('brake');
-    if (execution.action.type === 'javascript') {
-      const { executeJavaScript } = await import('./javascript.js'); result = await executeJavaScript(execution, context, env, ctx, secrets);
-    } else result = await executeHttp(execution, context, env, secrets);
   } catch { result = { status: 'failure', error: 'Action failed or exceeded its limits' }; }
   // Store the outcome before acknowledging. On reporting failure, the hold still bounds cost.
   await rpc(env.JOBS, `${account}:${name}`, 'result', { id, result: boundLog(result) });

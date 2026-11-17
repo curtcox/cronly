@@ -72,7 +72,9 @@ and Cloudflare account, with a separate Clerk application and Stripe product, as
 - Record evidence and deployment SHA in STATUS.md, then enable automatic deploys if desired.
 
 A global emergency stop is Worker variable COST_SAFETY_HARD_STOP=true. It is checked by
-JobDO, executor and gateway. The persisted daily cost brake also pauses schedules;
+JobDO, executor and gateway. Queued runs skipped before execution by this stop or
+the analytics brake release their holds with a zero charge; skipped JavaScript
+runs do not record a paid daily activation. The persisted daily cost brake also pauses schedules;
 missing/stale analytics fails closed. Clear the cause, rerun reconciliation and verify
 resumption. Registry reconciliation reads 100 accounts per page. A healthy report
 atomically records a versioned recovery scan; each subsequent page commits account
