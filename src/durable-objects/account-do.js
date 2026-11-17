@@ -207,6 +207,13 @@ export class AccountDO {
       }
       if (next) await tx.setAlarm(next);
     });
-    try { await this.syncJobs(); } catch { await this.storage.setAlarm(Date.now() + 60000); }
+    try { await this.syncJobs(); } catch {
+      // Synchronization may yield to new reservations. Its retry must not delay
+      // either the next existing expiry or a newly committed hold's deadline.
+      await this.storage.transaction(async tx => {
+        const retry = Date.now() + 60000; const alarm = await tx.getAlarm();
+        if (alarm === null || alarm > retry) await tx.setAlarm(retry);
+      });
+    }
   }
 }
