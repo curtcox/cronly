@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 export function verifyProbe(name, data) {
   assert.equal(data.case, name);
   if (name === 'cpu-limit' || name === 'subrequest-limit') {
-    const diagnostic = data.runtime_error?.message || '';
+    const diagnostic = data.runtime_error?.message || (data.result?.status === 'success' ? JSON.parse(data.result.return_value)?.native_error : '') || '';
     assert.match(diagnostic, name === 'cpu-limit' ? /CPU|exceeded.*(?:time|resource).*limit/i : /subrequest|too many.*requests/i, `${name}: native limit rejection missing`);
     return;
   }
@@ -27,6 +28,16 @@ export function verifyProbe(name, data) {
       assert.equal(value, marker); assert(result.console.includes(marker)); assert(!result.console.includes(other));
       assert(result.console.includes('«secret:token»')); assert(!JSON.stringify(result).includes('probe-private-marker'));
     }
+  }
+}
+
+/** Retry only pre-execution auth refusals while the secret deployment propagates. */
+export async function requestProbe(origin, name, token) {
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(`${origin}/${name}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(90000) });
+    if (response.status !== 401 || attempt === 7) return response;
+    await response.body?.cancel();
+    await new Promise(resolve => setTimeout(resolve, 2000));
   }
 }
 
@@ -51,7 +62,9 @@ export async function probeSandbox() {
   const expires = Date.now() + 10 * 60000;
   await writeFile(config, `name = ${JSON.stringify(name)}\nmain = ${JSON.stringify(main)}\ncompatibility_date = "2026-10-30"\ncompatibility_flags = ["nodejs_compat"]\nworkers_dev = true\npreview_urls = false\n[vars]\nPROBE_EXPIRES_AT = "${expires}"\n[limits]\ncpu_ms = 1000\n[[worker_loaders]]\nbinding = "LOADER"\n[[ratelimits]]\nname = "PROBE_LIMITER"\nnamespace_id = "${parseInt(crypto.randomUUID().slice(0, 8), 16)}"\nsimple = { limit = 12, period = 60 }\n[observability]\nenabled = false\n`);
   const token = crypto.randomUUID() + crypto.randomUUID();
-  const report = { worker: name, checked_at: new Date().toISOString(), cases: [], cleaned_up: false };
+  const sources = ['scripts/sandbox-probe-worker.js', 'src/executor/javascript.js', 'src/executor/redaction.js'];
+  const source_sha256 = Object.fromEntries(await Promise.all(sources.map(async path => [path, createHash('sha256').update(await readFile(new URL(`../${path}`, import.meta.url))).digest('hex')])));
+  const report = { worker: name, checked_at: new Date().toISOString(), source_sha256, cases: [], errors: [], cleaned_up: false };
   let deployed = false;
   try {
     // Delete the unique name even if deploy creates the Worker and then loses its reply.
@@ -63,11 +76,14 @@ export async function probeSandbox() {
     const denied = await fetch(`${origin}/smoke`, { method: 'POST', signal: AbortSignal.timeout(15000) });
     assert.equal(denied.status, 401);
     for (const name of ['smoke', 'cpu-control', 'cpu-limit', 'native-fetch', 'native-connect', 'subrequest-control', 'subrequest-limit', 'isolation']) {
-      const response = await fetch(`${origin}/${name}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(90000) });
-      assert.equal(response.status, 200, `${name}: unexpected response status`);
-      const data = await response.json(); report.cases.push(data);
-      verifyProbe(name, data); console.log(`Passed: ${name}`);
+      try {
+        const response = await requestProbe(origin, name, token);
+        assert.equal(response.status, 200, `${name}: unexpected response status`);
+        const data = await response.json(); report.cases.push(data);
+        verifyProbe(name, data); console.log(`Passed: ${name}`);
+      } catch (error) { report.errors.push({ case: name, message: error.message }); console.log(`Failed: ${name}`); }
     }
+    assert.equal(report.errors.length, 0, report.errors.map(error => error.message).join('\n'));
   } finally {
     try { if (deployed) { await wrangler(['delete', '--config', config, '--force']); report.cleaned_up = true; console.log(`Removed temporary Worker ${name}`); } }
     finally { await writeFile(resolvePath('report.json'), JSON.stringify(report, null, 2) + '\n'); console.log(`Probe evidence: ${resolvePath('report.json')}`); }

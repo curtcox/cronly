@@ -8,17 +8,28 @@ async function api(path, method = 'GET', body) {
   const response = await fetch(`${origin}${path}`, { method, headers: { ...headers, 'Idempotency-Key': `${name}:${method}:${path}`.slice(0, 128) }, body: body && JSON.stringify(body), signal: AbortSignal.timeout(15000) });
   const data = await response.json(); assert(response.ok, `${path}: ${data.code || response.status}`); return data;
 }
-const action = { type: 'javascript', source: 'export default async function run() { let n=0; for(let i=0;i<100000000;i++) n+=Math.sqrt(i); return n; }', cpu_ms: 10, subrequests: 0 };
+// The finite arithmetic benchmark can finish within Cloudflare's CPU allowance;
+// a deliberately nonterminating loop makes rejection observable and unambiguous.
+const action = { type: 'javascript', source: 'export default () => { for(;;) Math.sqrt(Math.random()); }', cpu_ms: 10, subrequests: 0 };
 const quote = await api(`/api/actions/${name}?dry_run=1`, 'PUT', action); assert(quote.quote_microdollars <= 10000);
-await api(`/api/actions/${name}`, 'PUT', action); await api(`/api/jobs/${name}`, 'PUT', { action: name, cron: null });
-const runQuote = await api(`/api/jobs/${name}/run?dry_run=1`, 'POST', {}); assert(runQuote.quote_microdollars <= 10000);
-await api(`/api/jobs/${name}/run`, 'POST', {});
-let result; const deadline = Date.now() + 120000;
-while (Date.now() < deadline) {
-  result = (await api(`/api/runs?job=${name}`)).items[0];
-  if (result && ['success', 'failure', 'expired'].includes(result.status)) break;
-  await new Promise(resolve => setTimeout(resolve, 2000));
+let result;
+let actionCreated = false; let jobCreated = false;
+try {
+  actionCreated = true; await api(`/api/actions/${name}`, 'PUT', action);
+  jobCreated = true; await api(`/api/jobs/${name}`, 'PUT', { action: name, cron: null });
+  const runQuote = await api(`/api/jobs/${name}/run?dry_run=1`, 'POST', {}); assert(runQuote.quote_microdollars <= 10000);
+  await api(`/api/jobs/${name}/run`, 'POST', {});
+  const deadline = Date.now() + 120000;
+  while (Date.now() < deadline) {
+    result = (await api(`/api/runs?job=${name}`)).items[0];
+    if (result && ['success', 'failure', 'expired'].includes(result.status)) break;
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+} finally {
+  // Attempt both cleanups even after a failed API reply or polling timeout.
+  // Deleting the dependent job first keeps action reference checks satisfied.
+  try { if (jobCreated) await api(`/api/jobs/${name}`, 'DELETE'); }
+  finally { if (actionCreated) await api(`/api/actions/${name}`, 'DELETE'); }
 }
-await api(`/api/jobs/${name}`, 'DELETE'); await api(`/api/actions/${name}`, 'DELETE');
 assert.equal(result?.status, 'failure', 'CPU rejection was not observed; keep JS_LIVE_ACCEPTED disabled and investigate.');
-console.log('Live configured CPU rejection observed. Confirm Cloudflare limit telemetry, gateway limits and isolation before enabling JS_LIVE_ACCEPTED.');
+console.log('Live CPU probe failed as expected. Confirm native CPU rejection in Cloudflare telemetry, gateway limits and isolation before enabling JS_LIVE_ACCEPTED.');

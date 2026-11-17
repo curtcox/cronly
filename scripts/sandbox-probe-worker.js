@@ -7,11 +7,11 @@ const isolation = 'export default async ctx => { console.log(ctx.input.marker, {
 export const PROBE_CASES = Object.freeze({
   smoke: { source: 'export default () => "sandbox-ready";', cpu_ms: 100, subrequests: 0 },
   'cpu-control': { source: burn, cpu_ms: 1000, subrequests: 0 },
-  'cpu-limit': { source: burn, cpu_ms: 10, subrequests: 0 },
+  'cpu-limit': { source: 'export default () => { for(;;) Math.sqrt(Math.random()); }', cpu_ms: 10, subrequests: 0 },
   'native-fetch': { source: 'export default async () => { try { await fetch("https://example.com"); return false; } catch { return true; } }', cpu_ms: 100, subrequests: 0 },
   'native-connect': { source: 'import { connect } from "cloudflare:sockets"; export default async () => { try { const socket=connect({ hostname:"example.com", port:443 }); await socket.opened; await socket.close(); return false; } catch { return true; } }', cpu_ms: 100, subrequests: 0 },
   'subrequest-control': { source: 'export default async ctx => { return (await ctx.fetch("https://fixture.example/")).status; }', cpu_ms: 100, subrequests: 1 },
-  'subrequest-limit': { source: 'export default async ctx => { for(let i=0;i<3;i++) await ctx.fetch("https://fixture.example/"); return "escaped"; }', cpu_ms: 100, subrequests: 1 },
+  'subrequest-limit': { source: 'export default async ctx => { try { for(let i=0;i<3;i++) await ctx.fetch("https://fixture.example/"); return "escaped"; } catch(error) { return { native_error: error.message }; } }', cpu_ms: 100, subrequests: 1 },
   isolation: { source: isolation, cpu_ms: 100, subrequests: 1 }
 });
 

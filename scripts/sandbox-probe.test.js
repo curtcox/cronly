@@ -1,8 +1,22 @@
-import { it, expect, vi } from 'vitest';
+import { afterEach, it, expect, vi } from 'vitest';
 import probe, { PROBE_CASES } from './sandbox-probe-worker.js';
-import { verifyProbe } from './probe-sandbox-live.mjs';
+import { verifyProbe, requestProbe } from './probe-sandbox-live.mjs';
 
 vi.mock('cloudflare:workers', () => ({ WorkerEntrypoint: class {} }));
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+it('waits for secret propagation but never repeats requests that reached execution', async () => {
+  vi.useFakeTimers();
+  const fetch = vi.fn().mockResolvedValueOnce(new Response(null, { status: 401 })).mockResolvedValueOnce(new Response(null, { status: 200 }));
+  vi.stubGlobal('fetch', fetch);
+  const pending = requestProbe('https://probe', 'smoke', 'private');
+  await vi.runAllTimersAsync(); expect((await pending).status).toBe(200); expect(fetch).toHaveBeenCalledTimes(2);
+  fetch.mockReset().mockResolvedValue(new Response(null, { status: 500 }));
+  expect((await requestProbe('https://probe', 'cpu-limit', 'private')).status).toBe(500); expect(fetch).toHaveBeenCalledTimes(1);
+  fetch.mockReset().mockResolvedValue(new Response(null, { status: 401 }));
+  const refused = requestProbe('https://probe', 'smoke', 'private');
+  await vi.runAllTimersAsync(); expect((await refused).status).toBe(401); expect(fetch).toHaveBeenCalledTimes(8);
+});
 
 it('keeps the probe closed without a valid, unexpired credential and a fixed case', async () => {
   const limit = vi.fn(async () => ({ success: true }));
@@ -26,6 +40,8 @@ it('requires explicit CPU/subrequest rejection rather than an arbitrary failed a
   }
   expect(() => verifyProbe('cpu-limit', { case: 'cpu-limit', runtime_error: { message: 'Worker exceeded CPU time limit' } })).not.toThrow();
   expect(() => verifyProbe('subrequest-limit', { case: 'subrequest-limit', runtime_error: { message: 'Too many subrequests' } })).not.toThrow();
+  expect(() => verifyProbe('subrequest-limit', { case: 'subrequest-limit', result: { status: 'success', return_value: JSON.stringify({ native_error: 'Too many subrequests by single Worker invocation.' }) } })).not.toThrow();
+  expect(() => verifyProbe('cpu-limit', { case: 'cpu-limit', result: { status: 'success', return_value: '666666661666.567' } })).toThrow();
   expect(() => verifyProbe('cpu-control', { case: 'cpu-control', result: { status: 'failure' } })).toThrow();
   expect(() => verifyProbe('native-fetch', { case: 'native-fetch', result: { status: 'success', return_value: 'false' } })).toThrow();
 });

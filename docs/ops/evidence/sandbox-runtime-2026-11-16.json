@@ -1,0 +1,99 @@
+{
+  "worker": "cronly-sandbox-probe-bbf4e68c",
+  "checked_at": "2026-11-17T04:35:59.792Z",
+  "cases": [
+    {
+      "case": "smoke",
+      "result": {
+        "status": "success",
+        "return_value": "\"sandbox-ready\"",
+        "console": "",
+        "cpu_limit_ms": 100,
+        "subrequest_limit": 0
+      }
+    },
+    {
+      "case": "cpu-control",
+      "result": {
+        "status": "success",
+        "return_value": "666666661666.567",
+        "console": "",
+        "cpu_limit_ms": 1000,
+        "subrequest_limit": 0
+      }
+    },
+    {
+      "case": "cpu-limit",
+      "runtime_error": {
+        "name": "Error",
+        "message": "Worker exceeded CPU time limit."
+      }
+    },
+    {
+      "case": "native-fetch",
+      "result": {
+        "status": "success",
+        "return_value": "true",
+        "console": "",
+        "cpu_limit_ms": 100,
+        "subrequest_limit": 0
+      }
+    },
+    {
+      "case": "native-connect",
+      "result": {
+        "status": "success",
+        "return_value": "true",
+        "console": "",
+        "cpu_limit_ms": 100,
+        "subrequest_limit": 0
+      }
+    },
+    {
+      "case": "subrequest-control",
+      "result": {
+        "status": "success",
+        "return_value": "200",
+        "console": "",
+        "cpu_limit_ms": 100,
+        "subrequest_limit": 1
+      }
+    },
+    {
+      "case": "subrequest-limit",
+      "result": {
+        "status": "success",
+        "return_value": "{\"native_error\":\"Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits\"}",
+        "console": "",
+        "cpu_limit_ms": 100,
+        "subrequest_limit": 1
+      }
+    },
+    {
+      "case": "isolation",
+      "result": [
+        {
+          "status": "success",
+          "return_value": "\"left\"",
+          "console": "left {\"token\":\"«secret:token»\"}\n",
+          "cpu_limit_ms": 100,
+          "subrequest_limit": 1
+        },
+        {
+          "status": "success",
+          "return_value": "\"right\"",
+          "console": "right {\"token\":\"«secret:token»\"}\n",
+          "cpu_limit_ms": 100,
+          "subrequest_limit": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "cleaned_up": true,
+  "source_sha256": {
+    "scripts/sandbox-probe-worker.js": "ee1fe94a4e998895eb99fb6cb94b80e74aa9dc7b5b45048fe94cc00f0dadd36e",
+    "src/executor/javascript.js": "6aa73a95b9d47ca5ff9eaa9b7bba0537776a75e67c48352cd314ac59b5e48948",
+    "src/executor/redaction.js": "99a5675f0756c54b5bf1b8608183b2b4ff8d43dcad8a42b67129d85d7d2b8923"
+  }
+}

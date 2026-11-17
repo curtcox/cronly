@@ -61,12 +61,20 @@ the other checks cover native fetch/connect denial, concurrent log isolation and
 synthetic-secret redaction. Estimated provider cost is below $0.10 per suite at
 [current rates](https://developers.cloudflare.com/dynamic-workers/pricing/).
 The runner removes its Worker in `finally` and writes a sanitized JSON report to
-the printed temporary path, including cleanup status. If interrupted, remove
+the printed temporary path, including source hashes and cleanup status. If interrupted, remove
 only the unique Worker named in that report/config with `wrangler delete`.
 
 The probe does not provision app credentials or customer credit, exercise the
 production billing/Queue/gateway path, or enable `JS_LIVE_ACCEPTED`. Complete the
 service acceptance below before enabling JavaScript for customers.
+
+Live runtime checks passed on 2026-11-16: [recorded evidence](evidence/sandbox-runtime-2026-11-16.json).
+The finite arithmetic test also succeeded at 10 ms, so the CPU rejection probe
+uses a nonterminating loop and requires the explicit native CPU-limit exception.
+The cronly.org zone is active and the `cronly-runs` queue exists. GitHub's production
+environment contains the verified Cloudflare account ID; application/deploy tokens
+and the app Worker remain unconfigured. Automatic deployments, launch approval
+and public JavaScript remain disabled.
 
 - Set GitHub secret JS_ACCEPTANCE_ACCOUNT to the invited owner's Clerk ID. Other accounts cannot
   invoke JS until JS_LIVE_ACCEPTED=true. Keep a daily cap on the owner's test API key.
