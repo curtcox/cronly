@@ -1,6 +1,5 @@
 import { assert, errorResponse } from '../utils/errors.js';
 import { rpc } from '../utils/rpc.js';
-import { price } from '../utils/pricing.js';
 import { nextFires } from '../services/cron.js';
 import { compareRuns, runCursor, parseRunCursor } from '../services/run-pagination.js';
 import { sameRecord } from '../utils/records.js';
@@ -45,7 +44,9 @@ export class JobDO {
       case 'hook': {
         const settings = await this.storage.get('settings'); const trigger = await this.storage.get(`trigger:${args.token_id}`);
         assert(settings?.job && trigger && !trigger.revoked, 'invalid_trigger', 'Invalid trigger token', 401);
-        if (args.dry_run) { const config = await rpc(this.env.ACCOUNTS, settings.account, 'config'); return { quote_microdollars: price('hook', config.actions[settings.job.action]), cost_microdollars: 0 }; }
+        // Validate current definitions and input without consuming a token attempt
+        // or replaying a prior run that used the caller's idempotency key.
+        if (args.dry_run) return rpc(this.env.ACCOUNTS, settings.account, 'prepare-run', { id: 'preview', name: settings.name, input: args.input, trigger: 'webhook', dry_run: true });
         let bucket = await this.storage.get(`trigger-rate:${args.token_id}`); const now = Date.now();
         if (!bucket || bucket.reset <= now) bucket = { count: 0, reset: now + 60000 };
         const operation = await digest(args.id);
