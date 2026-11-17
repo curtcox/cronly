@@ -44,10 +44,12 @@ address**, without creating a Gmail mailbox, on 2026-11-17. The browser showed
 the authenticated identity as `support@cronly.org`. The owner completed the
 personal details, verification, password and terms steps directly.
 
-OAuth project access is the next step: an `OAuth Config Editor`
-(`roles/oauthconfig.editor`) grant is prepared for this identity on
-`cronly-515013`, awaiting explicit approval. It permits OAuth configuration and
-client credential management. No project access grant has been saved yet.
+With explicit owner approval, the `OAuth Config Editor`
+(`roles/oauthconfig.editor`) grant was saved for this identity on
+`cronly-515013` on 2026-11-17 and verified in the project's IAM table. It permits
+OAuth configuration and client credential management. The original project owner
+retains the existing Owner role. Google Cloud requires fresh password verification
+for the support identity; that browser sign-in is awaiting the owner.
 
 References: [Google's support-email requirements](https://support.google.com/cloud/answer/15549049?hl=en),
 [using an existing address for a Google account](https://support.google.com/accounts/answer/27441?hl=en#existingemail),
