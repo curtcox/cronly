@@ -1,5 +1,8 @@
 import { secretKeyring } from '../src/executor/secret-keys.js';
-const required = ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_ANALYTICS_TOKEN', 'CLERK_SECRET_KEY', 'CLERK_PUBLISHABLE_KEY', 'CLERK_WEBHOOK_SECRET', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'TOKEN_SIGNING_KEY', 'ANTHROPIC_API_KEY'];
+const required = ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_ANALYTICS_TOKEN', 'CLERK_SECRET_KEY', 'CLERK_PUBLISHABLE_KEY', 'CLERK_WEBHOOK_SECRET', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'TOKEN_SIGNING_KEY'];
+// Invite-only sign-in and deterministic scheduling can be accepted before prose.
+// The API refuses unconfigured prose before reserving funds or calling Anthropic.
+if (process.env.LAUNCH_APPROVED === 'true') required.push('ANTHROPIC_API_KEY');
 const missing = required.filter(name => !process.env[name]);
 const products = ['STRIPE_CREDIT_PRODUCT_ID', 'STRIPE_CARD_COST_PRODUCT_ID'];
 for (const name of products) if (!/^prod_[a-zA-Z0-9]+$/.test(process.env[name] || '')) missing.push(name);

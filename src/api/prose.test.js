@@ -25,6 +25,19 @@ it('quotes without calling Claude, holds first, uses actual usage and regenerate
   expect(result.explanation).toContain('09:00');
   await api('/api/prose/to-cron', 'POST', { text: 'Weekdays at nine' }, { 'Idempotency-Key': 'translation' }); expect(env.LLM_FETCH).toHaveBeenCalledTimes(1);
 });
+it('refuses unconfigured prose before billing while free deterministic cron remains available', async () => {
+  const { api, env } = setup(); delete env.ANTHROPIC_API_KEY;
+  await api('/api/dev/deposit', 'POST', { amount_microdollars: 5000000 });
+  const before = await api('/api/account');
+  for (const mode of ['to-cron', 'ask', 'change']) {
+    expect(await api(`/api/prose/${mode}`, 'POST', { text: 'Weekdays at nine' }))
+      .toMatchObject({ status: 503, code: 'prose_unavailable', cost_microdollars: 0 });
+  }
+  expect(await api('/api/account')).toEqual(before);
+  expect(env.LLM_FETCH).not.toHaveBeenCalled();
+  expect(await api('/api/cron/explain', 'POST', { cron: '0 9 * * 1-5', timezone: 'UTC' }))
+    .toMatchObject({ status: 200, cost_microdollars: 0 });
+});
 it('proposes without mutating and requires a separate application against an unchanged config', async () => {
   const { api, output } = setup(); await api('/api/dev/deposit', 'POST', { amount_microdollars: 5000000 });
   output({ explanation: 'Set greeting', operations: [{ kind: 'variables', name: 'greeting', delete: false, value_json: '{"value":"hello"}' }] });

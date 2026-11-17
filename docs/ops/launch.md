@@ -34,6 +34,10 @@ and Cloudflare account, with a separate Clerk application and Stripe product, as
    follow [secret-key rotation](secret-rotation.md) when replacing a master. Versioned
    `SECRETS_KEYRING` can replace the legacy binding; never overwrite a key still in use.
 5. Put the required secrets listed in wrangler.toml into GitHub's production environment.
+   A prelaunch deployment (`CRONLY_LAUNCH_APPROVED=false`) can omit
+   `ANTHROPIC_API_KEY`: prose returns `503 prose_unavailable` before any hold or
+   provider call. Sign-in, free cron previews and the rest of the HTTP service can
+   then be accepted independently. Launch-approved deployment still requires it.
    Add CLOUDFLARE_API_TOKEN with scoped deployment permissions and
    CLOUDFLARE_ACCOUNT_ID. Add the read-only analytics token separately. No .dev.vars
    or plaintext credentials belong in git. CI uploads secrets through stdin.

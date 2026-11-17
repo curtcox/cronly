@@ -14,6 +14,16 @@ it('accepts a complete deployment with a dedicated credit and card-cost catalog'
   expect(check({}).status).toBe(0);
 });
 
+it('allows prelaunch deployment without prose but requires it before opening payments', () => {
+  for (const LAUNCH_APPROVED of [undefined, '', 'false']) {
+    expect(check({ ANTHROPIC_API_KEY: '', LAUNCH_APPROVED }).status).toBe(0);
+  }
+  const result = check({ ANTHROPIC_API_KEY: '', LAUNCH_APPROVED: 'true' });
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('ANTHROPIC_API_KEY');
+  expect(check({ LAUNCH_APPROVED: 'true' }).status).toBe(0);
+});
+
 it('requires the independent analytics token before deploying a service that would remain braked', () => {
   const result = check({ CLOUDFLARE_ANALYTICS_TOKEN: '' });
   expect(result.status).toBe(1);
