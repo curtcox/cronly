@@ -55,3 +55,56 @@ for (const arriving of [false, true]) for (const ttl of [10000, 120000]) {
     expect((await account('account')).balance_microdollars).toBe(9750);
   });
 }
+
+for (const op of ['deposit', 'dev-deposit', 'resume-cost-jobs']) for (const deadline of [null, 500, 60000]) {
+  it(`coalesces ${op} with ${deadline === null ? 'an absent wakeup' : `a ${deadline}ms wakeup`} and recovers after restart`, async () => {
+    const { account, storage, deliver } = await setup();
+    if (deadline === null) await storage.deleteAlarm();
+    else await storage.setAlarm(Date.now() + deadline);
+    const alarm = vi.spyOn(storage, 'setAlarm');
+    const args = op === 'resume-cost-jobs' ? {} : { id: 'top-up', amount: 1000 };
+    await account(op, args);
+    expect(await storage.getAlarm()).toBe(Date.now() + Math.min(deadline ?? Infinity, 1000));
+    expect(alarm).toHaveBeenCalledTimes(deadline === 500 ? 0 : 1);
+    expect(await storage.get('sync:j')).toBeDefined();
+    if (op !== 'resume-cost-jobs') {
+      await account(op, args);
+      expect(alarm).toHaveBeenCalledTimes(deadline === 500 ? 0 : 1);
+    }
+    vi.setSystemTime(await storage.getAlarm()); await deliver();
+    expect(await storage.get('sync:j')).toBeUndefined();
+    expect((await account('account')).balance_microdollars).toBe(op === 'resume-cost-jobs' ? 9800 : 10800);
+    expect((await account('account')).job_runtime.j).toMatchObject({ paused: null, next_fire: Date.parse('2026-11-16T13:00:00Z') });
+  });
+}
+
+for (const op of ['deposit', 'dev-deposit', 'resume-cost-jobs']) {
+  it(`does not wake an account without scheduling work for ${op}`, async () => {
+    const { account, storage } = await setup();
+    await account('sync-jobs');
+    await account('mutate', { account: 'a', id: 'delete', operations: [{ kind: 'jobs', name: 'j', delete: true }] });
+    await account('sync-jobs'); await storage.deleteAlarm();
+    const alarm = vi.spyOn(storage, 'setAlarm');
+    await account(op, { id: 'empty', amount: 1000 });
+    expect(alarm).not.toHaveBeenCalled();
+    expect(await storage.getAlarm()).toBeNull();
+  });
+}
+
+for (const op of ['deposit', 'dev-deposit', 'resume-cost-jobs']) {
+  it(`rolls back ${op} and its synchronization outbox if the wakeup fails`, async () => {
+    const { account, storage, deliver } = await setup();
+    await account('sync-jobs'); await storage.deleteAlarm();
+    const before = structuredClone(storage.rows);
+    const fault = vi.spyOn(storage, 'setAlarm').mockRejectedValueOnce(new Error('wakeup unavailable'));
+    const args = { id: 'retry', amount: 1000 };
+    await expect(account(op, args)).rejects.toMatchObject({ status: 500 });
+    expect(storage.rows).toEqual(before); expect(await storage.getAlarm()).toBeNull();
+    fault.mockRestore();
+    await account(op, args);
+    expect(await storage.get('sync:j')).toBeDefined();
+    vi.setSystemTime(await storage.getAlarm()); await deliver();
+    expect(await storage.get('sync:j')).toBeUndefined();
+    expect((await account('account')).balance_microdollars).toBe(op === 'resume-cost-jobs' ? 9800 : 10800);
+  });
+}

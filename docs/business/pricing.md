@@ -230,7 +230,12 @@ execution holds and job pauses retain their original state.
 Action, variable and secret mutations also skip the account alarm write: they
 create no scheduling outbox. Explicit job edits schedule a recovery wakeup only
 when an existing alarm will not already run soon enough, retaining earlier hold
-expiry deadlines. These administrative savings leave paid-run prices unchanged.
+expiry deadlines. Deposits and cost-brake recovery follow the same earliest-wakeup rule, skipping
+redundant alarms or accounts with no synchronization work. A failed synchronization
+retries within a minute without postponing an earlier hold expiry, including holds
+reserved while the cross-object call was in flight. The retry's alarm comparison is
+transactional with any concurrent reservations. These administrative savings leave
+paid-run prices unchanged.
 
 ## Verified provider sources
 

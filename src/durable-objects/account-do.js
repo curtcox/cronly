@@ -61,9 +61,7 @@ export class AccountDO {
       }
       case 'metrics': return (await accountMetric(tx, args.period)) || {};
       case 'resume-cost-jobs': {
-        const profile = await tx.get('profile');
-        for (const [key] of await tx.list({ prefix: 'def:jobs:' })) { const name = key.slice('def:jobs:'.length); await tx.put(`sync:${name}`, { name, account: profile.id, version: crypto.randomUUID() }); }
-        await tx.setAlarm(Date.now() + 1000); return {};
+        await this.nudge(tx); return {};
       }
       case 'maintenance': {
         const now = Date.now();
@@ -189,7 +187,10 @@ export class AccountDO {
   async nudge(tx) {
     const profile = await tx.get('profile'); if (!profile) return;
     for (const [key] of await tx.list({ prefix: 'def:jobs:' })) { const name = key.slice('def:jobs:'.length); await tx.put(`sync:${name}`, { name, account: profile.id, version: crypto.randomUUID() }); }
-    if ((await tx.list({ prefix: 'sync:' })).size) await tx.setAlarm(Date.now() + 1000);
+    if ((await tx.list({ prefix: 'sync:' })).size) {
+      const next = Date.now() + 1000; const alarm = await tx.getAlarm();
+      if (alarm === null || alarm > next) await tx.setAlarm(next);
+    }
   }
   async syncJobs() {
     for (const [key, item] of await this.storage.list({ prefix: 'sync:' })) {
