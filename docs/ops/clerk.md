@@ -13,6 +13,8 @@ separate application from hashbin, as approved in STATUS D1.
 | Account portal | `https://accounts.cronly.org` |
 | Sign-in methods | Email verification code and Google |
 | Access mode | Invite-only, saved in development and cloned into production |
+| Google Cloud project | `cronly-515013` (display name `cronly`) |
+| Google Cloud project number | `173186686444` |
 
 [Production dashboard](https://dashboard.clerk.com/apps/app_3MEi0XGTZX7J6dgu6ezcHdRwyHA/instances/ins_3MEi8pmakrxmN0ExfJI0UhhAicJ).
 The owner explicitly selected Email and Google. Google's production connection
@@ -43,6 +45,12 @@ With the owner's explicit approval, the production `CLERK_SECRET_KEY` and
 environment. Secret values were passed through stdin and the private temporary
 file was deleted. Keys are not checked into this repository. No hashbin
 credentials were reused. Deployments and launch approval remain disabled.
+
+The owner requested a dedicated Google Cloud project and separately approved its
+link to the selected existing billing account. Project `cronly-515013` was created
+on 2026-11-17. Google Auth Platform configuration is in progress; its required
+support/developer contacts and consent configuration need owner input before an
+OAuth client can be created. The project is separate from hashbin.
 
 ## Remaining integration
 
