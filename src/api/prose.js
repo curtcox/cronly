@@ -1,7 +1,7 @@
 import { ApiError, assert, readJson } from '../utils/errors.js';
 import { rpc } from '../utils/rpc.js';
 import { callProse, proseQuote } from '../services/llm.js';
-import { explainCron } from '../services/cron.js';
+import { cron, explainCron } from '../services/cron.js';
 import { PRICES } from '../utils/pricing.js';
 import { digest } from '../auth/crypto.js';
 import { retainedRuns } from './reporting.js';
@@ -11,6 +11,8 @@ import { compareRuns } from '../services/run-pagination.js';
 export async function prose(route, request, env, auth) {
   const mode = route.params.mode; assert(['to-cron', 'ask', 'change'].includes(mode), 'not_found', 'Unknown prose endpoint', 404);
   const input = await readJson(request, 8192); assert(typeof input.text === 'string' && input.text.length > 0 && input.text.length <= 4096, 'invalid_text', 'Text must be 1–4096 characters');
+  // Time-zone errors are caller mistakes and must fail before a paid model call.
+  if (mode === 'to-cron') cron('* * * * *', input.timezone);
   const quote = proseQuote(mode);
   if (new URL(request.url).searchParams.get('dry_run') === '1') return { quote_microdollars: quote, cost_microdollars: 0 };
   assert(env.ANTHROPIC_API_KEY, 'prose_unavailable', 'Prose is not configured', 503);
@@ -34,7 +36,7 @@ export async function prose(route, request, env, auth) {
     const result = await callProse(mode, modelInput, env, readTool); knownCharge = Math.min(quote, result.cost_microdollars); let value = result.value;
     if (mode === 'to-cron') {
       assert(Number.isFinite(value.confidence) && value.confidence >= 0 && value.confidence <= 1 && Array.isArray(value.alternatives) && value.alternatives.every(v => typeof v === 'string'), 'invalid_prose_response', 'Invalid cron response', 502);
-      value = { ...value, ...explainCron(value.cron, input.timezone || 'UTC') };
+      value = { ...value, ...explainCron(value.cron, input.timezone) };
     }
     if (mode === 'ask') {
       assert(typeof value.answer === 'string' && Array.isArray(value.citations), 'invalid_prose_response', 'Invalid answer', 502);
