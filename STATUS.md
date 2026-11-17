@@ -724,5 +724,8 @@ calendar days of billed counts rather than sampling retained logs.
   cold restart, unchanged balance/history, repeated refusal and recovery wakes.
   The existing manual-refusal test also verifies that publication failure retains
   its prior pause and reset deadline until retry succeeds.
-- Lint and all 809 unit/integration tests pass, including 456 full-path cost checks.
-  Prices are unchanged. L9–L14 live/owner/legal acceptance remains open.
+- Lint, all 809 unit/integration tests (including 456 full-path cost checks), all
+  five browser flows, the production dry-run build and real local SQLite/Queue
+  acceptance pass. Prices are unchanged. The master plan now reflects the selected
+  Loader, audited prices and separate L13 legal/L14 production steps.
+  L9–L14 live/owner/legal acceptance remains open.

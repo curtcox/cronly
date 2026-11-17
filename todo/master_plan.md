@@ -45,7 +45,7 @@ the design. Pricing numbers and their derivation live in
 | **Action** | Named thing to do: an HTTP request template or a JavaScript module | `ping-health`, `nightly-report` |
 | **Job** | An action plus *when*: a cron expression and time zone, plus policies and a budget. One action can have several jobs. | `ping-health` every 5 min, `America/Chicago` |
 | **Trigger** | A way to run a job now: "Run now" in the UI, `POST /api/jobs/{name}/run`, or a webhook URL with a trigger token | `https://cronly.org/hook/tk_…` |
-| **Run** | One execution of a job, with its log, outcome and cost | run `r_01J…` at 2026-11-16T09:00Z, 200 OK, 25 µ$ |
+| **Run** | One execution of a job, with its log, outcome and cost | run `r_01J…` at 2026-11-16T09:00Z, 200 OK, 85 µ$ |
 | **Budget** | Limits on what a job may spend: per run, per day, per month | max 1,000 µ$/day |
 | **Balance** | Prepaid credit in micro-dollars, topped up with Stripe | $4.81 |
 
@@ -197,21 +197,18 @@ with **enforced CPU and subrequest limits**, and whose outbound traffic goes thr
 cronly-controlled gateway Worker that counts subrequests, enforces the destination rules in §8,
 and strips cronly's own hosts.
 
-Two Cloudflare options; decide in L12 after checking current docs and pricing:
+**Selected in D2/L10: Dynamic Worker Loader.** Each account/action version has a
+content-addressed isolate supplied at load time. Its version includes the source,
+limits, trusted wrapper and redactor. `globalOutbound: null` blocks native networking;
+the wrapper supplies only the scoped gateway capability. Loader and entrypoint limits
+set `cpuMs` and `subRequests`; the gateway separately enforces the action's counted
+outbound allowance. No Workers for Platforms dispatch namespace is used.
 
-| | Workers for Platforms (dispatch namespace) | Dynamic Worker Loader |
-|---|---|---|
-| Per-invocation limits | `cpuMs` and `subRequests` on dispatch (documented) | verify |
-| Outbound control | Outbound Worker | `globalOutbound` |
-| Fixed cost | ~$25/month plan; per-script fee past included scripts | verify; no per-script upload |
-| Upload | Script uploaded per action version via API | Code passed at load time, cached by id |
-
-Recommendation: prefer the Worker Loader if it is generally available with enforced CPU
-limits, because it has no per-script fee and no extra fixed cost; otherwise Workers for
-Platforms. Either way, cronly passes a content hash as the isolate id so unchanged code is not
-re-uploaded. Pricing (§6) charges the **configured** CPU limit per run until measured CPU is
-available per invocation (Tail Worker `cpuTime` or equivalent), then charges measured CPU with
-the configured limit as the hold.
+Local execution, network denial and gateway counting are verified. Production CPU
+enforcement still requires the live L10 acceptance in [the launch handoff](../docs/ops/launch.md).
+Pricing (§6) charges the **configured** CPU limit per run until measured CPU is
+available per invocation (S2), then charges measured CPU with the configured limit
+as the hold.
 
 Dynamic Worker activation is held on every run and charged once per account/action
 version and UTC execution-claim day. Record paid activation atomically with
@@ -358,19 +355,22 @@ Detailed derivation in [`docs/business/pricing.md`](../docs/business/pricing.md)
   itemized on top, as hashbin decided in its L20 (same wording and Terms language; reuse
   `grossUp`). Credit never expires while the account exists; refunds of unused balance on
   request minus the non-refundable card cost.
-- **Starting prices** (to be confirmed by the cost model and price-floor tests):
+- **Current prices** (audited in [`docs/business/pricing.md`](../docs/business/pricing.md)
+  and enforced by price-floor tests):
 
 | Operation | Price | Worst-case marginal cost (est.) |
 |-----------|-------|----------------------|
-| HTTP run (scheduled, manual, or retry) | 25 µ$ | ~14 µ$ |
-| Webhook-triggered run | run price + 5 µ$ | ~1 µ$ for the inbound request |
-| JS run | 25 µ$ + 0.05 µ$ per CPU-ms of limit + 1 µ$ per allowed subrequest | ~14 µ$ + 0.02 µ$/ms + ~0.3 µ$/subrequest |
-| Change (create/update/delete action, variable, secret, job, key, trigger) | 100 µ$ | ~6 µ$ plus a permanent audit row |
-| Prose request | 1.5 × actual Anthropic token cost + 500 µ$ | token cost |
-| API reads with an API key | 1 µ$ each | ~0.5 µ$ |
-| Web UI reads, cron explain, quotes, dry runs | free, rate-limited | ~0.5 µ$ |
+| HTTP run (scheduled, manual, or retry) | 85 µ$ | 52 µ$ |
+| Webhook-triggered run | run price + 5 µ$ | run bound + 2 µ$ |
+| JS run | 85 µ$ + ceil(0.05 µ$ × CPU-ms limit) + 5 µ$ per allowed subrequest | HTTP bound + configured CPU + counted gateway |
+| JS daily activation | 3,300 µ$ per account/action version/UTC execution day | 2,000 µ$ |
+| Change (create/update/delete action, variable, secret, job, key, trigger) | 100 µ$ | 20 µ$ including billing and audit |
+| Prose request | ceil(1.64 × actual Anthropic token cost) + 500 µ$ | token cost + bookkeeping |
+| API reads with an API key | 21 µ$ + 2 µ$ per job scanned for aggregate history | ceil(12 µ$ + 1.2 µ$/job) |
+| Web UI reads, cron explain, quotes, dry runs | free, rate-limited | bounded fixed operating cost |
 
-  So a job every hour costs ~1.8¢/month; every minute, ~$1.08/month.
+  HTTP run charges for 30 days are $0.06120 for an hourly job and $3.6720 for a
+  minutely job. Changes, API polling, prose and JS activation are additional.
 - **Reservation rule:** an operation runs only after its maximum price is held. Max price is
   computable up front for every operation (runs: from the action's limits; prose: from
   `max_tokens` and input size). Settlement charges `min(actual, held)`.
@@ -379,11 +379,11 @@ Detailed derivation in [`docs/business/pricing.md`](../docs/business/pricing.md)
 - **Projection:** for each enabled job, expected runs in the next 30 days (from cron) × max
   run price, capped by its budget; sum per day; runway = (balance − holds) / daily burn,
   shown as a date. Webhook-only jobs use their trailing 7-day average.
-- **Fixed costs:** Workers Paid ($5/mo) + domain + (Workers for Platforms $25/mo if chosen) +
-  Clerk (free tier). Roughly $6–31/month. Break-even with HTTP runs alone at ~10 µ$ net margin:
-  ~0.6M runs/month without WfP. Price-floor tests assert every price ≥ 1.5 × worst-case cost
-  after Stripe's cut and an 8% revenue haircut (refunds, disputes), using constants in
-  `src/utils/cost-policy.js`.
+- **Fixed costs:** Workers Paid + domain + Clerk; the selected Loader adds no
+  Workers for Platforms subscription. See the current cost model for provider rates.
+  Price-floor tests assert `price × revenueKept ≥ 1.5 × ceil(worst-case cost)`,
+  including the 8% revenue haircut (refunds, disputes), using constants in
+  `src/utils/cost-policy.js`. Deposits itemize the card fee separately.
 
 ## 7. Logs and retention
 
@@ -463,8 +463,9 @@ Each step has a STATUS row. Later steps depend on earlier ones unless noted.
 11. **L11 Agent surface:** OpenAPI generation and drift test, `llms.txt`, agent docs, MCP
     server, `/api/config` import/export, browser snippet.
 12. **L12 Safety:** limits in §8, rate-limit rules, reconciliation and brake, invite-only.
-13. **L13 Launch:** cronly.org DNS and Workers custom domain, production Clerk and Stripe,
-    Terms/Privacy, end-to-end production test with a real deposit, `verify:production`.
+13. **L13 Legal:** Terms/Privacy, confirmed operator facts and owner/legal approval.
+14. **L14 Production:** cronly.org DNS and Workers custom domain, production Clerk and
+    Stripe, end-to-end production test with a real deposit, `verify:production`.
 
 ## 11. What is deliberately left out
 
