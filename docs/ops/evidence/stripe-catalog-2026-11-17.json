@@ -1,0 +1,57 @@
+{
+  "checked_at": "2026-11-17T16:13:49.967Z",
+  "charge_attempted": false,
+  "card_details_used": false,
+  "session_created": true,
+  "live_mode": true,
+  "payment_status": "unpaid",
+  "credit_cents": 500,
+  "card_cost_cents": 46,
+  "total_cents": 546,
+  "line_items": [
+    {
+      "product": "prod_Ve6uXTm3GrWYo5",
+      "name": "cronly prepaid credit",
+      "unit_amount": 500,
+      "quantity": 1,
+      "currency": "usd"
+    },
+    {
+      "product": "prod_Ve6v9xj8VFn2eB",
+      "name": "cronly card payment cost (non-refundable)",
+      "unit_amount": 46,
+      "quantity": 1,
+      "currency": "usd"
+    }
+  ],
+  "catalog_verified": true,
+  "expired": true,
+  "final_payment_status": "unpaid",
+  "scope": "Direct live Stripe SDK request; deployed Worker, signed delivery and real deposit remain unverified",
+  "source_commit": "591a24870f622094522d8513b5081c52e18207fe",
+  "runtime_key": {
+    "name": "cronly production checkout",
+    "permissions": {
+      "Checkout Sessions": "Write",
+      "Products": "Read",
+      "Prices": "Read"
+    },
+    "other_permissions": "None",
+    "secret_destination": "GitHub curtcox/cronly production: STRIPE_SECRET_KEY"
+  },
+  "webhook": {
+    "id": "we_0Ucox4TWAgyTrTqTgzY8njcH",
+    "name": "cronly production payments",
+    "status": "Active",
+    "url": "https://cronly.org/webhooks/stripe",
+    "api_version": "2026-10-28.endive",
+    "payload": "snapshot",
+    "scope": "Your account",
+    "events": [
+      "checkout.session.completed",
+      "checkout.session.async_payment_succeeded"
+    ],
+    "secret_destination": "GitHub curtcox/cronly production: STRIPE_WEBHOOK_SECRET"
+  },
+  "private_temporary_credential_files_removed": true
+}

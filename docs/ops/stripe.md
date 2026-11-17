@@ -31,9 +31,10 @@ Services category. This is not tax/legal acceptance; review tax obligations and
 the itemized card-cost wording before opening payments. No automatic tax setting
 or shared Stripe business/branding settings were changed.
 
-## Restricted runtime key (prepared, not created)
+## Restricted runtime key (created and verified)
 
-The staged key is named **cronly production checkout**. It has only:
+Created on 2026-11-17 after explicit owner approval and owner-completed Stripe
+identity verification. The key is named **cronly production checkout** and has only:
 
 - Checkout Sessions: Write (includes Read).
 - Products: Read.
@@ -44,16 +45,16 @@ Customers, Payouts and Webhook Endpoints. Stripe's restricted keys apply to the
 selected resource types across the shared account; they are not restricted to
 cronly's product IDs. See [restricted key configuration](https://docs.stripe.com/keys/restricted-api-keys).
 
-Creation requires the owner's action-time approval. Store the resulting
-`rk_live_…` value as `STRIPE_SECRET_KEY` in GitHub's **production** environment
-through stdin, without displaying it or committing a local credential file.
-Keep refunds owner-operated in Stripe. Validate Checkout creation and inspect
-permission errors before adding any broader access; no real payment is needed
-to validate an unpaid session.
+Stored the resulting `rk_live_…` value as `STRIPE_SECRET_KEY` in GitHub's
+**production** environment through stdin. Verified its entry name/update time
+without reading the value back. The private temporary credential file was
+removed; no credential value was displayed or committed. Keep refunds
+owner-operated in Stripe; broader runtime access is not needed for Checkout.
 
-## Webhook (prepared, not created)
+## Webhook (created and verified)
 
-The draft destination is **cronly production payments**:
+Created the owner-approved **cronly production payments** destination on
+2026-11-17, ID `we_0Ucox4TWAgyTrTqTgzY8njcH`, and verified its Active status:
 
 - URL: `https://cronly.org/webhooks/stripe`.
 - Scope: Your account, snapshot payloads.
@@ -64,23 +65,33 @@ The draft destination is **cronly production payments**:
 Enabling this destination transmits matching Checkout event payloads from the
 entire shared Stripe account, including sibling-app sessions, to cronly. The
 handler ignores non-cronly metadata and unpaid sessions before creating an
-account or granting credit. Creating the destination requires owner approval.
-Save its signing secret as `STRIPE_WEBHOOK_SECRET` in GitHub's production
-environment through stdin. The existing hashbin destination stays unchanged.
+account or granting credit. Stored its signing secret as `STRIPE_WEBHOOK_SECRET`
+in GitHub's production environment through stdin and verified the entry name and
+update time. The private temporary file was removed. The existing hashbin
+destination and key were not modified.
 
 The app Worker is not deployed, so signed delivery and balance fulfillment cannot
 be accepted yet. Events could fail delivery until that endpoint exists.
 
+## Unpaid live Checkout acceptance — 2026-11-17
+
+The restricted key successfully created a card-only, one-time live session with
+the same catalog/amount fields used by the app: $5.00 credit plus $0.46 card cost,
+$5.46 total. Reading its line items with expanded products confirmed both exact
+product IDs, names, USD amounts and quantity one. The key then expired the
+session, which remained unpaid. No card details, charge or refund were submitted.
+
+This was a direct Stripe SDK check, not a deployed Worker or ledger test. It
+confirms the current permissions support session creation, item reads and expiry
+without broader write grants. [Sanitized acceptance evidence](evidence/stripe-catalog-2026-11-17.json).
+
 ## Acceptance still required
 
-1. Approve/create the restricted key and webhook; securely store both secrets.
-2. Validate the restricted key's exact Checkout request, product selection and
-   itemized amounts. A $5 credit quotes $5.46 total under the current gross-up.
-3. Complete the remaining app credentials, production deployment and legal
+1. Complete the remaining app credentials, production deployment and legal
    approval; keep invite-only and do not open payments early.
-4. Have the owner complete a real $5 credit purchase in the deployed UI. Verify
+2. Have the owner complete a real $5 credit purchase in the deployed UI. Verify
    the full $5 credit, one ledger deposit, signed delivery, repeated event
    deduplication and balance-paused job recovery. Confirm both completed and
    async-success delivery for the same session cannot credit it twice.
-5. Verify the refund procedure with the owner and record deployment SHA and
+3. Verify the refund procedure with the owner and record deployment SHA and
    sanitized evidence in STATUS.md. No live charge or refund is claimed here.

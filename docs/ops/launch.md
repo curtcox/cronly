@@ -24,8 +24,10 @@ and Cloudflare account, with a separate Clerk application and Stripe product, as
    checkout.session.completed/async_payment_succeeded webhooks to /webhooks/stripe.
    Payments itemize credit and non-refundable card cost. Verify tax obligations with
    the owner/legal reviewer before launch. Refunds are owner-operated through Stripe.
-   The dedicated live catalog and its deployment wiring are prepared; restricted
-   key creation, webhook activation and payment acceptance remain. Follow
+   The dedicated live catalog, restricted runtime key, active two-event webhook
+   and GitHub production secret storage are provisioned. An unpaid live Checkout
+   session verified the catalog and permissions and was expired. Signed delivery,
+   deployed balance fulfillment and a real purchase remain. Follow
    [Stripe setup and acceptance](stripe.md).
 4. Generate independent 32-byte-or-longer random TOKEN_SIGNING_KEY and
    SECRETS_MASTER_KEY through a secret manager. Keep master-key backups securely;
