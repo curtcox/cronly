@@ -336,7 +336,10 @@ conventions, including `escapeHtml`).
 - **Jobs:** list with cron, plain-English schedule, next run, last outcome, monthly projected
   cost, budget use. Editor with a cron field, live English and next-5 preview (free, local),
   a "describe it in words" box (prose, metered — shows the price before the call), policies,
-  budget, triggers. Save shows the change price.
+  budget, triggers. Translation results show the deterministic explanation, time zone, next five
+  fires, confidence, alternatives and actual prose charge. An explicit choice adds the translated
+  cron and time zone to the requesting draft; save remains a separate billed confirmation.
+  Delayed translations cannot change another editor. Save shows the change price.
 - **Actions / Variables / Secrets:** editors; HTTP action editor with "test run" (billed as a
   run); JS editor (textarea + basic highlighting) with CPU/subrequest limits and the per-run
   price they imply.

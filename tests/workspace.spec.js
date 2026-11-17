@@ -602,3 +602,123 @@ test('ignores prose previews and paid replies from an earlier Ask visit', async 
   await expect(page.getByLabel('What would you like to do?')).toHaveValue('Third question');
   await expect(page.locator('#notice')).not.toBeVisible();
 });
+
+async function translationJobs(page) {
+  await login(page);
+  const jobs = Object.fromEntries(['first', 'second'].map(name => [name, { action: 'ping', cron: null, timezone: 'UTC', enabled: true, overlap: 'skip', missed: 'skip', retries: 0, budget: {} }]));
+  await page.route('**/api/config', route => route.fulfill({ json: { config: { jobs, actions: { ping: { type: 'http' } }, variables: {}, secrets: {} } } }));
+  await page.route('**/api/jobs/*/triggers', route => route.fulfill({ json: { items: [] } }));
+  await page.getByRole('link', { name: 'Jobs', exact: true }).click();
+  await page.locator('[data-edit="first"]').click();
+  await page.locator('#job-prose').fill('Weekdays at 7am');
+  await page.getByLabel('Time zone', { exact: true }).fill('America/Chicago');
+}
+const translatedSchedule = {
+  cron: '0 7 * * 1-5', timezone: 'America/Chicago', explanation: 'At 07:00 AM, Monday through Friday', confidence: 0.65,
+  alternatives: ['Consider holidays too'], next_fires: ['2026-11-18T13:00:00Z', '2026-11-19T13:00:00Z', '2026-11-20T13:00:00Z', '2026-11-23T13:00:00Z', '2026-11-24T13:00:00Z'], cost_microdollars: 450
+};
+
+test('reviews translated cron, ambiguity, time zone and fires before explicitly updating and saving a draft', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await translationJobs(page);
+  const calls = []; const unsafe = '<img src=x onerror="window.pwned=true">';
+  await page.route('**/api/prose/to-cron*', async route => {
+    const request = route.request(); const dry = new URL(request.url()).searchParams.has('dry_run');
+    calls.push({ dry, body: request.postDataJSON(), key: request.headers()['idempotency-key'] });
+    await route.fulfill({ json: dry ? { quote_microdollars: 12345 } : { ...translatedSchedule, alternatives: [unsafe] } });
+  });
+  const saves = [];
+  await page.route('**/api/jobs/first*', async route => {
+    if (route.request().method() !== 'PUT') return route.fallback();
+    saves.push({ dry: new URL(route.request().url()).searchParams.has('dry_run'), body: route.request().postDataJSON() });
+    await route.fulfill({ json: { quote_microdollars: 100, cost_microdollars: 100 } });
+  });
+  await page.getByRole('button', { name: 'Quote prose translation' }).click();
+  await expect(page.locator('#review-price')).toContainText('12,345 µ$');
+  await expect(page.locator('#review-detail')).toContainText('America/Chicago');
+  await page.locator('#review-cancel').click();
+  expect(calls.filter(call => !call.dry)).toHaveLength(0);
+  await expect(page.locator('#job-cron')).toHaveValue('');
+  await page.getByRole('button', { name: 'Quote prose translation' }).click(); await apply(page);
+  const result = page.locator('#job-translation');
+  await expect(result).toContainText('0 7 * * 1-5');
+  await expect(result).toContainText('At 07:00 AM, Monday through Friday · America/Chicago');
+  await expect(result).toContainText('Model confidence: 65%');
+  await expect(result).toContainText(unsafe);
+  await expect(result.locator('img')).toHaveCount(0);
+  await expect(result.locator('ul').last().locator('li')).toHaveCount(5);
+  await expect(result.locator('ul').last().locator('li').first()).toContainText('7:00:00 AM');
+  await expect(result).toContainText('Translation charged $0.00045');
+  await expect(page.locator('#job-cron')).toHaveValue('');
+  expect(saves).toHaveLength(0);
+  expect(calls.filter(call => !call.dry)).toHaveLength(1);
+  expect(calls.at(-1).body).toEqual({ text: 'Weekdays at 7am', timezone: 'America/Chicago' });
+  expect(calls.at(-1).key).toBeTruthy();
+  await page.getByLabel('Time zone', { exact: true }).fill('UTC');
+  await page.getByRole('button', { name: 'Use this schedule in the draft' }).click();
+  await expect(page.locator('#job-cron')).toHaveValue(translatedSchedule.cron);
+  await expect(page.locator('#job-timezone')).toHaveValue('America/Chicago');
+  await expect(page.locator('#cron-preview')).toContainText('Monday through Friday');
+  expect(saves).toHaveLength(0);
+  expect(await page.evaluate(() => window.pwned)).toBeUndefined();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: /Review save/ }).click();
+  await expect(page.locator('#review-price')).toContainText('100 µ$');
+  await apply(page);
+  expect(saves.map(save => save.dry)).toEqual([true, false]);
+  expect(saves[1].body.cron).toBe(translatedSchedule.cron);
+  expect(saves[1].body.timezone).toBe('America/Chicago');
+});
+
+for (const phase of ['preview', 'paid']) test(`ignores a translation ${phase} from an earlier job editor`, async ({ page }) => {
+  await translationJobs(page);
+  let release; const ready = new Promise(resolve => { release = resolve; });
+  let finished; const done = new Promise(resolve => { finished = resolve; });
+  await page.route('**/api/prose/to-cron*', async route => {
+    const dry = new URL(route.request().url()).searchParams.has('dry_run');
+    if (dry === (phase === 'preview')) await ready;
+    await route.fulfill({ json: dry ? { quote_microdollars: 1000 } : translatedSchedule });
+    if (dry === (phase === 'preview')) finished();
+  });
+  const oldButton = await page.getByRole('button', { name: 'Quote prose translation' }).elementHandle();
+  const sent = page.waitForRequest(request => new URL(request.url()).pathname === '/api/prose/to-cron' && new URL(request.url()).searchParams.has('dry_run') === (phase === 'preview'));
+  await page.getByRole('button', { name: 'Quote prose translation' }).click();
+  if (phase === 'paid') { await expect(page.locator('#review')).toBeVisible(); await page.locator('#review-apply').click(); }
+  await sent;
+  await page.locator('[data-edit="second"]').click();
+  await expect(page.getByRole('heading', { name: 'Edit second', exact: true })).toBeVisible();
+  await page.locator('#job-cron').fill('15 9 * * *');
+  release(); await done;
+  await expect(page.locator('body')).not.toHaveAttribute('data-applying', 'true');
+  await expect.poll(() => oldButton.evaluate(button => button.disabled)).toBe(false);
+  await expect(page.locator('#review')).not.toBeVisible();
+  await expect(page.locator('#job-translation')).toBeEmpty();
+  await expect(page.locator('#job-cron')).toHaveValue('15 9 * * *');
+  await expect(page.locator('#job-timezone')).toHaveValue('UTC');
+  await expect(page.locator('#notice')).not.toBeVisible();
+});
+
+test('discards a translation quote when its prose changes and lets a failed quote be retried', async ({ page }) => {
+  await translationJobs(page);
+  let release; const ready = new Promise(resolve => { release = resolve; });
+  let attempts = 0;
+  await page.route('**/api/prose/to-cron*', async route => {
+    attempts++;
+    if (attempts === 1) await ready;
+    if (attempts === 2) return route.fulfill({ status: 503, json: { error: 'Translation temporarily unavailable', code: 'unavailable' } });
+    await route.fulfill({ json: { quote_microdollars: 1000 } });
+  });
+  const button = page.getByRole('button', { name: 'Quote prose translation' });
+  const sent = page.waitForRequest('**/api/prose/to-cron?dry_run=1');
+  await button.click(); await sent;
+  await expect(button).toBeDisabled();
+  await page.locator('#job-prose').fill('Every hour');
+  release(); await expect(button).toBeEnabled();
+  await expect(page.locator('#review')).not.toBeVisible();
+  await button.click(); await expect(page.locator('#notice')).toContainText('Translation temporarily unavailable');
+  await expect(button).toBeEnabled();
+  await expect(page.locator('#job-prose')).toHaveValue('Every hour');
+  await button.click(); await expect(page.locator('#review')).toBeVisible();
+  await expect(page.locator('#review-detail')).toContainText('Every hour');
+  expect(attempts).toBe(3);
+});

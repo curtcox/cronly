@@ -103,7 +103,7 @@ function definitionForm(kind) {
   }
   if (kind === 'jobs') {
     const job = value || { timezone: 'UTC', cron: '0 * * * *', enabled: true, overlap: 'skip', missed: 'skip', retries: 0, budget: {} };
-    fields = `${name}<label>Action<select name="action" required>${Object.keys(config.actions).map(a => `<option ${job.action === a ? 'selected' : ''}>${e(a)}</option>`).join('')}</select></label><div class="fields"><label>Cron (blank for on demand only)<input name="cron" id="job-cron" value="${e(job.cron || '')}" placeholder="0 * * * *"></label><label>Time zone<input name="timezone" id="job-timezone" value="${e(job.timezone)}" required></label></div><div id="cron-preview" class="schedule-preview" aria-live="polite"></div><label>Describe the schedule<textarea id="job-prose" rows="2" placeholder="Weekdays at 7am"></textarea></label><button type="button" id="translate-job" class="secondary">Quote prose translation</button><div class="fields"><label>Overlap<select name="overlap"><option ${job.overlap === 'skip' ? 'selected' : ''}>skip</option><option ${job.overlap === 'allow' ? 'selected' : ''}>allow</option></select></label><label>Missed run<select name="missed"><option ${job.missed === 'skip' ? 'selected' : ''}>skip</option><option ${job.missed === 'run_once' ? 'selected' : ''}>run_once</option></select></label><label>Immediate retries<input name="retries" type="number" min="0" max="3" value="${e(job.retries)}"></label><label>Daily budget / µ$<input name="budget_day" type="number" min="0" value="${e(job.budget.day ?? '')}" placeholder="No limit beyond balance"></label><label>Monthly budget / µ$<input name="budget_month" type="number" min="0" value="${e(job.budget.month ?? '')}"></label></div><label class="check"><input type="checkbox" name="enabled" ${job.enabled ? 'checked' : ''}>Enabled</label>`;
+    fields = `${name}<label>Action<select name="action" required>${Object.keys(config.actions).map(a => `<option ${job.action === a ? 'selected' : ''}>${e(a)}</option>`).join('')}</select></label><div class="fields"><label>Cron (blank for on demand only)<input name="cron" id="job-cron" value="${e(job.cron || '')}" placeholder="0 * * * *"></label><label>Time zone<input name="timezone" id="job-timezone" value="${e(job.timezone)}" required></label></div><div id="cron-preview" class="schedule-preview" aria-live="polite"></div><label>Describe the schedule<textarea id="job-prose" rows="2" maxlength="4096" placeholder="Weekdays at 7am"></textarea></label><button type="button" id="translate-job" class="secondary">Quote prose translation</button><div id="job-translation" aria-live="polite"></div><div class="fields"><label>Overlap<select name="overlap"><option ${job.overlap === 'skip' ? 'selected' : ''}>skip</option><option ${job.overlap === 'allow' ? 'selected' : ''}>allow</option></select></label><label>Missed run<select name="missed"><option ${job.missed === 'skip' ? 'selected' : ''}>skip</option><option ${job.missed === 'run_once' ? 'selected' : ''}>run_once</option></select></label><label>Immediate retries<input name="retries" type="number" min="0" max="3" value="${e(job.retries)}"></label><label>Daily budget / µ$<input name="budget_day" type="number" min="0" value="${e(job.budget.day ?? '')}" placeholder="No limit beyond balance"></label><label>Monthly budget / µ$<input name="budget_month" type="number" min="0" value="${e(job.budget.month ?? '')}"></label></div><label class="check"><input type="checkbox" name="enabled" ${job.enabled ? 'checked' : ''}>Enabled</label>`;
   }
   return `<form id="definition-form" data-kind="${kind}">${fields}<div class="form-actions"><button type="submit">Review save · ${deployment.prices.change} µ$</button><button type="button" id="new-definition" class="secondary">Clear / new</button></div></form>`;
 }
@@ -116,6 +116,21 @@ function cronPreview() {
     const cron = new Cron(expression, { timezone: zone, paused: true });
     $('#cron-preview').innerHTML = `<strong>${e(window.cronstrue.toString(expression))}</strong><ul>${cron.nextRuns(5).map(d => `<li>${e(d.toLocaleString(undefined, { timeZone: zone, timeZoneName: 'short' }))}</li>`).join('')}</ul>`;
   } catch (error) { $('#cron-preview').textContent = error.message; }
+}
+async function translateJob(button) {
+  const form = button.closest('form'); const target = form.querySelector('#job-translation');
+  if (button.disabled) return;
+  const input = { text: form.querySelector('#job-prose').value, timezone: form.elements.timezone.value };
+  button.disabled = true;
+  try {
+    await reviewed('/api/prose/to-cron', 'POST', input, async result => {
+      // A translation belongs to the editor that requested it, even if a different
+      // job is open when the paid reply arrives. Never overwrite a draft implicitly.
+      if (target.isConnected) target.innerHTML = `<h3>Translated schedule</h3><p>${e(input.text)}</p><pre>${e(result.cron)}</pre><p>${e(result.explanation)} · ${e(result.timezone)}</p><p class="note">Model confidence: ${e(Math.round(result.confidence * 100))}%. Review any ambiguity before using this schedule.</p>${result.alternatives.length ? `<h4>Alternatives</h4><ul>${result.alternatives.map(alternative => `<li>${e(alternative)}</li>`).join('')}</ul>` : ''}<h4>Next five fires / ${e(result.timezone)}</h4><ul>${result.next_fires.map(time => `<li>${e(new Date(time).toLocaleString(undefined, { timeZone: result.timezone, timeZoneName: 'short' }))}</li>`).join('')}</ul><p class="note">Translation charged ${e(usd(result.cost_microdollars))}. Using this schedule only updates the draft; saving is a separate billed change.</p><button type="button" id="use-job-translation" class="secondary" data-translation="${e(JSON.stringify({ cron: result.cron, timezone: result.timezone }))}">Use this schedule in the draft</button>`;
+      await refreshHeader();
+    }, () => form.isConnected && form.querySelector('#job-prose').value === input.text && form.elements.timezone.value === input.timezone);
+  } catch (error) { if (form.isConnected) throw error; }
+  finally { button.disabled = false; }
 }
 function updateJsPrice() {
   if (!$('#js-price')) return;
@@ -294,9 +309,11 @@ content.addEventListener('click', async event => {
     }
     if (button.id === 'export-config') download('cronly.json', JSON.stringify(config, null, 2));
     if (button.id === 'export-runs') await exportRuns(button);
-    if (button.id === 'translate-job') {
-      const input = { text: $('#job-prose').value, timezone: $('#job-timezone').value };
-      await reviewed('/api/prose/to-cron', 'POST', input, async result => { $('#job-cron').value = result.cron; cronPreview(); notify(`Translation cost ${usd(result.cost_microdollars)}. Review the cron and save separately.`); });
+    if (button.id === 'translate-job') await translateJob(button);
+    if (button.id === 'use-job-translation') {
+      const translation = JSON.parse(button.dataset.translation);
+      $('#job-cron').value = translation.cron; $('#job-timezone').value = translation.timezone;
+      cronPreview(); notify('Translation added to this draft. Review the next fires and save separately.');
     }
     if (button.id === 'apply-proposal') {
       const proposal = JSON.parse(button.dataset.proposal);
