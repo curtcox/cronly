@@ -3,6 +3,7 @@ import { cron } from './cron.js';
 import { price, PRICES } from '../utils/pricing.js';
 import { assert } from '../utils/errors.js';
 import { ownValue } from '../utils/records.js';
+import { compareRuns } from './run-pagination.js';
 const offsetCache = new Map();
 function zoneOffset(zone, time) {
   const key = `${zone}:${time}`;
@@ -99,7 +100,7 @@ export function filterRuns(runs, params) {
   const from = params.get('from') ? Date.parse(params.get('from')) : 0;
   const to = params.get('to') ? Date.parse(params.get('to')) : Infinity;
   assert(Number.isFinite(from) && (to === Infinity || Number.isFinite(to)), 'invalid_window', 'Invalid date range');
-  return runs.filter(run => (!params.get('job') || run.job === params.get('job')) && (!params.get('status') || run.status === params.get('status')) && run.created_at >= from && run.created_at <= to).sort((a, b) => b.created_at - a.created_at);
+  return runs.filter(run => (!params.get('job') || run.job === params.get('job')) && (!params.get('status') || run.status === params.get('status')) && run.created_at >= from && run.created_at <= to).sort(compareRuns);
 }
 /** Group permanent run charges by job, action or UTC day. */
 export function costGroups(entries, params) {

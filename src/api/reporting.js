@@ -25,7 +25,8 @@ export async function reports(route, request, env, auth) {
       return { group, from: metrics.from, to: metrics.to, items: Object.entries(buckets).map(([name, cost_microdollars]) => ({ name, cost_microdollars })), total_microdollars: Object.values(buckets).reduce((sum, amount) => sum + amount, 0) };
     }
     case 'runs': {
-      const options = { job: params.get('job'), names: auth.read_names, status: params.get('status'), from: params.get('from') ? Date.parse(params.get('from')) : undefined, to: params.get('to') ? Date.parse(params.get('to')) : undefined, before: params.get('before') ? Number(params.get('before')) : undefined };
+      const options = { job: params.get('job'), names: auth.read_names, status: params.get('status'), from: params.get('from') ? Date.parse(params.get('from')) : undefined, to: params.get('to') ? Date.parse(params.get('to')) : undefined, before: params.get('before') ? Number(params.get('before')) : undefined, cursor: params.get('cursor') };
+      assert(options.job || options.cursor === null, 'invalid_cursor', 'Filter by job to page retained runs');
       if (options.job) {
         assert(/^(?:_test:)?[a-z0-9-]{1,64}$/.test(options.job), 'invalid_name', 'Invalid job filter');
         const index = await rpc(env.ACCOUNTS, auth.account, 'get', { key: `job-index:${options.job}` }); assert(index.name, 'not_found', 'Job history not found', 404);

@@ -27,6 +27,10 @@ export function openapi(routes) {
     }
     if (route.handler === 'quote') for (const name of ['op', 'job', 'resource']) operation.parameters.push({ name, in: 'query', schema: { type: 'string' } });
     if (['runs', 'costs', 'upcoming'].includes(route.handler)) for (const name of ['from', 'to', 'job', 'status', 'group', 'limit', 'format', 'before', 'cursor']) operation.parameters.push({ name, in: 'query', schema: { type: 'string' } });
+    if (route.handler === 'runs') {
+      operation.parameters.find(parameter => parameter.name === 'cursor').description = 'With job set, pass next_cursor to fetch older runs without skipping equal timestamps. Keep the same filters. NDJSON returns X-Next-Cursor.';
+      operation.parameters.find(parameter => parameter.name === 'before').description = 'Legacy exclusive timestamp in milliseconds. Prefer cursor because retries can share a timestamp.';
+    }
     (paths[path] ||= {})[route.method.toLowerCase()] = operation;
   }
   return { openapi: '3.1.0', info: { title: 'cronly API', version: '0.1.0', description: 'Prepaid cron actions. Quote first, apply separately. Session reads are free; API reads are metered.' }, servers: [{ url: 'https://cronly.org' }], paths,

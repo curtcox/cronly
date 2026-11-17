@@ -2,6 +2,7 @@ import { assert, errorResponse } from '../utils/errors.js';
 import { rpc } from '../utils/rpc.js';
 import { price } from '../utils/pricing.js';
 import { nextFires } from '../services/cron.js';
+import { compareRuns, runCursor, parseRunCursor } from '../services/run-pagination.js';
 
 const DAY = 86400000;
 /** Per-job alarm and run log. Never waits for customer HTTP inside the DO. */
@@ -62,9 +63,10 @@ export class JobDO {
       }
       case 'runs': {
         const limit = Math.min(args.limit || 100, 100); const before = args.before || Infinity;
-        const entries = (await this.summaries()).filter(r => r.created_at < before && (!args.status || r.status === args.status) && (!args.from || r.created_at >= args.from) && (!args.to || r.created_at <= args.to)).sort((a, b) => b.created_at - a.created_at);
+        const cursor = parseRunCursor(args.cursor);
+        const entries = (await this.summaries()).filter(r => r.created_at < before && (!cursor || compareRuns(r, cursor) > 0) && (!args.status || r.status === args.status) && (!args.from || r.created_at >= args.from) && (!args.to || r.created_at <= args.to)).sort(compareRuns);
         const page = entries.slice(0, limit); const items = args.summary ? page.map(({ pending: _pending, retry: _retry, settlement: _settlement, ...summary }) => summary) : await Promise.all(page.map(r => this.record(r)));
-        return { items: items.filter(Boolean), next_before: entries.length > limit ? page.at(-1).created_at : null };
+        return { items: items.filter(Boolean), next_before: entries.length > limit ? page.at(-1).created_at : null, next_cursor: entries.length > limit ? runCursor(page.at(-1)) : null };
       }
       case 'run': return (await this.readRun(args.id)) || {};
       default: assert(false, 'unknown_operation', 'Unknown job operation', 404);

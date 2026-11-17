@@ -136,7 +136,7 @@ const worker = {
       }
       const data = await handle(route, request, env, auth);
       const balance = auth ? await rpc(env.ACCOUNTS, auth.account, 'account') : {};
-      if (route.handler === 'runs' && new URL(request.url).searchParams.get('format') === 'ndjson') return new Response(data.items.map(item => JSON.stringify(item)).join('\n') + '\n', { headers: { 'content-type': 'application/x-ndjson', 'X-Next-Before': String(data.next_before || ''), 'X-Cost-Microdollars': String(cost), 'X-Balance-Microdollars': String(balance.balance_microdollars) } });
+      if (route.handler === 'runs' && new URL(request.url).searchParams.get('format') === 'ndjson') return new Response(data.items.map(item => JSON.stringify(item)).join('\n') + '\n', { headers: { 'content-type': 'application/x-ndjson', 'X-Next-Before': String(data.next_before || ''), 'X-Next-Cursor': data.next_cursor || '', 'X-Cost-Microdollars': String(cost), 'X-Balance-Microdollars': String(balance.balance_microdollars) } });
       return Response.json({ cost_microdollars: cost, balance_microdollars: balance.balance_microdollars, ...data }, { headers: path.startsWith('/hook/') ? { 'Access-Control-Allow-Origin': '*' } : {} });
     } catch (error) {
       let balance; if (auth) { try { balance = (await rpc(env.ACCOUNTS, auth.account, 'account')).balance_microdollars; } catch { /* Preserve the original failure. */ } }

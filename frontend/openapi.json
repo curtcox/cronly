@@ -504,14 +504,16 @@
             "in": "query",
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Legacy exclusive timestamp in milliseconds. Prefer cursor because retries can share a timestamp."
           },
           {
             "name": "cursor",
             "in": "query",
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "With job set, pass next_cursor to fetch older runs without skipping equal timestamps. Keep the same filters. NDJSON returns X-Next-Cursor."
           }
         ],
         "responses": {
