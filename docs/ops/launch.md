@@ -71,6 +71,28 @@ and Cloudflare account, with a separate Clerk application and Stripe product, as
    log full trigger URLs, Authorization, request bodies or secret values. Alert webhook
    configuration is optional and owner-controlled.
 
+## First single-user validation
+
+1. Open https://cronly.org/app.html. The Deploy production workflow checks the
+   home page and opens the live Clerk email/Google form in a fresh browser. Its
+   `production-signed-out-browser` artifact contains screenshots for seven days.
+   This verifies the form loads; it does not prove a successful sign-in.
+2. The owner must invite their own email in the [Clerk production
+   dashboard](https://dashboard.clerk.com/apps/app_3MEi0XGTZX7J6dgu6ezcHdRwyHA/instances/ins_3MEi8pmakrxmN0ExfJI0UhhAicJ).
+   Use email verification for the first sign-in. Google remains External / Testing
+   and needs an explicitly authorized test identity until publication is complete.
+3. Confirm the empty dashboard and zero-balance header load, visit every workspace
+   page, and preview a cron expression in Jobs without saving it. Check the signed
+   user webhook delivery in Clerk and record the user's ID for JS acceptance.
+   These checks need no deposit, API key or fake production credit.
+4. Before a paid run, complete policy approval, Anthropic setup and the first
+   healthy cost-monitor report below. Open payments only through the existing
+   reviewed launch gate, then make the real $5 deposit and check fulfillment once.
+   Keep sign-up invite-only and public JavaScript disabled during acceptance.
+5. Use this same account for the HTTP/manual/schedule/hook checks below and a
+   capped API key for sandbox acceptance. Record each result in STATUS.md; opening
+   a sign-in form alone does not complete L14.
+
 ## Live acceptance before opening payments
 
 Before Clerk/Stripe credentials are available, the sandbox runtime itself can be
@@ -101,9 +123,11 @@ The finite arithmetic test also succeeded at 10 ms, so the CPU rejection probe
 uses a nonterminating loop and requires the explicit native CPU-limit exception.
 The cronly.org zone is active and the `cronly-runs` queue exists. GitHub's production
 environment contains the verified Cloudflare account ID, deployment/analytics
-tokens and live Clerk keypair/webhook secret. Other application credentials and
-the app Worker remain unconfigured. The analytics query now passes live schema
-validation; actual usage/cost-monitor acceptance requires deployed namespaces.
+tokens, live Clerk/Stripe credentials and independent signing/encryption keys.
+The app Worker and three SQLite namespaces are deployed; their verified IDs are
+stored in CRONLY_DO_NAMESPACES. Anthropic is omitted during prelaunch. The
+analytics query passes live schema validation; actual usage/cost-monitor
+acceptance remains pending.
 Automatic deployments, launch approval
 and public JavaScript remain disabled.
 

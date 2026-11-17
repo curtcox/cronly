@@ -5,7 +5,7 @@ disagrees with it, this file wins and the other document is stale.
 
 - **Last audited:** 2026-11-17 (sandbox runtime verified; Clerk and Stripe provisioned; deployed service acceptance pending)
 - **Production:** first app Worker/custom-domain deployment completed 2026-11-17; corrected public-page verification pending. Three SQLite Durable Object namespaces and `cronly-runs` queue are provisioned. Payments, automatic deployments and public JavaScript remain disabled.
-- **Overall:** Code implemented and locally verified on main; production/credential/legal acceptance remains. Design is in [`todo/master_plan.md`](todo/master_plan.md); pricing in
+- **Overall:** Code implemented and locally verified on main; production/sign-in/payment/legal acceptance remains. Deploy verification now also opens the live Clerk email/Google form in a fresh browser without signing in or spending credit. Design is in [`todo/master_plan.md`](todo/master_plan.md); pricing in
   [`docs/business/pricing.md`](docs/business/pricing.md).
 
 ---

@@ -52,3 +52,11 @@ jobs:
       - run: npm run verify:production
         env:
           EXPECTED_GIT_SHA: ${{ github.sha }}
+      - run: npm run verify:production:browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-signed-out-browser
+          path: /tmp/cronly-production-browser/
+          if-no-files-found: ignore
+          retention-days: 7
