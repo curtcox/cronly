@@ -70,6 +70,36 @@ async function recoverySetup() {
   return env;
 }
 
+for (const latestBrake of [true, false]) {
+  it(`ignores an older in-flight monitor after a newer ${latestBrake ? 'failure' : 'success'}`, async () => {
+    const env = await recoverySetup();
+    let finishOlder; let started;
+    const waiting = new Promise(resolve => { started = resolve; });
+    const healthy = () => Response.json({ data: { viewer: { accounts: [{ workers: [], invocations: [], periodic: [], storage: [] }] } } });
+    const failed = () => Response.json({ errors: [{ message: 'Unavailable' }] });
+    env.ANALYTICS_FETCH.mockImplementationOnce(() => {
+      started(); return new Promise(resolve => { finishOlder = resolve; });
+    }).mockImplementationOnce(latestBrake ? failed : healthy);
+    const older = runCostMonitor(env);
+    await waiting;
+    // Both checks deliberately have the same timestamp; generations order them.
+    const latest = await runCostMonitor(env);
+    expect(latest.brake).toBe(latestBrake);
+    const safety = env.SAFETY.get('global');
+    env.SAFETY.objects.set('global', new SafetyDO({ storage: safety.storage }, env));
+    const current = env.SAFETY.get('global'); const fetch = current.fetch.bind(current); const operations = [];
+    vi.spyOn(current, 'fetch').mockImplementation(async request => {
+      operations.push((await request.clone().json()).op);
+      return fetch(request);
+    });
+    finishOlder(latestBrake ? healthy() : failed());
+    expect(await older).toEqual({ ...latest, superseded: true });
+    expect(operations).toEqual(latestBrake ? ['accounts', 'record'] : ['record']);
+    expect(await safety.storage.get('report')).toEqual(latest);
+    expect(await rpc(env.SAFETY, 'global', 'status')).toMatchObject({ brake: latestBrake });
+  });
+}
+
 for (const failure of ['enqueue', 'acknowledgement']) {
   it(`finishes cost-brake recovery after failed ${failure} and a cold monitor restart`, async () => {
     const env = await recoverySetup();

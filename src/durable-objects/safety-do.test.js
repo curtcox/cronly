@@ -75,3 +75,29 @@ it('retains legacy outboxes while a newer generation scans beyond its first page
   await call('resumed-account', { account: 'a0204', version: 'legacy' });
   expect(await object.storage.get('resume:a0204')).toEqual(newest);
 });
+
+for (const latestBrake of [true, false]) {
+  it(`preserves the latest ${latestBrake ? 'braked' : 'healthy'} reconciliation through a delayed result and restart`, async () => {
+    const { env, object, call } = await setup(1);
+    const older = await call('begin-monitor');
+    const newer = await call('begin-monitor');
+    const checked_at = Date.now();
+    const latest = { checked_at, brake: latestBrake, reason: 'Latest reconciliation' };
+    await call('record', { ...newer, report: latest });
+    const recovery = await object.storage.get('recovery');
+    env.SAFETY.objects.set('global', new SafetyDO({ storage: object.storage }, env));
+    expect(await call('record', { ...older, report: { checked_at, brake: !latestBrake } })).toEqual({ ...latest, superseded: true });
+    expect(await object.storage.get('report')).toEqual(latest);
+    expect(await object.storage.get('recovery')).toEqual(recovery);
+    expect(await call('status')).toMatchObject({ brake: latestBrake });
+  });
+}
+
+it('keeps the brake on when an obsolete monitor finishes before the first current report', async () => {
+  const { object, call } = await setup(1);
+  const older = await call('begin-monitor');
+  await call('begin-monitor');
+  expect(await call('record', { ...older, report: { checked_at: Date.now(), brake: false } })).toEqual({ brake: true, superseded: true });
+  expect(await object.storage.get('report')).toBeUndefined();
+  expect(await object.storage.get('recovery')).toBeUndefined();
+});

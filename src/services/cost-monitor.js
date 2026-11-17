@@ -24,6 +24,7 @@ export function measuredCost(account) {
 /** Reconcile daily infrastructure against prepaid revenue; stale/missing analytics stops runs. */
 export async function runCostMonitor(env, now = Date.now()) {
   if (env.ENVIRONMENT === 'local') return { local: true };
+  const { version } = await rpc(env.SAFETY, 'global', 'begin-monitor');
   let report;
   try {
     assert(env.CLOUDFLARE_ANALYTICS_TOKEN && env.CLOUDFLARE_ACCOUNT_ID && env.COST_SAFETY_DO_NAMESPACES, 'analytics_unconfigured', 'Analytics token, account and cronly namespace IDs are required', 503);
@@ -49,7 +50,8 @@ export async function runCostMonitor(env, now = Date.now()) {
     const cost = Math.max(observed, estimated); const projectedLoss = Math.max(0, (cost - revenue * C.revenueKept) * 30);
     report = { checked_at: now, observed_microdollars: observed, estimated_microdollars: estimated, revenue_microdollars: revenue, projected_loss_microdollars: Math.ceil(projectedLoss), brake: projectedLoss > C.projectionBrakeCents * 10000, method: 'Cloudflare Worker/DO observations with conservative ledger allowance for Queue/sandbox costs' };
   } catch { report = { checked_at: now, brake: true, reason: 'Analytics missing, incomplete or unavailable; operator must investigate' }; }
-  await rpc(env.SAFETY, 'global', 'record', { report });
+  report = await rpc(env.SAFETY, 'global', 'record', { report, version });
+  if (report.superseded) return report;
   if (!report.brake) {
     let pending;
     do {

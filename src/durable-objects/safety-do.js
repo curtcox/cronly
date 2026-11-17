@@ -16,8 +16,16 @@ export class SafetyDO {
           const entries = [...await tx.list({ prefix: 'account:', limit: PAGE_SIZE, ...(args.cursor ? { startAfter: args.cursor } : {}) })];
           return { items: entries.map(([, item]) => item), next_cursor: entries.length === PAGE_SIZE ? entries.at(-1)[0] : null };
         }
+        if (args.op === 'begin-monitor') {
+          const version = crypto.randomUUID();
+          await tx.put('monitor', version);
+          return { version };
+        }
         if (args.op === 'record') {
           const prior = await tx.get('report');
+          // A slow reconciliation must not replace the result of a newer one,
+          // even when both started in the same millisecond or the DO restarted.
+          if (args.version && args.version !== await tx.get('monitor')) return { ...prior, brake: braked(prior), superseded: true };
           if (braked(prior) && !braked(args.report)) {
             // Commit the recovery scan with the report, then materialize bounded
             // pages. A restart must retain both its generation and its position.

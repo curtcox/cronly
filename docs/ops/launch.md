@@ -122,7 +122,10 @@ resumption. Registry reconciliation reads 100 accounts per page. A healthy repor
 atomically records a versioned recovery scan; each subsequent page commits account
 resume outboxes with its scan cursor. If staging, a resume request or acknowledgement
 fails, rerun reconciliation to finish the durable scan and queue after a restart.
-New brake cycles supersede older acknowledgements. Analytics refusals
+New brake cycles supersede older acknowledgements. Each monitor
+starts a durable generation, and superseded results neither replace the current
+report nor start recovery or send alerts. This ordering survives a SafetyDO restart.
+Analytics refusals
 publish the job's cost-brake pause to the account runtime without recurring settings
 writes. Do not defeat the brake to get a green launch check.
 
