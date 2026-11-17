@@ -6,7 +6,9 @@ export function configDiff(current, desired) {
   assert(desired && typeof desired === 'object' && !Array.isArray(desired), 'invalid_config', 'Expected a config object');
   const changes = [];
   for (const kind of COLLECTIONS) {
-    const collection = desired[kind] ?? current[kind];
+    // Omitted collections are preserved, so they cannot contribute mutations.
+    if (desired[kind] == null) continue;
+    const collection = desired[kind];
     assert(collection && typeof collection === 'object' && !Array.isArray(collection), 'invalid_config', `Expected ${kind} object`);
     for (const name of Object.keys(current[kind])) if (!Object.hasOwn(collection, name)) changes.push({ kind, name, delete: true });
     for (const [name, value] of Object.entries(collection)) {

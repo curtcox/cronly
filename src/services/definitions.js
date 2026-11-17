@@ -31,7 +31,8 @@ export function normalize(kind, value) {
     const hostTemplate = value.url.split('/').slice(0, 3).join('/');
     assert(!references(hostTemplate).some(r => ['secret', 'input'].includes(r.type)), 'invalid_url', 'Secrets and webhook input cannot choose a destination host');
     assert(value.headers === undefined || (value.headers && typeof value.headers === 'object' && !Array.isArray(value.headers) && Object.entries(value.headers).every(([k, v]) => /^[a-zA-Z0-9-]+$/.test(k) && !['host', 'connection', 'upgrade', 'content-length', 'transfer-encoding'].includes(k.toLowerCase()) && typeof v === 'string' && !/[\r\n]/.test(v))), 'invalid_headers', 'Invalid headers');
-    assert(value.body === undefined || (typeof value.body === 'string' && value.body.length <= 32768 && !['GET', 'HEAD'].includes(method)), 'invalid_body', 'Invalid HTTP body');
+    // Saved GET/HEAD actions include an empty body; exports must remain valid input.
+    assert(value.body === undefined || (typeof value.body === 'string' && value.body.length <= 32768 && (value.body.length === 0 || !['GET', 'HEAD'].includes(method))), 'invalid_body', 'Invalid HTTP body');
     const success = value.success_status || [[200, 299]];
     assert(Array.isArray(success) && success.length > 0 && success.length <= 10 && success.every(r => Array.isArray(r) && r.length === 2 && r.every(Number.isInteger) && r[0] >= 100 && r[1] <= 599 && r[0] <= r[1]), 'invalid_success_rule', 'Expected status ranges');
     return { type: 'http', method, url: value.url, headers: value.headers || {}, body: value.body || '', timeout_seconds: timeout, follow_redirects: value.follow_redirects === true, success_status: success };

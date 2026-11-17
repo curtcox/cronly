@@ -113,3 +113,27 @@ it('separates import billing from named-definition idempotency keys', async () =
   expect((await account('account')).balance_microdollars).toBe(99800);
   expect((await account('list', { prefix: 'ledger:' })).items.filter(row => row.kind === 'change')).toHaveLength(2);
 });
+
+it('round-trips exported HTTP actions and keeps omitted collections unchanged', async () => {
+  const { api, account } = await setup();
+  await account('mutate', { account: 'a', id: 'setup', operations: [
+    { kind: 'actions', name: 'get', value: { url: 'https://example.com' } },
+    { kind: 'actions', name: 'head', value: { url: 'https://example.com', method: 'HEAD' } },
+    { kind: 'jobs', name: 'j', value: { action: 'get', cron: null } }
+  ] });
+  const exported = await account('config');
+  const unchanged = await api(exported, 'round-trip');
+  expect(unchanged).toMatchObject({ status: 200, changes: [], cost_microdollars: 0 });
+  expect(await api({ variables: { greeting: 'hello' } }, 'partial')).toMatchObject({ status: 200, cost_microdollars: 100, changes: [{ kind: 'variables', name: 'greeting', operation: 'put' }] });
+  const updated = await account('config');
+  expect(updated.actions).toEqual(exported.actions); expect(updated.jobs).toEqual(exported.jobs);
+  expect(updated.variables).toEqual({ greeting: 'hello' });
+});
+
+it('rejects nonempty GET/HEAD request bodies during config validation before charging', async () => {
+  const { api, account } = await setup();
+  for (const method of ['GET', 'HEAD']) {
+    expect(await api({ actions: { ping: { url: 'https://example.com', method, body: 'not empty' } } }, method)).toMatchObject({ status: 400, code: 'invalid_body' });
+  }
+  expect((await account('account')).balance_microdollars).toBe(100000);
+});

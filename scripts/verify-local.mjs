@@ -16,6 +16,31 @@ await inputApi('/api/dev/deposit', 'POST', { amount_microdollars: 1000 }, 'fund'
 await inputApi('/api/actions/needs-input', 'PUT', { url: 'https://example.com/{{input.event}}' });
 await inputApi('/api/jobs/needs-input', 'PUT', { action: 'needs-input', cron: '* * * * *', budget: { day: 0 } });
 const inputAt = (await inputApi('/api/account')).job_runtime['needs-input'].next_fire;
+// Real SQLite must replay intent receipts rather than recomputing mutations
+// against definitions edited after the original request committed.
+const importApi = localClient(`imports-${crypto.randomUUID()}`);
+await importApi('/api/dev/deposit', 'POST', { amount_microdollars: 5000 }, 'fund');
+const document = { variables: { greeting: 'hello' }, actions: { ping: { url: 'https://example.com' } }, jobs: { j: { action: 'ping', cron: null } } };
+const imported = await importApi('/api/config', 'PUT', document, 'import');
+assert.equal(imported.cost_microdollars, 3 * PRICES.change);
+await importApi('/api/variables/greeting', 'PUT', { value: 'edited' }, 'edit');
+assert.deepEqual(await importApi('/api/config', 'PUT', document, 'import'), imported);
+assert.equal((await importApi('/api/config')).config.variables.greeting, 'edited');
+const exported = await importApi('/api/config');
+assert.equal((await importApi('/api/config', 'PUT', exported, 'round-trip')).cost_microdollars, 0);
+const noop = { variables: { greeting: 'edited' } };
+const empty = await importApi('/api/config', 'PUT', noop, 'noop');
+assert.equal(empty.cost_microdollars, 0);
+await importApi('/api/variables/extra', 'PUT', { value: 'later' }, 'extra');
+assert.deepEqual(await importApi('/api/config', 'PUT', noop, 'noop'), empty);
+assert.equal((await importApi('/api/config')).config.variables.extra, 'later');
+const paused = await importApi('/api/jobs/j/pause', 'POST', {}, 'pause');
+await importApi('/api/jobs/j', 'PUT', { action: 'ping', cron: null, enabled: true, budget: { day: 500 } }, 'edit-job');
+assert.deepEqual(await importApi('/api/jobs/j/pause', 'POST', {}, 'pause'), paused);
+assert.equal((await importApi('/api/jobs/j')).value.enabled, true);
+const preview = await importApi('/api/jobs/j/resume?dry_run=1', 'POST', {}, 'pause');
+assert.equal(preview.cost_microdollars, 0); assert.equal(preview.quote_microdollars, PRICES.change);
+assert.equal((await importApi('/api/jobs/j/resume', 'POST', {}, 'pause', 409)).code, 'idempotency_conflict');
 await api('/api/dev/deposit', 'POST', { amount_microdollars: 5000000 }, 'fund');
 const before = await api('/api/account');
 await api('/api/variables/token?dry_run=1', 'PUT', { value: 'test' });
@@ -194,4 +219,4 @@ assert.deepEqual((await inputApi('/api/runs?job=needs-input')).items, inputPause
 await inputApi('/api/actions/needs-input', 'PUT', { url: 'https://example.com/corrected' });
 await inputApi('/api/jobs/needs-input', 'PUT', { action: 'needs-input', cron: null, budget: { day: 0 } });
 assert.equal((await inputApi('/api/account')).job_runtime['needs-input'].paused, null);
-console.log('Local acceptance passed: deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, one settled activation across three jobs sharing an action version, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries, one log for repeated budget refusals, preserved outcomes after configuration sync, durable deposit resumption without clearing a budget pause, a real scheduled alarm with one charge, next-fire publication and final disable, and one unpaid missing-input schedule pause that survives a deposit and resumes after correction. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
+console.log('Local acceptance passed: transactional config/no-op and pause/resume receipt replay after later edits, dry-run quotes and conflicting intent rejection, deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, one settled activation across three jobs sharing an action version, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries, one log for repeated budget refusals, preserved outcomes after configuration sync, durable deposit resumption without clearing a budget pause, a real scheduled alarm with one charge, next-fire publication and final disable, and one unpaid missing-input schedule pause that survives a deposit and resumes after correction. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
