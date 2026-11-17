@@ -55,11 +55,9 @@ export async function mutate(tx, args, env) {
     if (kind === 'jobs') await tx.put(`job-index:${name}`, { name, account: args.account, updated_at: Date.now() });
     if (operation.delete) await tx.delete(`def:${kind}:${name}`);
     else await tx.put(`def:${kind}:${name}`, config[kind][name]);
-    // Job metadata is recalculated after action edits too.
+    // Only explicit job edits change scheduling state. Reservations load the
+    // current action, and public reads derive its quote without rewriting jobs.
     if (kind === 'jobs') await tx.put(`sync:${name}`, { name, account: args.account, version: crypto.randomUUID() });
-  }
-  if (args.operations.some(op => op.kind === 'actions')) for (const [name, job] of Object.entries(config.jobs)) {
-    await tx.put(`def:jobs:${name}`, job); await tx.put(`sync:${name}`, { name, account: args.account, version: crypto.randomUUID() });
   }
   await tx.put(`audit:${Date.now()}:${args.id}`, { id: args.id, changes, created_at: Date.now(), key_id: args.key_id || null });
   const result = { changes, quote_microdollars: quote, cost_microdollars: quote, balance_microdollars: balance_microdollars - quote };

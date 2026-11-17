@@ -221,6 +221,13 @@ five-invocation and 3,000-read allowances. The rounded HTTP cost falls from 53 t
 keep their original maximum; persisted job quotes use the current price. Further
 S4 reductions and live/owner launch acceptance remain open.
 
+Action changes no longer fan out into writes and scheduling synchronization for
+every job in the account. Quotes and reservations resolve the current action
+without persisting derived price changes on each job. A single action create,
+edit or deletion stays within the existing change allowance even with 100 jobs;
+only explicitly edited/deleted jobs need durable scheduling outboxes. Existing
+execution holds and job pauses retain their original state.
+
 ## Verified provider sources
 
 - [Workers](https://developers.cloudflare.com/workers/platform/pricing/)
