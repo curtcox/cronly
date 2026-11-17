@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { it, expect } from 'vitest';
 
 const configuration = {
-  CLOUDFLARE_API_TOKEN: 'fake-cloudflare-token', CLOUDFLARE_ACCOUNT_ID: 'fake-account',
+  CLOUDFLARE_API_TOKEN: 'fake-cloudflare-token', CLOUDFLARE_ACCOUNT_ID: 'fake-account', CLOUDFLARE_ANALYTICS_TOKEN: 'fake-analytics-token',
   CLERK_SECRET_KEY: 'fake-clerk-key', CLERK_PUBLISHABLE_KEY: 'fake-clerk-public', CLERK_WEBHOOK_SECRET: 'fake-clerk-webhook',
   STRIPE_SECRET_KEY: 'rk_live_fake', STRIPE_WEBHOOK_SECRET: 'fake-stripe-webhook',
   TOKEN_SIGNING_KEY: 'test-signing-key-with-at-least-32-bytes', SECRETS_MASTER_KEY: 'test-master-key-with-at-least-32-bytes', ANTHROPIC_API_KEY: 'fake-anthropic-key',
@@ -12,6 +12,14 @@ const check = overrides => spawnSync(process.execPath, ['scripts/check-deploymen
 
 it('accepts a complete deployment with a dedicated credit and card-cost catalog', () => {
   expect(check({}).status).toBe(0);
+});
+
+it('requires the independent analytics token before deploying a service that would remain braked', () => {
+  const result = check({ CLOUDFLARE_ANALYTICS_TOKEN: '' });
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('CLOUDFLARE_ANALYTICS_TOKEN');
+  expect(result.stderr).not.toContain(configuration.CLOUDFLARE_API_TOKEN);
+  expect(result.stderr).not.toContain(configuration.STRIPE_SECRET_KEY);
 });
 
 it('blocks deployment with missing or malformed catalog IDs without disclosing their values', () => {

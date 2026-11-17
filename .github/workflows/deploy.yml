@@ -3,9 +3,12 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+concurrency:
+  group: cronly-production
+  cancel-in-progress: false
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || vars.CRONLY_DEPLOY_ENABLED == 'true'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.CRONLY_DEPLOY_ENABLED == 'true')
     runs-on: ubuntu-24.04
     environment: production
     env:

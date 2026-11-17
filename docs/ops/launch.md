@@ -42,6 +42,11 @@ and Cloudflare account, with a separate Clerk application and Stripe product, as
 6. Run the manual Deploy production workflow. Automatic main deployments are opt-in via
    repository variable CRONLY_DEPLOY_ENABLED=true after initial setup. CI verifies lint,
    unit/cost-floor/drift tests, browser flows and the Worker build before deploy.
+   Only main can deploy, including manual dispatches. Production workflows run one
+   at a time without cancelling an active deployment, keeping code, secret uploads
+   and verification together. Preflight requires the independent analytics token;
+   namespace IDs can remain unset for the first deploy, which stays braked until
+   step 7 is complete.
 7. Record the three actual cronly namespace IDs in GitHub repository variable
    CRONLY_DO_NAMESPACES, comma-separated (deployed as COST_SAFETY_DO_NAMESPACES). Do not include hashbin namespaces.
    Use the local scheduled endpoint or Cloudflare's dashboard to invoke the first daily
