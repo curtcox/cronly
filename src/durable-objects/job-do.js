@@ -48,8 +48,15 @@ export class JobDO {
         if (args.dry_run) { const config = await rpc(this.env.ACCOUNTS, settings.account, 'config'); return { quote_microdollars: price('hook', config.actions[settings.job.action]), cost_microdollars: 0 }; }
         let bucket = await this.storage.get(`trigger-rate:${args.token_id}`); const now = Date.now();
         if (!bucket || bucket.reset <= now) bucket = { count: 0, reset: now + 60000 };
-        assert(bucket.count < trigger.rate, 'rate_limited', 'Trigger rate exceeded', 429);
-        bucket.count++; await this.storage.put(`trigger-rate:${args.token_id}`, bucket);
+        const operation = await digest(args.id);
+        // A lost reservation reply or pending write must remain recoverable at
+        // the token limit. Remember at most the configured 60 distinct attempts
+        // in this same bounded row; known retries need no additional rate write.
+        if (!bucket.ids?.includes(operation)) {
+          assert(bucket.count < trigger.rate, 'rate_limited', 'Trigger rate exceeded', 429);
+          bucket = { ...bucket, count: bucket.count + 1, ids: [...(bucket.ids || []), operation] };
+          await this.storage.put(`trigger-rate:${args.token_id}`, bucket);
+        }
         return this.start({ ...args, trigger: 'webhook', scheduled_at: new Date().toISOString() });
       }
       case 'status': return await this.storage.get('settings') || {};

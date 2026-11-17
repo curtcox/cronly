@@ -261,6 +261,9 @@ spend at most $0.50/day. Port hashbin's `src/auth/scopes.js` and key storage.
 Trigger tokens are stateless: `tk_` + base64url(account, job, token id) + HMAC. Revocation is
 a token-id check in the JobDO. Each has its own rate limit (default 10/min) and counts against
 the job budget, so one embedded in a public web page can at worst spend the job's budget.
+Webhook retries with the same `Idempotency-Key` reuse one rate-limit attempt, including
+recovery after a lost reservation response or failed queue dispatch. New operation IDs
+consume the token's limit; revocation is checked before every replay.
 
 ### 4.2 Conventions every endpoint follows
 

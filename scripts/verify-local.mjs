@@ -72,6 +72,17 @@ assert.equal(triggerPreview.quote_microdollars, PRICES.change); assert.equal(tri
 assert.deepEqual((await credentialsApi('/api/jobs/j/triggers')).items, [{ id: trigger.id, rate_per_minute: 23, revoked: true }]);
 assert.equal((await credentialsApi(`/hook/${trigger.token}`, 'POST', {}, undefined, 401)).code, 'invalid_trigger');
 assert.equal((await credentialsApi('/api/account')).balance_microdollars, 3000 - 7 * PRICES.change);
+// A one-attempt token must still recover its own queued/completed operation.
+// Replay immediately, then check again after the other Queue work has drained.
+const hookApi = localClient(`hook-${crypto.randomUUID()}`);
+await hookApi('/api/dev/deposit', 'POST', { amount_microdollars: 1000 }, 'fund');
+await hookApi('/api/actions/ping', 'PUT', { url: 'https://example.com' });
+await hookApi('/api/jobs/j', 'PUT', { action: 'ping', cron: null });
+const limitedTrigger = await hookApi('/api/jobs/j/triggers', 'POST', { rate_per_minute: 1 });
+const hookPath = `/hook/${limitedTrigger.token}`;
+assert.equal((await hookApi(hookPath, 'POST', {}, 'original')).run.trigger, 'webhook');
+assert.equal((await hookApi(hookPath, 'POST', {}, 'original')).duplicate, true);
+assert.equal((await hookApi(hookPath, 'POST', {}, 'different', 429)).code, 'rate_limited');
 await api('/api/dev/deposit', 'POST', { amount_microdollars: 5000000 }, 'fund');
 const before = await api('/api/account');
 await api('/api/variables/token?dry_run=1', 'PUT', { value: 'test' });
@@ -142,6 +153,14 @@ const spent = -transactions.filter(row => row.kind !== 'deposit').reduce((sum, r
 assert.equal(account.balance_microdollars, transactions.reduce((sum, row) => sum + row.amount_microdollars, 0));
 assert.equal(transactions.filter(row => row.kind === 'run').length, 9);
 assert.equal((await api('/api/costs')).total_microdollars, spent);
+assert.equal((await hookApi(hookPath, 'POST', {}, 'original')).duplicate, true);
+const hookRuns = (await hookApi('/api/runs?job=j')).items;
+assert.equal(hookRuns.length, 1); assert.equal(hookRuns[0].status, 'success');
+assert.equal(hookRuns[0].cost_microdollars, price('hook'));
+const hookAccount = await hookApi('/api/account');
+assert.equal(hookAccount.held_microdollars, 0);
+assert.equal(hookAccount.balance_microdollars, 1000 - 3 * PRICES.change - price('hook'));
+assert.equal((await hookApi('/api/transactions')).items.filter(row => row.kind === 'run').length, 1);
 for (const group of ['job', 'action']) {
   const costs = await api(`/api/costs?group=${group}`);
   assert.equal(costs.total_microdollars, spent);
@@ -250,4 +269,4 @@ assert.deepEqual((await inputApi('/api/runs?job=needs-input')).items, inputPause
 await inputApi('/api/actions/needs-input', 'PUT', { url: 'https://example.com/corrected' });
 await inputApi('/api/jobs/needs-input', 'PUT', { action: 'needs-input', cron: null, budget: { day: 0 } });
 assert.equal((await inputApi('/api/account')).job_runtime['needs-input'].paused, null);
-console.log('Local acceptance passed: API-key and trigger receipt replay with original charges, preserved revocation/rates, private metadata and current dry-run quotes; transactional config/no-op and pause/resume receipt replay after later edits, dry-run quotes and conflicting intent rejection, deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, one settled activation across three jobs sharing an action version, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries, one log for repeated budget refusals, preserved outcomes after configuration sync, durable deposit resumption without clearing a budget pause, a real scheduled alarm with one charge, next-fire publication and final disable, and one unpaid missing-input schedule pause that survives a deposit and resumes after correction. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
+console.log('Local acceptance passed: webhook replay at a one-attempt token limit with one execution/charge; API-key and trigger receipt replay with original charges, preserved revocation/rates, private metadata and current dry-run quotes; transactional config/no-op and pause/resume receipt replay after later edits, dry-run quotes and conflicting intent rejection, deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, one settled activation across three jobs sharing an action version, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries, one log for repeated budget refusals, preserved outcomes after configuration sync, durable deposit resumption without clearing a budget pause, a real scheduled alarm with one charge, next-fire publication and final disable, and one unpaid missing-input schedule pause that survives a deposit and resumes after correction. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
