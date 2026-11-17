@@ -313,3 +313,46 @@ for (const failed of [false, true]) test(`ignores a ${failed ? 'failed' : 'succe
   await expect(page.locator('#notice')).not.toBeVisible();
   await expect(page.getByRole('button', { name: 'Older transactions' })).toBeEnabled();
 });
+
+test('filters historical costs by inclusive UTC dates and displays applied totals', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const queries = [];
+  await page.route('**/api/costs*', async route => {
+    const query = Object.fromEntries(new URL(route.request().url()).searchParams);
+    queries.push(query);
+    if (query.from > query.to) return route.fulfill({ status: 400, json: { error: 'Choose a valid UTC range', code: 'invalid_window' } });
+    const from = query.from || '2026-10-18'; const to = query.to || '2026-11-17';
+    const items = query.group === 'day' ? [{ name: '2026-11-17', cost_microdollars: 100 }] : query.group === 'job' ? [] : [{ name: '<img src=x onerror="window.pwned=true">', cost_microdollars: 450 }];
+    await route.fulfill({ json: { group: query.group, from, to, items, total_microdollars: items.reduce((sum, item) => sum + item.cost_microdollars, 0) } });
+  });
+  await page.getByRole('link', { name: 'Costs', exact: true }).click();
+  const from = page.getByLabel('From / UTC', { exact: true });
+  const to = page.getByLabel('To / UTC', { exact: true });
+  await expect(from).toHaveValue('2026-10-18'); await expect(to).toHaveValue('2026-11-17');
+  await expect(page.locator('#costs-results')).toContainText('2026-10-18 through 2026-11-17');
+  await expect(page.locator('#costs-results')).toContainText('Total $0.0001');
+  await from.fill('2026-01-01'); await to.fill('2026-06-30');
+  await page.getByRole('combobox', { name: 'Group', exact: true }).selectOption('action');
+  await page.getByRole('button', { name: 'Show spend', exact: true }).click();
+  await expect(page.locator('#costs-results')).toContainText('2026-01-01 through 2026-06-30, including both UTC days. Total $0.00045.');
+  await expect(page.locator('#costs-results')).toContainText('<img src=x onerror="window.pwned=true">');
+  expect(await page.evaluate(() => window.pwned)).toBeUndefined();
+  await from.fill('2026-07-01');
+  await page.getByRole('button', { name: 'Show spend', exact: true }).click();
+  await expect(page.locator('#notice')).toContainText('Choose a valid UTC range');
+  await expect(page.locator('#costs-results')).toContainText('2026-01-01 through 2026-06-30');
+  await expect(page.getByRole('button', { name: 'Show spend', exact: true })).toBeEnabled();
+  await from.fill('2026-01-01');
+  await page.getByRole('combobox', { name: 'Group', exact: true }).selectOption('job');
+  await page.getByRole('button', { name: 'Show spend', exact: true }).click();
+  await expect(page.locator('#costs-results')).toContainText('No spend in this date range.');
+  await expect(page.locator('#costs-results')).toContainText('Total $0.00');
+  await expect(page.locator('#notice')).not.toBeVisible();
+  expect(queries).toEqual([
+    { group: 'day' },
+    { group: 'action', from: '2026-01-01', to: '2026-06-30' },
+    { group: 'action', from: '2026-07-01', to: '2026-06-30' },
+    { group: 'job', from: '2026-01-01', to: '2026-06-30' }
+  ]);
+});

@@ -143,9 +143,21 @@ async function runsPage(query = '') {
 async function costsPage() {
   const result = await api('/api/costs?group=day');
   if (currentPage() !== 'costs') return;
-  content.innerHTML = `<h1 class="app-title">Costs</h1><p class="muted">Integer micro-dollars. Forecasts use maximum configured prices.</p><div class="cards"><div class="card"><p>Daily burn</p><div class="metric">${e(usd(forecast.daily_microdollars))}</div></div><div class="card"><p>Next 30 days</p><div class="metric">${e(usd(forecast.monthly_microdollars))}</div></div><div class="card"><p>Available credit</p><div class="metric">${e(usd(account.balance_microdollars - account.held_microdollars))}</div></div></div><div class="grid"><section class="panel"><h2>Past spend</h2><form id="costs-filter" class="inline"><label>Group<select name="group"><option>day</option><option>job</option><option>action</option></select></label><button>Group</button></form><div id="costs-results">${costTable(result)}</div></section><section class="panel"><h2>Projection by job</h2>${table(['Job', 'Runs / 30 days', 'Daily max', '30-day max'], forecast.jobs.map(j => `<tr><td>${e(j.job)}</td><td>${e(j.runs_30_days)}</td><td>${e(usd(j.daily_microdollars))}</td><td>${e(usd(j.monthly_microdollars))}</td></tr>`))}<p class="note">${e(forecast.estimate)}</p></section></div>`;
+  content.innerHTML = `<h1 class="app-title">Costs</h1><p class="muted">Integer micro-dollars. Forecasts use maximum configured prices.</p><div class="cards"><div class="card"><p>Daily burn</p><div class="metric">${e(usd(forecast.daily_microdollars))}</div></div><div class="card"><p>Next 30 days</p><div class="metric">${e(usd(forecast.monthly_microdollars))}</div></div><div class="card"><p>Available credit</p><div class="metric">${e(usd(account.balance_microdollars - account.held_microdollars))}</div></div></div><div class="grid"><section class="panel"><h2>Past spend</h2><form id="costs-filter" class="inline"><label>Group<select name="group"><option>day</option><option>job</option><option>action</option></select></label><label>From / UTC<input name="from" type="date" value="${e(result.from)}" required></label><label>To / UTC<input name="to" type="date" value="${e(result.to)}" required></label><button>Show spend</button></form><div id="costs-results">${costTable(result)}</div></section><section class="panel"><h2>Projection by job</h2>${table(['Job', 'Runs / 30 days', 'Daily max', '30-day max'], forecast.jobs.map(j => `<tr><td>${e(j.job)}</td><td>${e(j.runs_30_days)}</td><td>${e(usd(j.daily_microdollars))}</td><td>${e(usd(j.monthly_microdollars))}</td></tr>`))}<p class="note">${e(forecast.estimate)}</p></section></div>`;
 }
-function costTable(result) { return table([result.group, 'Spend'], result.items.map(i => `<tr><td>${e(i.name)}</td><td>${e(usd(i.cost_microdollars))}</td></tr>`)) + (result.truncated ? '<p class="note">Only the most recent 1,000 ledger entries are included.</p>' : ''); }
+function costTable(result) {
+  return `<p class="note">${e(result.from)} through ${e(result.to)}, including both UTC days. Total ${e(usd(result.total_microdollars))}.</p>${result.items.length ? table([result.group, 'Spend'], result.items.map(i => `<tr><td>${e(i.name)}</td><td>${e(usd(i.cost_microdollars))}</td></tr>`)) : empty('No spend in this date range.')}`;
+}
+async function filterCosts(form, data) {
+  const results = $('#costs-results'); const button = form.querySelector('button');
+  if (button.disabled) return;
+  button.disabled = true; clearNotice();
+  try {
+    const result = await api(`/api/costs?${new URLSearchParams(data)}`);
+    if (results.isConnected) results.innerHTML = costTable(result);
+  } catch (error) { if (results.isConnected) throw error; }
+  finally { button.disabled = false; }
+}
 async function askPage() {
   content.innerHTML = `<h1 class="app-title">Ask cronly</h1><p class="muted">Questions are read-only. Changes become a proposal for a separate, billed application.</p><section class="panel"><form id="ask-form"><label>What would you like to do?<textarea name="text" rows="5" required maxlength="4096" placeholder="What runs tonight? Or: move the report to 7am weekdays."></textarea></label><label>Mode<select name="mode"><option value="ask">Ask about this account</option><option value="change">Propose changes</option><option value="to-cron">Translate prose to cron</option></select></label><label>Time zone<input name="timezone" value="UTC"></label><button>Review maximum price</button></form><div id="ask-result" aria-live="polite"></div></section>`;
 }
@@ -255,7 +267,7 @@ content.addEventListener('submit', async event => {
     }
     if (form.id === 'upcoming-filter') { const query = new URLSearchParams(); for (const [k, v] of data) if (v) query.set(k, new Date(v).toISOString()); const result = await api(`/api/upcoming?${query}`); $('#upcoming-results').innerHTML = `${upcomingTable(result.items)}<p>Window maximum ${e(usd(result.window_total_microdollars))} · Shown subtotal ${e(usd(result.subtotal_microdollars))}${result.truncated ? ' · Results truncated; narrow the window.' : ''}</p>`; }
     if (form.id === 'runs-filter') { const query = new URLSearchParams(); for (const [k, v] of data) if (v) query.set(k, k === 'from' ? `${v}T00:00:00.000Z` : k === 'to' ? `${v}T23:59:59.999Z` : v); await runsPage(`?${query}`); }
-    if (form.id === 'costs-filter') $('#costs-results').innerHTML = costTable(await api(`/api/costs?group=${fields.group}`));
+    if (form.id === 'costs-filter') await filterCosts(form, data);
     if (form.id === 'key-form') await reviewed('/api/keys', 'POST', { name: fields.name, scopes: data.getAll('scopes'), daily_spend_microdollars: fields.daily_spend_microdollars === '' ? null : Number(fields.daily_spend_microdollars) }, async result => { await render(); $('#new-key-result').innerHTML = `<p>Copy your key now:</p><pre>${e(result.token)}</pre>`; });
     if (form.id === 'config-form') await reviewed('/api/config', 'PUT', JSON.parse(fields.config));
     if (form.id === 'deposit-form') {
