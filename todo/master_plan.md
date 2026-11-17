@@ -346,7 +346,9 @@ conventions, including `escapeHtml`).
   (Log excerpts total at most 16 KB per run; see §7.)
 - **Costs:** past spend by day/job/action; projection by job.
 - **Ask:** one prose box for questions and change requests; change proposals render as a
-  diff with a price and an Apply button.
+  before/after diff from the reserved account snapshot, with the explanation, expiry, server
+  application quote and an Apply button. Show the prose charge separately; a delayed reply
+  must not replace a later Ask visit, and no-op proposals need no Apply button.
 - **Account:** deposits (Stripe Checkout), transaction history, API keys (scopes, spend caps),
   trigger tokens, data export.
 - Public pages: home, pricing (with our cost beside each price), docs, API, agents, terms,

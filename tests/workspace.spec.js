@@ -472,3 +472,133 @@ test('shows job pause reasons and settled UTC budget usage on mobile', async ({ 
   await expect(page.locator('.list')).not.toContainText('NaN');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test('reviews escaped proposal diffs and the server application quote before a separate paid apply', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const calls = [];
+  const unsafe = '<img src=x onerror="window.pwned=true">';
+  const proposal = {
+    id: 'prose:session:review', explanation: `Update greeting ${unsafe}`, expires_at: Date.now() + 86400000,
+    cost_microdollars: 450, quote_microdollars: 700,
+    operations: [{ kind: 'variables', name: 'greeting', value: { value: unsafe } }, { kind: 'variables', name: 'old', delete: true }],
+    diff: [
+      { kind: 'variables', name: 'greeting', operation: 'create', before: null, after: unsafe },
+      { kind: 'variables', name: 'old', operation: 'delete', before: 'previous value', after: null }
+    ]
+  };
+  await page.route('**/api/prose/change*', async route => {
+    const dry = new URL(route.request().url()).searchParams.has('dry_run');
+    calls.push({ type: 'prose', dry, body: route.request().postDataJSON() });
+    await route.fulfill({ json: dry ? { quote_microdollars: 12345 } : proposal });
+  });
+  await page.route('**/api/changes/*/apply*', async route => {
+    const request = route.request(); const dry = new URL(request.url()).searchParams.has('dry_run');
+    calls.push({ type: 'apply', dry, body: request.postDataJSON(), key: request.headers()['idempotency-key'] });
+    await route.fulfill({ json: { quote_microdollars: 700, cost_microdollars: dry ? 0 : 700, changes: [{ kind: 'variables', name: 'greeting', operation: 'put' }, { kind: 'variables', name: 'old', operation: 'delete' }] } });
+  });
+  await page.getByRole('link', { name: 'Ask', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Mode', exact: true }).selectOption('change');
+  await page.getByLabel('What would you like to do?').fill('Update my greeting');
+  await page.getByRole('button', { name: 'Review maximum price', exact: true }).click();
+  await expect(page.locator('#review-price')).toContainText('12,345 µ$');
+  expect(calls.filter(call => !call.dry)).toHaveLength(0);
+  await apply(page);
+  const result = page.locator('#ask-result');
+  await expect(result).toContainText(`Update greeting ${unsafe}`);
+  await expect(result.getByRole('heading', { name: 'Create variables/greeting' })).toBeVisible();
+  await expect(result.getByRole('heading', { name: 'Delete variables/old' })).toBeVisible();
+  await expect(result.locator('table').first().locator('td').nth(0)).toHaveText('Not present');
+  await expect(result.locator('table').first().locator('td').nth(1)).toHaveText(JSON.stringify(unsafe));
+  await expect(result.locator('table').last().locator('td').nth(0)).toHaveText('"previous value"');
+  await expect(result.locator('table').last().locator('td').nth(1)).toHaveText('Not present');
+  await expect(result).toContainText('Prose charged $0.00045. Application is a separate charge of $0.0007.');
+  await expect(result).toContainText('Any account configuration change requires a new proposal.');
+  expect(await page.evaluate(() => window.pwned)).toBeUndefined();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(calls.filter(call => call.type === 'apply')).toHaveLength(0);
+  await page.getByRole('button', { name: 'Review application · $0.0007', exact: true }).click();
+  await expect(page.locator('#review-price')).toContainText('700 µ$');
+  await page.locator('#review-cancel').click();
+  await expect(result).toContainText('Proposed changes');
+  expect(calls.filter(call => call.type === 'apply' && !call.dry)).toHaveLength(0);
+  await page.getByRole('button', { name: 'Review application · $0.0007', exact: true }).click();
+  await apply(page);
+  await expect(page.locator('#notice')).toContainText('Applied. Charged $0.0007.');
+  const applications = calls.filter(call => call.type === 'apply');
+  expect(applications).toHaveLength(3);
+  expect(applications.map(call => call.dry)).toEqual([true, true, false]);
+  expect(applications.every(call => call.body.quote_microdollars === 700)).toBe(true);
+  expect(applications[2].key).toBeTruthy();
+});
+
+test('shows a no-op proposal without an application button and preserves stale proposals on refusal', async ({ page }) => {
+  await login(page);
+  let empty = true;
+  await page.route('**/api/prose/change*', async route => {
+    const dry = new URL(route.request().url()).searchParams.has('dry_run');
+    await route.fulfill({ json: dry ? { quote_microdollars: 1000 } : {
+      id: 'proposal', explanation: empty ? 'Nothing needs changing.' : 'Set greeting.', cost_microdollars: 500,
+      quote_microdollars: empty ? 0 : 100,
+      operations: empty ? [] : [{ kind: 'variables', name: 'greeting', value: { value: 'hello' } }],
+      diff: empty ? [] : [{ kind: 'variables', name: 'greeting', operation: 'create', before: null, after: 'hello' }]
+    } });
+  });
+  const applications = [];
+  await page.route('**/api/changes/proposal/apply*', async route => {
+    applications.push(new URL(route.request().url()).searchParams.get('dry_run'));
+    await route.fulfill({ status: 409, json: { error: 'Account changed; request a new proposal', code: 'stale_proposal' } });
+  });
+  await page.getByRole('link', { name: 'Ask', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Mode', exact: true }).selectOption('change');
+  await page.getByLabel('What would you like to do?').fill('Set greeting');
+  await page.getByRole('button', { name: 'Review maximum price', exact: true }).click(); await apply(page);
+  await expect(page.locator('#ask-result')).toContainText('No changes proposed.');
+  await expect(page.locator('#apply-proposal')).toHaveCount(0);
+  empty = false;
+  await page.getByRole('button', { name: 'Review maximum price', exact: true }).click(); await apply(page);
+  await page.getByRole('button', { name: 'Review application · $0.0001', exact: true }).click();
+  await expect(page.locator('#notice')).toContainText('stale_proposal');
+  await expect(page.locator('#ask-result')).toContainText('Set greeting.');
+  await expect(page.locator('#review')).not.toBeVisible();
+  expect(applications).toEqual(['1']);
+});
+
+test('ignores prose previews and paid replies from an earlier Ask visit', async ({ page }) => {
+  await login(page);
+  let releasePreview; const previewReady = new Promise(resolve => { releasePreview = resolve; });
+  let releasePaid; const paidReady = new Promise(resolve => { releasePaid = resolve; });
+  let blockPreview = true;
+  await page.route('**/api/prose/ask*', async route => {
+    const dry = new URL(route.request().url()).searchParams.has('dry_run');
+    if (dry && blockPreview) await previewReady;
+    if (!dry) await paidReady;
+    await route.fulfill({ json: dry ? { quote_microdollars: 1000 } : { answer: 'Earlier answer', citations: [], cost_microdollars: 500 } });
+  });
+  const visitAsk = async text => {
+    await page.getByRole('link', { name: 'Ask', exact: true }).click();
+    await page.getByLabel('What would you like to do?').fill(text);
+  };
+  await visitAsk('First question');
+  const previewSent = page.waitForRequest('**/api/prose/ask?dry_run=1');
+  await page.getByRole('button', { name: 'Review maximum price', exact: true }).click(); await previewSent;
+  await page.getByRole('link', { name: 'Dashboard', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+  await visitAsk('Second question');
+  const previewDone = page.waitForResponse('**/api/prose/ask?dry_run=1');
+  releasePreview(); await previewDone;
+  await expect(page.locator('#review')).not.toBeVisible();
+  await expect(page.getByLabel('What would you like to do?')).toHaveValue('Second question');
+  blockPreview = false;
+  await page.getByRole('button', { name: 'Review maximum price', exact: true }).click();
+  const paidSent = page.waitForRequest(request => new URL(request.url()).pathname === '/api/prose/ask' && !new URL(request.url()).search);
+  await page.locator('#review-apply').click(); await paidSent;
+  await page.getByRole('link', { name: 'Dashboard', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+  await visitAsk('Third question');
+  releasePaid();
+  await expect(page.locator('body')).not.toHaveAttribute('data-applying', 'true');
+  await expect(page.locator('#ask-result')).toBeEmpty();
+  await expect(page.getByLabel('What would you like to do?')).toHaveValue('Third question');
+  await expect(page.locator('#notice')).not.toBeVisible();
+});

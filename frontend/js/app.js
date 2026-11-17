@@ -192,6 +192,24 @@ async function filterCosts(form, data) {
 async function askPage() {
   content.innerHTML = `<h1 class="app-title">Ask cronly</h1><p class="muted">Questions are read-only. Changes become a proposal for a separate, billed application.</p><section class="panel"><form id="ask-form"><label>What would you like to do?<textarea name="text" rows="5" required maxlength="4096" placeholder="What runs tonight? Or: move the report to 7am weekdays."></textarea></label><label>Mode<select name="mode"><option value="ask">Ask about this account</option><option value="change">Propose changes</option><option value="to-cron">Translate prose to cron</option></select></label><label>Time zone<input name="timezone" value="UTC"></label><button>Review maximum price</button></form><div id="ask-result" aria-live="polite"></div></section>`;
 }
+function proposalResult(result) {
+  const value = definition => definition === null ? '<p class="muted">Not present</p>' : `<pre>${json(definition)}</pre>`;
+  const changes = result.diff ? result.diff.map(change => `<section class="proposal-change"><h3>${e(change.operation[0].toUpperCase() + change.operation.slice(1))} ${e(change.kind)}/${e(change.name)}</h3>${table(['Before', 'After'], [`<tr><td>${value(change.before)}</td><td>${value(change.after)}</td></tr>`])}</section>`).join('') : `<pre>${json(result.operations)}</pre>`;
+  return `<h2>Proposed changes</h2><p>${e(result.explanation)}</p>${result.operations.length ? changes : empty('No changes proposed.')}<p class="note">Prose charged ${e(usd(result.cost_microdollars))}. Application is a separate charge of ${e(usd(result.quote_microdollars))}.</p>${result.expires_at ? `<p class="note">Expires ${e(date(result.expires_at))}. Any account configuration change requires a new proposal.</p>` : ''}${result.operations.length ? `<button id="apply-proposal" data-proposal="${e(JSON.stringify({ id: result.id, quote_microdollars: result.quote_microdollars }))}">Review application · ${e(usd(result.quote_microdollars))}</button>` : ''}`;
+}
+async function ask(form, fields) {
+  const target = $('#ask-result'); const button = form.querySelector('button');
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    await reviewed(`/api/prose/${fields.mode}`, 'POST', { text: fields.text, timezone: fields.timezone }, async result => {
+      // Paid responses can arrive after navigation, including another Ask visit.
+      if (target.isConnected) target.innerHTML = result.operations ? proposalResult(result) : `<h2>Response</h2><pre>${json(result.answer || result)}</pre><p class="note">Charged ${e(usd(result.cost_microdollars))}</p>`;
+      await refreshHeader();
+    }, () => form.isConnected);
+  } catch (error) { if (form.isConnected) throw error; }
+  finally { button.disabled = false; }
+}
 function transactionHistory(result, older = false) {
   return `${table(['When', 'Operation / reference', 'Amount'], result.items.map(t => `<tr><td>${e(date(t.created_at))}</td><td>${e(t.kind)}<br><span class="small mono">${e(t.id)}</span></td><td>${e(usd(t.amount_microdollars))}</td></tr>`))}${!result.items.length ? empty('No transactions on this page.') : ''}<div class="inline">${result.next_cursor ? `<button class="secondary" data-transactions-cursor="${e(result.next_cursor)}">Older transactions →</button>` : ''}${older ? '<button class="secondary" id="latest-transactions">Newest transactions</button>' : ''}</div>`;
 }
@@ -305,10 +323,7 @@ content.addEventListener('submit', async event => {
       if (deployment.local) await reviewed('/api/dev/deposit', 'POST', { amount_microdollars: Number(fields.amount) * 1000000 });
       else await reviewed('/api/payments/checkout', 'POST', { credit_cents: Number(fields.amount) * 100 }, result => { location.href = result.url; });
     }
-    if (form.id === 'ask-form') await reviewed(`/api/prose/${fields.mode}`, 'POST', { text: fields.text, timezone: fields.timezone }, async result => {
-      $('#ask-result').innerHTML = `<h2>${result.operations ? 'Proposed changes' : 'Response'}</h2><pre>${json(result.operations || result.answer || result)}</pre><p class="note">Charged ${e(usd(result.cost_microdollars))}</p>${result.operations?.length ? `<button id="apply-proposal" data-proposal="${e(JSON.stringify({ id: result.id, quote_microdollars: result.operations.length * deployment.prices.change }))}">Review application · ${e(usd(result.operations.length * deployment.prices.change))}</button>` : ''}`;
-      await refreshHeader();
-    });
+    if (form.id === 'ask-form') await ask(form, fields);
   } catch (error) { notify(error.message, true); }
 });
 $('#workspace-nav').addEventListener('click', event => { const link = event.target.closest('a'); if (link && link.hash !== location.hash) { content.innerHTML = '<p class="muted">Loading workspace…</p>'; content.setAttribute('aria-busy', 'true'); } });
