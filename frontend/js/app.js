@@ -108,7 +108,7 @@ async function runsPage(query = '') {
   runsQuery = query; const filters = new URLSearchParams(query);
   const result = await api(`/api/runs${query}`);
   if (currentPage() !== 'runs') return;
-  content.innerHTML = `<h1 class="app-title">Runs</h1><p class="muted">30 days or 1,000 runs per job, whichever is fewer. Every excerpt is displayed as text.</p><form id="runs-filter" class="inline"><label>Job<input name="job" placeholder="Any job" value="${e(filters.get('job') || '')}"></label><label>Outcome<select name="status"><option value="">Any outcome</option>${['success', 'failure', 'paused', 'expired', 'queued'].map(s => `<option>${s}</option>`).join('')}</select></label><label>From<input name="from" type="date"></label><label>To<input name="to" type="date"></label><button>Filter</button><button type="button" id="export-runs" class="secondary">Export NDJSON</button></form><section class="panel">${result.items.length ? table(['Job / time', 'Outcome', 'Charge'], runRows(result.items)) : empty('No matching runs.')}<p class="note">${result.summary ? e(result.note) : 'Full log page, at most 100 runs.'}</p>${result.next_before ? `<button class="secondary" data-runs-before="${e(result.next_before)}">Older runs →</button>` : ''}</section>`;
+  content.innerHTML = `<h1 class="app-title">Runs</h1><p class="muted">30 days or 1,000 runs per job, whichever is fewer. Every excerpt is displayed as text.</p><form id="runs-filter" class="inline"><label>Job<input name="job" placeholder="Any job" value="${e(filters.get('job') || '')}"></label><label>Outcome<select name="status"><option value="">Any outcome</option>${['success', 'failure', 'paused', 'expired', 'queued'].map(s => `<option ${filters.get('status') === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label><label>From<input name="from" type="date" value="${e(filters.get('from') || '')}"></label><label>To<input name="to" type="date" value="${e(filters.get('to') || '')}"></label><button>Filter</button><button type="button" id="export-runs" class="secondary">Export NDJSON</button></form><section class="panel">${result.items.length ? table(['Job / time', 'Outcome', 'Charge'], runRows(result.items)) : empty('No matching runs.')}<p class="note">${result.summary ? e(result.note) : 'Full log page, at most 100 runs.'}</p>${result.next_cursor ? `<button class="secondary" data-runs-cursor="${e(result.next_cursor)}">Older runs →</button>` : ''}</section>`;
 }
 async function costsPage() {
   const result = await api('/api/costs?group=day');
@@ -151,7 +151,7 @@ content.addEventListener('click', async event => {
   const button = event.target.closest('button'); if (!button) return;
   const page = location.hash.slice(1) || 'dashboard';
   try {
-    if (button.dataset.runsBefore) { const query = new URLSearchParams(runsQuery); query.set('before', button.dataset.runsBefore); await runsPage(`?${query}`); }
+    if (button.dataset.runsCursor) { const query = new URLSearchParams(runsQuery); query.delete('before'); query.set('cursor', button.dataset.runsCursor); await runsPage(`?${query}`); }
     if (button.dataset.edit) { editing = button.dataset.edit; await definitionsPage(page); }
     if (button.id === 'new-definition') { editing = null; await definitionsPage(page); }
     if (button.dataset.delete) await reviewed(`/api/${page}/${button.dataset.delete}`, 'DELETE');

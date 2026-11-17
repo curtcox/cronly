@@ -75,3 +75,37 @@ test('shows zero spend and reviews changes for a constructor-named job', async (
   await page.getByRole('button', { name: 'Resume', exact: true }).click(); await apply(page);
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
 });
+
+test('pages run history with the stable cursor and keeps the active filters visible', async ({ page }) => {
+  await login(page);
+  const time = Date.parse('2026-11-16T12:00:00Z'); const cursor = 'stable-position';
+  const runs = Array.from({ length: 102 }, (_, index) => ({ id: `retry-${String(101 - index).padStart(3, '0')}`, job: 'pinger', status: 'failure', created_at: time, cost_microdollars: PRICES.run }));
+  const queries = [];
+  await page.route(/\/api\/runs(?:\?.*)?$/, async route => {
+    const params = new URL(route.request().url()).searchParams;
+    if (!params.get('job')) return route.fulfill({ json: { items: [], summary: true, note: 'Filter by job to page complete retained logs.' } });
+    queries.push(Object.fromEntries(params));
+    const next = params.get('cursor') === cursor;
+    return route.fulfill({ json: { items: next ? runs.slice(100) : runs.slice(0, 100), summary: false, next_cursor: next ? null : cursor, next_before: next ? null : time } });
+  });
+  await page.getByRole('link', { name: 'Runs', exact: true }).click();
+  await page.getByLabel('Job', { exact: true }).fill('pinger');
+  await page.getByRole('combobox', { name: 'Outcome', exact: true }).selectOption('failure');
+  await page.getByLabel('From', { exact: true }).fill('2026-11-01');
+  await page.getByLabel('To', { exact: true }).fill('2026-11-16');
+  await page.getByRole('button', { name: 'Filter', exact: true }).click();
+  await expect(page.locator('[data-run-detail]')).toHaveCount(100);
+  await expect(page.getByRole('button', { name: 'Older runs' })).toHaveAttribute('data-runs-cursor', cursor);
+  await page.getByRole('button', { name: 'Older runs' }).click();
+  await expect(page.locator('[data-run-detail]')).toHaveCount(2);
+  await expect(page.locator('[data-run-detail]').first()).toHaveAttribute('data-run-detail', 'retry-001');
+  await expect(page.getByRole('button', { name: 'Older runs' })).toHaveCount(0);
+  await expect(page.getByLabel('Job', { exact: true })).toHaveValue('pinger');
+  await expect(page.getByRole('combobox', { name: 'Outcome', exact: true })).toHaveValue('failure');
+  await expect(page.getByLabel('From', { exact: true })).toHaveValue('2026-11-01');
+  await expect(page.getByLabel('To', { exact: true })).toHaveValue('2026-11-16');
+  expect(queries).toEqual([
+    { job: 'pinger', status: 'failure', from: '2026-11-01', to: '2026-11-16' },
+    { job: 'pinger', status: 'failure', from: '2026-11-01', to: '2026-11-16', cursor }
+  ]);
+});
