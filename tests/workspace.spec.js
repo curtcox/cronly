@@ -13,6 +13,15 @@ test('serves every public page at its linked URL without redirects', async ({ re
     expect(response.headers()['content-type'], path).toContain('text/html');
   }
 });
+test('allows the blob workers required by Clerk without relaxing script policy', async ({ page }) => {
+  await page.goto('/app.html');
+  expect(await page.evaluate(() => new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(new Blob(['postMessage("ready")'], { type: 'text/javascript' }));
+    const worker = new Worker(url);
+    const timer = setTimeout(() => { worker.terminate(); URL.revokeObjectURL(url); reject(new Error('Worker did not start')); }, 2000);
+    worker.onmessage = event => { clearTimeout(timer); worker.terminate(); URL.revokeObjectURL(url); resolve(event.data); };
+  }))).toBe('ready');
+});
 test('public site uses the logo and the workspace stays usable on mobile', async ({ page }) => {
   await page.goto('/'); await expect(page.getByRole('heading', { name: 'Small actions. Right on time.' })).toBeVisible();
   await expect(page.locator('header img')).toHaveAttribute('src', '/logo.jpeg');

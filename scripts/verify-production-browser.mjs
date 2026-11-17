@@ -10,6 +10,10 @@ await mkdir(output, { recursive: true });
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 page.setDefaultTimeout(30000);
+await page.addInitScript(() => {
+  window.cronlyCspViolations = [];
+  document.addEventListener('securitypolicyviolation', event => window.cronlyCspViolations.push(event.effectiveDirective));
+});
 let stage = 'home page';
 try {
   const home = await page.goto(origin.href, { waitUntil: 'domcontentloaded' });
@@ -25,6 +29,7 @@ try {
   // email nor submits credentials, creates an account or performs billed work.
   await page.locator('input[name="identifier"], input[autocomplete="email"]').first().waitFor({ state: 'visible' });
   await page.getByRole('button', { name: /google/i }).waitFor({ state: 'visible' });
+  assert.deepEqual(await page.evaluate(() => window.cronlyCspViolations), [], 'Sign-in resources were blocked by the content security policy.');
   await page.screenshot({ path: join(output, 'sign-in.png'), fullPage: true });
   console.log('Production browser verification passed: home, workspace and Clerk email/Google sign-in form. No sign-in or paid operation was performed.');
 } catch {

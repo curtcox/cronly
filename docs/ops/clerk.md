@@ -109,3 +109,16 @@ The server already verifies Clerk sessions with `authorizedParties` restricted t
 `APP_ORIGIN` (`https://cronly.org` in production). The webhook handler verifies
 Svix signatures before initializing an AccountDO. Creating this application and
 verifying its DNS do not complete these deployed-service acceptance checks.
+
+## Deployed sign-in surface — 2026-11-17
+
+The app is now deployed at https://cronly.org. Signed-out browser acceptance
+opens the live modal and verifies both the email field and Google option without
+submitting credentials. Actual owner sign-in and signed webhook delivery remain
+pending. Deployment screenshots are retained in the production workflow artifact.
+
+Live browser inspection found CSP blocking Clerk's blob workers. The site now
+sets `worker-src 'self' blob:` as required by [Clerk's CSP
+guide](https://clerk.com/docs/guides/secure/best-practices/csp-headers), and the
+browser release check rejects CSP violations while opening the sign-in form.
+The modal uses `fallbackRedirectUrl` in place of the deprecated `afterSignInUrl`.

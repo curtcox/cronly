@@ -219,6 +219,6 @@ async function boot() {
   await new Promise((resolve, reject) => { script.onload = resolve; script.onerror = reject; document.head.append(script); });
   await window.Clerk.load(); setAuth(window.Clerk);
   if (window.Clerk.user) await signedIn();
-  else { content.innerHTML = '<section class="signed-out panel"><h1 class="app-title">Welcome to cronly</h1><p>Sign in to manage your actions and schedules.</p><button id="clerk-login">Sign in</button><p class="note">Launch is invite-only.</p></section>'; $('#clerk-login').addEventListener('click', () => window.Clerk.openSignIn({ afterSignInUrl: '/app.html' })); window.Clerk.addListener(({ user }) => { if (user) signedIn(); }); }
+  else { content.innerHTML = '<section class="signed-out panel"><h1 class="app-title">Welcome to cronly</h1><p>Sign in to manage your actions and schedules.</p><button id="clerk-login">Sign in</button><p class="note">Launch is invite-only.</p></section>'; $('#clerk-login').addEventListener('click', () => window.Clerk.openSignIn({ fallbackRedirectUrl: '/app.html' })); window.Clerk.addListener(({ user }) => { if (user) signedIn(); }); }
 }
 boot().catch(error => notify(error.message, true));
