@@ -15,6 +15,7 @@ separate application from hashbin, as approved in STATUS D1.
 | Access mode | Invite-only, saved in development and cloned into production |
 | Google Cloud project | `cronly-515013` (display name `cronly`) |
 | Google Cloud project number | `173186686444` |
+| Production webhook | `ep_3MEtJpRdXFzpw97bEJqu8Ilr0aU` |
 
 [Production dashboard](https://dashboard.clerk.com/apps/app_3MEi0XGTZX7J6dgu6ezcHdRwyHA/instances/ins_3MEi8pmakrxmN0ExfJI0UhhAicJ).
 The owner explicitly selected Email and Google. The production Google connection
@@ -27,11 +28,10 @@ sign-in remain unverified.
 The owner approved Cloudflare's one-time Domain Connect authorization. All five
 CNAME records below were added as **DNS only**, with a one-hour TTL, and Clerk
 reported the Frontend API, account portal and all three email records **Verified**.
-Certificate issuance follows DNS verification and must be checked before live use.
-Both subdomains passed normal HTTPS certificate verification during setup; the
-Frontend API root returned 200 and the account portal root returned 403. Clerk's
-dashboard still showed certificate issuance in progress. Successful portal/sign-in
-acceptance has not been claimed.
+Clerk subsequently reported **SSL Certificates Issued** on 2026-11-17.
+Both subdomains passed normal HTTPS certificate verification again after webhook
+setup; the Frontend API root returned 200 and the account portal root returned
+403. Successful portal/sign-in acceptance has not been claimed.
 
 | Name under cronly.org | Target |
 |----------------------|--------|
@@ -46,6 +46,17 @@ With the owner's explicit approval, the production `CLERK_SECRET_KEY` and
 environment. Secret values were passed through stdin and the private temporary
 file was deleted. Keys are not checked into this repository. No hashbin
 credentials were reused. Deployments and launch approval remain disabled.
+
+With explicit owner approval, created the production webhook
+`ep_3MEtJpRdXFzpw97bEJqu8Ilr0aU` for
+`https://cronly.org/webhooks/clerk`, subscribing only to `user.created` and
+`user.updated`. Its description is `cronly production account synchronization`.
+The endpoint is persisted in Clerk's webhook list. Its independent signing secret
+was transferred privately through stdin into `CLERK_WEBHOOK_SECRET` in GitHub's
+`production` environment; the secret entry's name and update timestamp were
+verified and the private temporary file was deleted. No delivery attempts exist
+yet. The app Worker must be deployed before testing signed delivery and AccountDO
+initialization; webhook creation alone does not verify that integration.
 
 The owner requested a dedicated Google Cloud project and separately approved its
 link to the selected existing billing account. Project `cronly-515013` was created
@@ -86,14 +97,12 @@ The project is separate from hashbin.
    owner's test identity explicitly. Retain only the identity scopes Clerk requests
    (`openid`, email, profile); the dedicated client credentials are already saved
    only in Clerk's Google connection settings.
-2. Verify issued certificates and HTTPS on both Clerk subdomains.
-3. Register `https://cronly.org/webhooks/clerk` for `user.created` and `user.updated`.
-   Store its signing secret as `CLERK_WEBHOOK_SECRET` in GitHub's production
-   environment, then verify a signed delivery after deploying the app Worker.
-4. Invite the owner to the production application when ready to sign in. No
+2. Deploy the app Worker, then verify signed `user.created` / `user.updated`
+   delivery and AccountDO initialization using the registered production webhook.
+3. Invite the owner to the production application when ready to sign in. No
    application user or invitation has been created by this setup. Record the
    resulting Clerk user ID as `JS_ACCEPTANCE_ACCOUNT` for full service acceptance.
-5. Deploy the app with live credentials, run `npm run verify:production` and test
+4. Deploy the app with live credentials, run `npm run verify:production` and test
    both email and Google sign-in. Keep Invite-only access until launch approval.
 
 The server already verifies Clerk sessions with `authorizedParties` restricted to

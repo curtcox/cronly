@@ -16,8 +16,9 @@ and Cloudflare account, with a separate Clerk application and Stripe product, as
    https://cronly.org/webhooks/clerk. Do not enable public sign-up.
    The separate application, production instance, Invite-only mode, verified DNS
    records, GitHub live key storage and dedicated Google OAuth client/Clerk
-   connection were completed on 2026-11-17. Google publication/branding,
-   certificates, signed webhook and owner sign-in remain tracked in
+   connection were completed on 2026-11-17. Clerk certificates are issued, and
+   the production user webhook and its GitHub signing-secret storage are configured.
+   Google publication/branding, signed webhook delivery and owner sign-in remain tracked in
    [Clerk setup](clerk.md).
 3. Configure Stripe Checkout for USD cards and a separate cronly product. Point signed
    checkout.session.completed/async_payment_succeeded webhooks to /webhooks/stripe.
