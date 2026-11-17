@@ -67,8 +67,12 @@ preserves the conflict response. Expired reservations return `rotation_expired`;
 the account balance and metadata before starting with a new key. Uncertain holds expire
 at their reserved maximum under the standard ledger policy. Completed results, refunded
 failures and no-op results replay unchanged even after later edits or key activations.
-Dry runs always quote the current state. The script stops on uncertain network outcomes;
-rerunning checks current metadata before issuing new rotations.
+Dry runs always quote the current state. The script retries interrupted rotation
+writes and temporary server outages up to three attempts with the same idempotency
+key, waiting one then two seconds. It stops on definitive rotation failures and does
+not retry an interrupted billed config read. Error output omits transport details
+and response bodies. If recovery is exhausted, rerunning checks current metadata
+before issuing new rotations.
 
 ## Retire an old key
 

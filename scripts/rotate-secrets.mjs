@@ -7,10 +7,26 @@ export async function rotateAccountSecrets({ origin, token, apply = false, reque
   if (!token) throw new Error('CRONLY_API_KEY is required (read and secrets:write scopes)');
   async function api(path, method = 'GET', id) {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const response = await request(new URL(path, url), { method, redirect: 'error', signal: AbortSignal.timeout(30000), headers: { Authorization: `ApiKey ${token}`, ...(id ? { 'Idempotency-Key': id } : {}) } });
-      const data = await response.json();
+      let response; let data;
+      try {
+        response = await request(new URL(path, url), { method, redirect: 'error', signal: AbortSignal.timeout(30000), headers: { Authorization: `ApiKey ${token}`, ...(id ? { 'Idempotency-Key': id } : {}) } });
+        // Proxies may return a non-JSON outage page. Never print that page or a
+        // transport error, which can contain credentials and request details.
+        try { data = await response.json(); } catch (error) { if (response.ok) throw error; data = {}; }
+      } catch {
+        response = undefined;
+        if (!id || attempt === 2) throw new Error('Rotation request interrupted; check secret metadata before starting again');
+      }
+      // Only a held mutation has a replayable identity. Retrying a billed config
+      // read after a lost response would spend again without recovering its bill.
+      if (id && (!response || ([500, 502, 503, 504].includes(response.status) && (!data?.code || data.code === 'internal_error'))) && attempt < 2) {
+        log('Rotation request interrupted; retrying the same operation.');
+        await pause(1000 * (attempt + 1)); continue;
+      }
+      if (!response) throw new Error('Rotation request interrupted; check secret metadata before starting again');
+      data = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
       if (response.status === 429 && data.code === 'rate_limited' && attempt < 2) { log('Account request limit reached; waiting one minute before retrying.'); await pause(60000); continue; }
-      if (!response.ok) throw new Error(`Rotation request refused (${response.status}, ${data.code || 'unknown_error'})`);
+      if (!response.ok) throw new Error(`Rotation request refused (${response.status}, ${typeof data.code === 'string' && /^[a-z0-9_]{1,64}$/.test(data.code) ? data.code : 'unknown_error'})`);
       return data;
     }
   }

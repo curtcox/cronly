@@ -71,7 +71,7 @@ disagrees with it, this file wins and the other document is stale.
 
 | ID | Item | Owner | Status | Notes / reference |
 |----|------|-------|--------|-------------------|
-| S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ✅ | Atomic versioned keyring, legacy reads, held per-secret re-encryption, edit/delete conflict protection, audit, scoped CLI and CI wiring verified. Interrupted rotations resume their original hold through lost replies, failed receipt writes and restarts; concurrent retries settle once. Recovery conflicts refund without overwriting edits; permanent no-op receipts preserve their original result across later key activations. Persisted local Worker migrated v1 → v2 and executed a redacted JS run with v1 retired. [Operator procedure](docs/ops/secret-rotation.md). §3.3. |
+| S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ✅ | Atomic versioned keyring, legacy reads, held per-secret re-encryption, edit/delete conflict protection, audit, scoped CLI and CI wiring verified. Interrupted rotations resume their original hold through lost replies, failed receipt writes and restarts; concurrent retries settle once. Recovery conflicts refund without overwriting edits; permanent no-op receipts preserve their original result across later key activations. CLI retries transient write failures with the same identity, bounds attempts and omits private transport details. Persisted local Worker migrated v1 → v2 and executed a redacted JS run with v1 retired. [Operator procedure](docs/ops/secret-rotation.md). §3.3. |
 | S2 | Charge measured JS CPU instead of the configured limit | code | ⬜ | §3.4; needs per-invocation CPU data. |
 | S3 | Recalibrate prices from a month of real Cloudflare and Anthropic bills | ops/code | ⬜ | `docs/business/pricing.md`. |
 | S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budgets, active money summaries and ledger buffering reduce ordinary writes; unchanged alarms/runtime indexes and completion settings skip writes. Transactional reads/changes skip transient holds. Ledger pages retain legacy cursors and permanent receipts. Small durable reservations share the balance row; large/legacy snapshots stay standalone. Finalization reuses the durable staged log. Cooldowns/recent-job activity now share the reservation balance write, saving another ordinary compact-run write; evicted cooldowns remain standalone and larger legacy hold arrays migrate after draining. Repeated balance/budget refusals skip writes after one atomic pause/log/reset-wakeup transition; unchanged configuration replay skips settings writes. The 456-path audit includes activity eviction, ledger archival, compact/rollover/large-period summaries, unfunded-retry pauses, runtime-write failures and lost settlement responses: conservative 37 writes, 27 DO requests/five Worker invocations at 85 µ$/run after rounded floors. Scheduled dispatch rearms once after schedule advancement, retaining its atomic pending wakeup; advancement publication survives failures and refusal pauses skip duplicate writes. Completion runtime publication now shares settlement’s account transaction; new completed deliveries skip publication calls while legacy completions retain recovery. Deposits and cost-brake recovery use one versioned wake batch per cause (100 healthy jobs: five deposit/account writes including acknowledgement), preserving unrelated pauses and earlier holds. Terminal credential/input refusals clear retry outboxes, and input-dependent schedules pause once instead of recurring unpaid. Repeated action tests reuse their permanent history index, saving one account write after the first reservation while retaining recency and deleted-action logs. Further worst-case reductions remain. [Cost audit](docs/business/pricing.md). |
@@ -871,3 +871,18 @@ calendar days of billed counts rather than sampling retained logs.
 - Nine new regressions, lint, all 880 unit/integration tests and the production
   dry-run build pass. The operator procedure describes same-key recovery. Prices
   are unchanged; production keys, activation and retirement remain owner work.
+
+
+## S1 rotation CLI recovery — 2026-11-16
+
+- The rotation CLI retries interrupted writes and temporary server outages with
+  the same idempotency key, up to three attempts with short backoff. It stops on
+  definitive refusals/refunded failures and does not retry a lost billed config
+  read. Transport exceptions and response bodies never enter error output.
+- Thirteen regressions cover transport/JSON/server failures, bounded retries,
+  private error handling and real API/AccountDO recovery after lost begin/finish
+  replies or receipt-write failure. Cold restart at an exhausted key cap still
+  produces one rotation charge, the correct total and no remaining hold.
+- Lint, all 893 unit/integration tests and the production dry-run bundle pass.
+  Operator documentation and the S1 row reflect automatic same-key recovery.
+  Prices and live/owner/legal launch requirements remain unchanged.
