@@ -136,27 +136,43 @@ export class AccountDO {
       }
       case 'create-key': {
         const prior = await tx.get(`key:${args.id}`);
-        if (prior) { assert(prior.request_hash === args.request_hash, 'idempotency_conflict', 'Idempotency key reused', 409); return { ...prior, hash: undefined }; }
+        if (prior && !args.dry_run) {
+          assert(prior.request_hash === args.request_hash, 'idempotency_conflict', 'Idempotency key reused', 409);
+          // Keep the original response independent of later revocation. Legacy
+          // records recover their original charge from the permanent receipt.
+          const { hash: _hash, request_hash: _requestHash, revoked: _revoked, ...metadata } = prior;
+          return prior.creation_response || { ...metadata, cost_microdollars: (await tx.get(`receipt:key:${args.id}`))?.charged ?? price('change') };
+        }
         const scopes = parseScopes(args.scopes); assert(scopes?.length, 'invalid_scopes', 'Expected known scopes');
         assert(args.daily_spend_microdollars === null || (Number.isSafeInteger(args.daily_spend_microdollars) && args.daily_spend_microdollars >= 0), 'invalid_budget', 'Invalid daily spend cap');
         assert(args.expires_at > Date.now() && args.expires_at <= Date.now() + 366 * 86400000, 'invalid_expiry', 'Expiry must be within a year');
         const amount = price('change');
+        assert(prior || (await tx.list({ prefix: 'key:' })).size < 100, 'key_limit', 'Maximum 100 API keys');
         if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
-        assert((await tx.list({ prefix: 'key:' })).size < 100, 'key_limit', 'Maximum 100 API keys');
         await charge(tx, { id: `key:${args.id}`, amount, kind: 'change' });
         const record = { id: args.id, name: args.name, hash: args.hash, scopes, daily_spend_microdollars: args.daily_spend_microdollars, expires_at: args.expires_at, request_hash: args.request_hash };
-        await tx.put(`key:${args.id}`, record);
+        const { hash: _hash, request_hash: _requestHash, ...metadata } = record;
+        const response = { ...metadata, cost_microdollars: amount, balance_microdollars: (await funds(tx)).balance_microdollars };
+        await tx.put(`key:${args.id}`, { ...record, creation_response: response });
         await tx.put(`audit:${Date.now()}:${args.id}`, { kind: 'create_key', id: args.id, created_at: Date.now() });
-        return { ...record, hash: undefined, cost_microdollars: amount };
+        return response;
       }
       case 'revoke-key': {
+        const receiptKey = `key-revoke:${args.request_id || args.id}`;
+        const prior = !args.dry_run && await tx.get(receiptKey);
+        if (prior) { assert(prior.id === args.id, 'idempotency_conflict', 'Idempotency key reused', 409); return prior.response; }
         const key = await tx.get(`key:${args.id}`); assert(key, 'not_found', 'Key not found', 404);
-        if (key.revoked) return { cost_microdollars: 0 };
-        const amount = price('change'); if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
-        await charge(tx, { id: `revoke:${args.id}`, amount, kind: 'change' });
-        await tx.put(`key:${args.id}`, { ...key, revoked: true });
-        await tx.put(`audit:${Date.now()}:revoke:${args.id}`, { kind: 'revoke_key', id: args.id, created_at: Date.now() });
-        return { cost_microdollars: amount };
+        const amount = key.revoked ? 0 : price('change'); if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
+        let charged = 0;
+        if (!key.revoked) {
+          const receipt = await charge(tx, { id: `revoke:${args.id}`, amount, kind: 'change' });
+          charged = receipt.charged;
+          await tx.put(`key:${args.id}`, { ...key, revoked: true });
+          await tx.put(`audit:${Date.now()}:revoke:${args.id}`, { kind: 'revoke_key', id: args.id, created_at: Date.now() });
+        }
+        const response = { cost_microdollars: charged, balance_microdollars: (await funds(tx)).balance_microdollars };
+        await tx.put(receiptKey, { id: args.id, response });
+        return response;
       }
       case 'settle': {
         // Completion visibility shares billing's commit, so JobDO can finalize

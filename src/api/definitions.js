@@ -25,10 +25,10 @@ export async function definitions(route, request, env, auth) {
 export async function keys(route, request, env, auth) {
   if (request.method === 'GET') {
     const result = await rpc(env.ACCOUNTS, auth.account, 'list', { prefix: 'key:' });
-    return { items: result.items.map(({ hash: _hash, request_hash: _requestHash, ...key }) => key) };
+    return { items: result.items.map(({ hash: _hash, request_hash: _requestHash, creation_response: _response, ...key }) => key) };
   }
   const dry_run = new URL(request.url).searchParams.get('dry_run') === '1';
-  if (request.method === 'DELETE') return rpc(env.ACCOUNTS, auth.account, 'revoke-key', { id: route.params.id, dry_run });
+  if (request.method === 'DELETE') return rpc(env.ACCOUNTS, auth.account, 'revoke-key', { id: route.params.id, request_id: request.headers.get('Idempotency-Key') || crypto.randomUUID(), dry_run });
   const body = await readJson(request); const idempotency = request.headers.get('Idempotency-Key') || crypto.randomUUID();
   const id = (await digest(`${auth.account}:${idempotency}`)).slice(0, 32);
   const token = await signToken('crk_', { account: auth.account, id }, env.TOKEN_SIGNING_KEY);

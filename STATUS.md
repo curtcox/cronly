@@ -53,7 +53,7 @@ disagrees with it, this file wins and the other document is stale.
 | ID | Item | Owner | Status | Notes / reference |
 |----|------|-------|--------|-------------------|
 | L1 | Scaffold: wrangler (prod + local), Vitest, ESLint, `dev:local`, CI, `/health` | code | ✅ | Wrangler prod/local, pinned dependencies, lint, CI, health and gated LocalDev/deposits verified. Master plan §10.1. Copy hashbin's local mode and CI shape. |
-| L2 | Accounts and auth: Clerk sessions, Clerk webhook → AccountDO, API keys with scopes and daily spend caps, `API_ROUTES` access test | code | ✅ | Clerk/LocalDev auth, signed hashed scoped keys, revocation, daily caps and Clerk webhook; access coverage tests. §4.1. Port hashbin `src/auth/`. |
+| L2 | Accounts and auth: Clerk sessions, Clerk webhook → AccountDO, API keys with scopes and daily spend caps, `API_ROUTES` access test | code | ✅ | Clerk/LocalDev auth, signed hashed scoped keys, revocation, daily caps and Clerk webhook; access coverage tests. Key creation/revocation replay original billed responses after lost replies and restart; creation replay preserves revocation, revocation keys bind their target, and dry runs validate current requests without returning credentials. §4.1. Port hashbin `src/auth/`. |
 | L3 | Money: µ$ ledger, reserve/settle/expire holds, Stripe deposits, history, `cost-policy.js`, `pricing.js`, price-floor tests, `/api/quote` | code | 🟨 | Transactional ledger/holds, signed Stripe webhook, itemized Checkout and quotes tested; S4 recovery/refused-retry audit and rounded floors set HTTP price to 85 µ$ and reads to 21 µ$ plus 2 µ$/job. Valid `constructor` names retain numeric summaries and enforce current/legacy budgets without inherited-property lookups. Existing holds keep their maximum. Signed payment fulfillment acknowledges credited payments during wake outages; durable delivery resumes balance pauses. Real deposit remains L14. §6, `docs/business/pricing.md`. Needs D4, D6. |
 | L4 | Definitions: variables, secrets (AES-GCM, write-only), HTTP actions, templates, change billing, audit log, dry run, idempotency | code | ✅ | Pause/resume replay the original billed response across edits/deletion and resolve current settings transactionally. Atomic billed CRUD, reference checks, AES-GCM write-only secrets, dry runs, audit and idempotency tested. Action changes no longer rewrite/resynchronize all jobs: quotes and new reservations resolve the current action; held snapshots, pauses and schedules remain durable. Non-job edits avoid account wakeups; job edits retain earlier hold-expiry alarms. Log redaction also covers JSON-escaped secret values and unpaired surrogates. §2, §3.3, §4.2. |
 | L5 | Scheduler: jobs, croner, JobDO alarms, run queue, HTTP executor, redaction, settlement, pause on refusal, policies, budget windows | code | ✅ | Real local Worker/Queue HTTP path verified; retries, missed/overlap, budgets, duplicate delivery, held snapshots, refusal pause and recovery tested. Initial pending runs and recovery alarms commit atomically. Replayed starts recover original deadlines, trigger/input and key identity from the reservation after a lost response/pending/alarm write; expired reservations never enqueue. Observed results stage before settlement; Queue redelivery/alarms recover completion and private retry dispatch after restart without repeating external work or charges. Retry input/key caps survive settlement; budget, revoked/expired-key and invalid-input refusals clear the retry rather than recurring unpaid. Input-dependent HTTP schedules pause once with `missing_input`; pause publication failures retain the due schedule for alarm recovery. Configuration sync preserves last outcomes and skips unchanged settings; balance wakes publish resumed runtime and repair failed publication. Reconciliation preserves deletion of prototype-named jobs. Scheduled next-fire publication retries before durable advancement, including missed-run skips without a pending run. Account synchronization retries preserve earlier hold-expiry wakeups, including reservations arriving during synchronization. Reason-specific job wakes retain unrelated pauses and recover publication, settings and alarm failures after restart. §3, §3.1, §2.3. |
@@ -806,3 +806,20 @@ calendar days of billed counts rather than sampling retained logs.
   secret redaction, network denial, gateway, funded retries, ledger/cost totals,
   scheduled alarms and deposit recovery also pass. Prices are unchanged; live
   acceptance, credentials, DNS and legal approval remain owner work.
+
+
+## L2 API-key recovery acceptance — 2026-11-16
+
+- Key creation retains its original public response in the key's existing write,
+  recovering the token, expiry, charge and balance after a lost reply or restart.
+  Replaying creation after revocation does not reactivate the credential. Legacy
+  records recover charges from their permanent billing receipts. Hashes and stored
+  response metadata stay off the public key-list surface.
+- Revocation binds idempotency keys to the requested key, commits its response
+  with the revocation and charge, and rolls everything back if persistence fails.
+  Dry runs validate current creation requests or quote current revocation state
+  without consuming receipts or returning a token.
+- Six regressions cover lost replies, concurrent creation, revocation, legacy
+  records, changed requests, dry runs and transactional rollback. Lint, all 845
+  unit/integration tests and the production dry-run build pass. Prices and paid-run
+  allowances are unchanged. Live/owner/legal launch acceptance remains open.
