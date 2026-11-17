@@ -18,7 +18,7 @@ export async function prose(route, request, env, auth) {
   if (started.duplicate) { if (started.response?.failed) throw new ApiError(502, started.response.code, started.response.error, { cost_microdollars: started.response.cost_microdollars }); assert(started.response, 'request_in_progress', 'Request already started; retry later or inspect transactions', 409); return started.response; }
   const config = await rpc(env.ACCOUNTS, auth.account, 'config'); const base_hash = await digest(JSON.stringify(config));
   const readTool = async name => name === 'list_jobs' ? config.jobs : name === 'recent_runs' ? (await retainedRuns(env, auth.account, config)).slice(0, 10) : projection(config, await rpc(env.ACCOUNTS, auth.account, 'account'));
-  let knownCharge;
+  let knownCharge; let response;
   try {
     const modelInput = mode === 'change' ? { ...input, jobs: config.jobs, actions: Object.keys(config.actions), variables: config.variables } : input;
     const result = await callProse(mode, modelInput, env, readTool); knownCharge = Math.min(quote, result.cost_microdollars); let value = result.value;
@@ -37,17 +37,19 @@ export async function prose(route, request, env, auth) {
       const proposal = await rpc(env.ACCOUNTS, auth.account, 'save-proposal', { id, operations, base_hash, explanation: value.explanation });
       value = { ...proposal, explanation: value.explanation };
     }
-    const response = { ...value, quote_microdollars: mode === 'change' ? value.quote_microdollars : quote, maximum_prose_microdollars: quote, token_cost_microdollars: result.token_cost_microdollars, cost_microdollars: Math.min(quote, result.cost_microdollars) };
-    await rpc(env.ACCOUNTS, auth.account, 'finish-prose', { id, actual: response.cost_microdollars, response });
-    return response;
+    response = { ...value, quote_microdollars: mode === 'change' ? value.quote_microdollars : quote, maximum_prose_microdollars: quote, token_cost_microdollars: result.token_cost_microdollars, cost_microdollars: Math.min(quote, result.cost_microdollars) };
   } catch (error) {
     // The provider may have done billable work even if the response was lost or invalid.
     const failure = error instanceof ApiError ? error : new ApiError(502, 'invalid_prose_response', 'Invalid prose provider response');
     const knownTokens = error.details?.known_token_cost_microdollars;
     const cost = knownCharge ?? (knownTokens === undefined ? quote : Math.min(quote, Math.ceil(knownTokens * PRICES.proseMarkup) + PRICES.proseBase));
-    await rpc(env.ACCOUNTS, auth.account, 'finish-prose', { id, actual: cost, response: { failed: true, error: failure.message, code: failure.code, cost_microdollars: cost } });
-    failure.details = { ...failure.details, cost_microdollars: cost }; throw failure;
+    response = { failed: true, error: failure.message, code: failure.code, cost_microdollars: cost };
   }
+  // Finalization failures must not reinterpret a successful provider result. Its
+  // transaction may have committed even when the acknowledgement was lost.
+  const saved = await rpc(env.ACCOUNTS, auth.account, 'finish-prose', { id, actual: response.cost_microdollars, response });
+  if (saved.failed) throw new ApiError(502, saved.code, saved.error, { cost_microdollars: saved.cost_microdollars });
+  return saved;
 }
 /** Applying a proposal is a separate billed transaction against its original config revision. */
 export async function applyProposal(route, request, env, auth) {

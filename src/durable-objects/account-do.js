@@ -82,8 +82,12 @@ export class AccountDO {
         await tx.put(`prose:${args.id}`, { request_hash: args.request_hash }); return {};
       }
       case 'finish-prose': {
-        await settle(tx, args.id, args.actual); const prior = await tx.get(`prose:${args.id}`);
-        await tx.put(`prose:${args.id}`, { ...prior, response: args.response }); return {};
+        const prior = await tx.get(`prose:${args.id}`);
+        assert(prior, 'not_found', 'Prose request not found', 404);
+        if (prior.response) return prior.response;
+        const receipt = await settle(tx, args.id, args.actual);
+        const response = { ...args.response, cost_microdollars: receipt.charged };
+        await tx.put(`prose:${args.id}`, { ...prior, response }); return response;
       }
       case 'save-proposal': {
         const quote = args.operations.length ? await mutate(tx, { id: `validate:${args.id}`, operations: args.operations, dry_run: true }, this.env) : { quote_microdollars: 0 };
