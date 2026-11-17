@@ -227,25 +227,27 @@ it('skips unchanged completion settings and commits a changed outcome with its l
   expect(ledger.filter(row => row.id === 'third')).toHaveLength(1);
 });
 
-it('repairs a lost completion publication after restart without billing again', async () => {
+it('recovers a lost atomic settlement response after restart without billing again', async () => {
   const { env, job, call } = await setup();
   await rpc(env.JOBS, 'a:j', 'start', { id: 'r', input: {}, trigger: 'manual' });
-  const publication = vi.spyOn(job, 'publish').mockRejectedValueOnce(new Error('account unavailable'));
+  const object = env.ACCOUNTS.get('a'); const fetch = object.fetch.bind(object);
+  const publication = vi.spyOn(object, 'fetch').mockImplementation(async request => {
+    const { op } = await request.clone().json(); const response = await fetch(request);
+    if (op === 'settle' && response.ok) throw new Error('settlement response lost');
+    return response;
+  });
   const args = { id: 'r', result: { status: 'success' } };
-  await expect(job.result(args)).rejects.toThrow('account unavailable');
-  expect((await job.readRun('r')).status).toBe('success');
-  expect((await call('account')).job_runtime.j.last_outcome).toBe(null);
+  await expect(job.result(args)).rejects.toThrow('settlement response lost');
+  expect((await job.readRun('r')).status).toBe('queued');
+  expect((await call('account')).job_runtime.j.last_outcome).toBe('success');
   publication.mockRestore();
   const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
   const balance = (await call('account')).balance_microdollars;
-  expect(await cold.result(args)).toEqual({ duplicate: true });
+  expect(await cold.result(args)).toMatchObject({ status: 'success', cost_microdollars: PRICES.run });
   expect((await call('account')).job_runtime.j.last_outcome).toBe('success');
   expect((await call('account')).balance_microdollars).toBe(balance);
-  // Replaying an older completion must publish the current outcome, not the old one.
-  const settings = await job.storage.get('settings');
-  await job.storage.put('settings', { ...settings, last_outcome: 'failure' });
-  await cold.result(args);
-  expect((await call('account')).job_runtime.j.last_outcome).toBe('failure');
+  expect(await cold.result(args)).toEqual({ duplicate: true });
+  expect((await call('list', { prefix: 'ledger:' })).items.filter(row => row.id === 'r')).toHaveLength(1);
 });
 
 it('finalizes a staged log once and overlays authoritative billing after restart', async () => {

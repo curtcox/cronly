@@ -153,9 +153,10 @@ export class JobDO {
     const run = await this.readRun(args.id); assert(run, 'not_found', 'Run not found', 404);
     const settings = await this.storage.get('settings');
     if (run.status === 'success' || run.status === 'failure' || run.status === 'expired') {
-      // Repair publication without reloading retained history on every redelivery.
-      // The pending run's existing alarm still guarantees pruning and rearming.
-      try { await this.publish(settings); }
+      // Older completions may still need publication. New completions publish
+      // atomically with settlement, including when its response was lost.
+      const summary = await this.storage.get(`history:${args.id}`);
+      try { if (!summary?.settlement?.runtime_published) await this.publish(settings); }
       finally { await this.dispatchRetry(args.id); }
       return { duplicate: true };
     }
@@ -169,17 +170,14 @@ export class JobDO {
     // account's execution snapshot before this object's completion can commit.
     const shouldRetry = outcome.status === 'failure' && run.attempt < (settings.job?.retries || 0);
     const retryData = shouldRetry ? (await this.storage.get(`history:${args.id}`))?.retry || await rpc(this.env.ACCOUNTS, settings.account, 'retry-data', { id: args.id }) : {};
-    const receipt = await rpc(this.env.ACCOUNTS, settings.account, 'settle', { id: args.id, actual: outcome.charge_microdollars ?? run.reserved_microdollars });
+    const receipt = await rpc(this.env.ACCOUNTS, settings.account, 'settle', { id: args.id, actual: outcome.charge_microdollars ?? run.reserved_microdollars, runtime: this.runtime({ ...settings, last_outcome: outcome.status }) });
     const result = { ...run, ...outcome, id: run.id, job: run.job, cost_microdollars: receipt.charged, subrequests: receipt.gateway_count ?? outcome.subrequests ?? 0, finished_at: Date.now() };
     delete result.input; delete result.key_id;
     const changed = settings.last_outcome !== result.status;
     settings.last_outcome = result.status;
     const retry = shouldRetry ? { dispatch: true, input: retryData.input || {}, key_id: run.key_id, attempt: run.attempt + 1, trigger: run.trigger, scheduled_at: run.scheduled_at } : undefined;
     await this.history(result, true, changed ? settings : null, retry);
-    try { await this.publish(settings); }
-    finally {
-      await this.dispatchRetry(args.id);
-    }
+    await this.dispatchRetry(args.id);
     await this.prune(); await this.arm(); return result;
   }
   async dispatchRetry(id) {
@@ -212,6 +210,7 @@ export class JobDO {
     // already durable before billing; overlay the committed settlement metadata.
     if (settlement && completion) {
       const { input: _input, key_id: _key, ...result } = { ...body, ...completion, ...publicSummary, ...settlement };
+      delete result.runtime_published;
       return result;
     }
     return body;
@@ -220,7 +219,7 @@ export class JobDO {
     const { id, job, status, created_at, trigger, scheduled_at, finished_at, cost_microdollars, http_status, reason } = run;
     const summary = { id, job, status, created_at, trigger, scheduled_at, finished_at, cost_microdollars, http_status, reason };
     if (retry) summary.retry = retry;
-    if (finalized) summary.settlement = { subrequests: run.subrequests };
+    if (finalized) summary.settlement = { subrequests: run.subrequests, runtime_published: true };
     // Pending metadata fits in the compact index; only completed logs need a body row.
     if (status === 'queued' || status === 'running') {
       const { expires_at, reserved_microdollars, attempt, key_id, enqueued } = run;
@@ -242,8 +241,9 @@ export class JobDO {
     if (this.historyCache) this.historyCache = [summary, ...this.historyCache.filter(r => r.id !== id)];
   }
   async publish(settings) {
-    await rpc(this.env.ACCOUNTS, settings.account, 'job-runtime', { name: settings.name, runtime: { next_fire: settings.next_fire, paused: settings.paused, last_outcome: settings.last_outcome || null } });
+    await rpc(this.env.ACCOUNTS, settings.account, 'job-runtime', { name: settings.name, runtime: this.runtime(settings) });
   }
+  runtime(settings) { return { next_fire: settings.next_fire, paused: settings.paused, last_outcome: settings.last_outcome || null }; }
   async prune() {
     const records = (await this.summaries()).map(r => [`history:${r.id}`, r]).sort(([, a], [, b]) => b.created_at - a.created_at);
     for (const [index, [key, run]] of records.entries()) {

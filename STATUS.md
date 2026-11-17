@@ -74,7 +74,7 @@ disagrees with it, this file wins and the other document is stale.
 | S1 | Secret master-key rotation (versioned keys, re-encrypt) | code | ✅ | Atomic versioned keyring, legacy reads, held per-secret re-encryption, edit/delete conflict protection, audit, scoped CLI and CI wiring verified. Persisted local Worker migrated v1 → v2 and executed a redacted JS run with v1 retired. [Operator procedure](docs/ops/secret-rotation.md). §3.3. |
 | S2 | Charge measured JS CPU instead of the configured limit | code | ⬜ | §3.4; needs per-invocation CPU data. |
 | S3 | Recalibrate prices from a month of real Cloudflare and Anthropic bills | ops/code | ⬜ | `docs/business/pricing.md`. |
-| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budgets, active money summaries and ledger buffering reduce ordinary writes; unchanged alarms/runtime indexes and completion settings skip writes. Transactional reads/changes skip transient holds. Ledger pages retain legacy cursors and permanent receipts. Small durable reservations share the balance row; large/legacy snapshots stay standalone. Finalization reuses the durable staged log. Cooldowns/recent-job activity now share the reservation balance write, saving another ordinary compact-run write; evicted cooldowns remain standalone and larger legacy hold arrays migrate after draining. Repeated balance/budget refusals skip writes after one atomic pause/log/reset-wakeup transition; unchanged configuration replay skips settings writes. The 288-path audit includes activity eviction, ledger archival, compact/rollover/large-period summaries and unfunded-retry pauses: conservative 37 writes, 30 DO requests/five Worker invocations at 87 µ$/run after rounded floors. Scheduled dispatch rearms once after schedule advancement, retaining its atomic pending wakeup; advancement publication survives failures and refusal pauses skip duplicate writes. Further worst-case reductions remain. [Cost audit](docs/business/pricing.md). |
+| S4 | Lower per-run row writes (merge hold + ledger, batch next-fire updates) and pass the saving into the price | code | 🚧 | Shared transactional budgets, active money summaries and ledger buffering reduce ordinary writes; unchanged alarms/runtime indexes and completion settings skip writes. Transactional reads/changes skip transient holds. Ledger pages retain legacy cursors and permanent receipts. Small durable reservations share the balance row; large/legacy snapshots stay standalone. Finalization reuses the durable staged log. Cooldowns/recent-job activity now share the reservation balance write, saving another ordinary compact-run write; evicted cooldowns remain standalone and larger legacy hold arrays migrate after draining. Repeated balance/budget refusals skip writes after one atomic pause/log/reset-wakeup transition; unchanged configuration replay skips settings writes. The 288-path audit includes activity eviction, ledger archival, compact/rollover/large-period summaries and unfunded-retry pauses: conservative 37 writes, 30 DO requests/five Worker invocations at 87 µ$/run after rounded floors. Scheduled dispatch rearms once after schedule advancement, retaining its atomic pending wakeup; advancement publication survives failures and refusal pauses skip duplicate writes. Completion runtime publication now shares settlement’s account transaction; new completed deliveries skip publication calls while legacy completions retain recovery. Further worst-case reductions remain. [Cost audit](docs/business/pricing.md). |
 
 ## Backlog
 
@@ -538,3 +538,15 @@ calendar days of billed counts rather than sampling retained logs.
   ledger audit cannot exhaust its API rate window.
 - L9–L14 live/owner/legal acceptance and further S4 reductions remain open;
   nothing was deployed to production and no live credentials changed.
+
+## L5/S4 atomic completion publication — 2026-11-16
+
+- Run settlement and account runtime publication commit in one AccountDO transaction.
+  A failed runtime write rolls back billing; lost responses and failed JobDO
+  finalization recover the staged outcome without repeating execution or charges.
+- New completed runs remember that publication committed and avoid publication RPCs
+  on Queue redelivery. Legacy completions retain publication repair. Internal
+  publication metadata stays out of run responses, including after cold restart.
+- Lint, all 506 unit/integration tests (including 288 full-path cost checks) and
+  all four browser flows and the production dry-run build pass. Cost allowances
+  and prices remain unchanged pending the next tightened audit. Live/owner launch acceptance remains open.
