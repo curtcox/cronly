@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { PRICES } from '../src/utils/pricing.js';
+import { PRICES, price } from '../src/utils/pricing.js';
 // Keep each browser's local ingress bucket independent, as separate visitors are
 // in production. Running the whole suite through one localhost IP exhausts it.
 test.beforeEach(async ({ context }, testInfo) => {
@@ -721,4 +721,70 @@ test('discards a translation quote when its prose changes and lets a failed quot
   await button.click(); await expect(page.locator('#review')).toBeVisible();
   await expect(page.locator('#review-detail')).toContainText('Every hour');
   expect(attempts).toBe(3);
+});
+
+
+test('derives read-only job run maxima from the selected action before saving budgets', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const actions = {
+    constructor: { type: 'http', url: 'https://example.com' },
+    small: { type: 'javascript', cpu_ms: 11, subrequests: 0, source: 'export default async function run() {}' },
+    large: { type: 'javascript', cpu_ms: 30000, subrequests: 50, source: 'export default async function run() {}' }
+  };
+  const job = { action: 'large', cron: null, timezone: 'UTC', enabled: true, overlap: 'skip', missed: 'skip', retries: 0, budget: { day: 10000, month: 100000 }, max_run_microdollars: 42 };
+  await page.route('**/api/config', route => route.fulfill({ json: { config: { actions, jobs: { saved: job }, variables: {}, secrets: {} } } }));
+  await page.route('**/api/jobs/saved/triggers', route => route.fulfill({ json: { items: [] } }));
+  await page.getByRole('link', { name: 'Jobs', exact: true }).click();
+  const maximum = page.getByRole('status', { name: 'Scheduled / manual run maximum', exact: true });
+  const hook = page.getByRole('status', { name: 'Webhook run maximum', exact: true });
+  const action = page.getByRole('combobox', { name: 'Action', exact: true });
+  const expected = amount => `${amount.toLocaleString('en-US')} µ$ (${(amount / 1000000).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 6 })})`;
+  await expect(maximum).toHaveText(expected(price('run', actions.constructor)));
+  await expect(hook).toHaveText(expected(price('hook', actions.constructor)));
+  await expect(maximum).toHaveJSProperty('tagName', 'OUTPUT');
+  await page.getByLabel('Daily budget / µ$').fill('4000');
+  await page.getByLabel('Monthly budget / µ$').fill('90000');
+  for (const name of ['small', 'large', 'constructor']) {
+    await action.selectOption(name);
+    await expect(maximum).toHaveText(expected(price('run', actions[name])));
+    await expect(hook).toHaveText(expected(price('hook', actions[name])));
+    await expect(page.getByLabel('Daily budget / µ$')).toHaveValue('4000');
+    await expect(page.getByLabel('Monthly budget / µ$')).toHaveValue('90000');
+    if (name !== 'constructor') await expect(page.locator('#job-run-price-note')).toContainText('3,300 µ$ daily activation, held each run');
+    else await expect(page.locator('#job-run-price-note')).not.toContainText('activation');
+  }
+  await page.locator('[data-edit="saved"]').click();
+  await expect(maximum).toHaveText(expected(price('run', actions.large)));
+  await expect(page.locator('#job-run-price-note')).toContainText('each retry needs its own hold and is billed separately');
+  await action.selectOption('small');
+  const saves = [];
+  await page.route('**/api/jobs/saved*', async route => {
+    if (route.request().method() !== 'PUT') return route.fallback();
+    saves.push(route.request().postDataJSON());
+    await route.fulfill({ json: { quote_microdollars: 100, cost_microdollars: 100 } });
+  });
+  await page.getByRole('button', { name: /Review save/ }).click();
+  expect(saves).toHaveLength(1);
+  expect(saves[0]).toMatchObject({ action: 'small', budget: { day: 10000, month: 100000 } });
+  expect(saves[0]).not.toHaveProperty('max_run_microdollars');
+  expect(saves[0]).not.toHaveProperty('job-run-price');
+  await page.locator('#review-cancel').click();
+  await page.getByRole('link', { name: 'Actions', exact: true }).click();
+  await page.locator('[data-edit="small"]').click();
+  await expect(page.locator('#js-price')).toContainText('$0.003386');
+  await page.getByLabel('CPU limit / milliseconds').fill('12');
+  await page.getByLabel('Allowed subrequests').fill('1');
+  const updated = price('run', { type: 'javascript', cpu_ms: 12, subrequests: 1 });
+  await expect(page.locator('#js-price')).toContainText(`$${(updated / 1000000).toFixed(6)}`);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('explains the missing action when no job run maximum can be derived', async ({ page }) => {
+  await login(page);
+  await page.getByRole('link', { name: 'Jobs', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Scheduled / manual run maximum', exact: true })).toHaveText('Choose an action');
+  await expect(page.getByRole('status', { name: 'Webhook run maximum', exact: true })).toHaveText('Choose an action');
+  await expect(page.locator('#job-run-price-note')).toHaveText('Create an action before configuring a job.');
+  await expect(page.locator('#content')).not.toContainText('NaN');
 });

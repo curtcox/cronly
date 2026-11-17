@@ -103,7 +103,7 @@ function definitionForm(kind) {
   }
   if (kind === 'jobs') {
     const job = value || { timezone: 'UTC', cron: '0 * * * *', enabled: true, overlap: 'skip', missed: 'skip', retries: 0, budget: {} };
-    fields = `${name}<label>Action<select name="action" required>${Object.keys(config.actions).map(a => `<option ${job.action === a ? 'selected' : ''}>${e(a)}</option>`).join('')}</select></label><div class="fields"><label>Cron (blank for on demand only)<input name="cron" id="job-cron" value="${e(job.cron || '')}" placeholder="0 * * * *"></label><label>Time zone<input name="timezone" id="job-timezone" value="${e(job.timezone)}" required></label></div><div id="cron-preview" class="schedule-preview" aria-live="polite"></div><label>Describe the schedule<textarea id="job-prose" rows="2" maxlength="4096" placeholder="Weekdays at 7am"></textarea></label><button type="button" id="translate-job" class="secondary">Quote prose translation</button><div id="job-translation" aria-live="polite"></div><div class="fields"><label>Overlap<select name="overlap"><option ${job.overlap === 'skip' ? 'selected' : ''}>skip</option><option ${job.overlap === 'allow' ? 'selected' : ''}>allow</option></select></label><label>Missed run<select name="missed"><option ${job.missed === 'skip' ? 'selected' : ''}>skip</option><option ${job.missed === 'run_once' ? 'selected' : ''}>run_once</option></select></label><label>Immediate retries<input name="retries" type="number" min="0" max="3" value="${e(job.retries)}"></label><label>Daily budget / µ$<input name="budget_day" type="number" min="0" value="${e(job.budget.day ?? '')}" placeholder="No limit beyond balance"></label><label>Monthly budget / µ$<input name="budget_month" type="number" min="0" value="${e(job.budget.month ?? '')}"></label></div><label class="check"><input type="checkbox" name="enabled" ${job.enabled ? 'checked' : ''}>Enabled</label>`;
+    fields = `${name}<label>Action<select name="action" id="job-action" required>${Object.keys(config.actions).map(a => `<option ${job.action === a ? 'selected' : ''}>${e(a)}</option>`).join('')}</select></label><div class="fields"><label>Cron (blank for on demand only)<input name="cron" id="job-cron" value="${e(job.cron || '')}" placeholder="0 * * * *"></label><label>Time zone<input name="timezone" id="job-timezone" value="${e(job.timezone)}" required></label></div><div id="cron-preview" class="schedule-preview" aria-live="polite"></div><label>Describe the schedule<textarea id="job-prose" rows="2" maxlength="4096" placeholder="Weekdays at 7am"></textarea></label><button type="button" id="translate-job" class="secondary">Quote prose translation</button><div id="job-translation" aria-live="polite"></div><div class="fields"><label>Scheduled / manual run maximum<output id="job-run-price" for="job-action"></output></label><label>Webhook run maximum<output id="job-hook-price" for="job-action"></output></label></div><p class="note" id="job-run-price-note"></p><div class="fields"><label>Overlap<select name="overlap"><option ${job.overlap === 'skip' ? 'selected' : ''}>skip</option><option ${job.overlap === 'allow' ? 'selected' : ''}>allow</option></select></label><label>Missed run<select name="missed"><option ${job.missed === 'skip' ? 'selected' : ''}>skip</option><option ${job.missed === 'run_once' ? 'selected' : ''}>run_once</option></select></label><label>Immediate retries<input name="retries" type="number" min="0" max="3" value="${e(job.retries)}"></label><label>Daily budget / µ$<input name="budget_day" type="number" min="0" value="${e(job.budget.day ?? '')}" placeholder="No limit beyond balance"></label><label>Monthly budget / µ$<input name="budget_month" type="number" min="0" value="${e(job.budget.month ?? '')}"></label></div><label class="check"><input type="checkbox" name="enabled" ${job.enabled ? 'checked' : ''}>Enabled</label>`;
   }
   return `<form id="definition-form" data-kind="${kind}">${fields}<div class="form-actions"><button type="submit">Review save · ${deployment.prices.change} µ$</button><button type="button" id="new-definition" class="secondary">Clear / new</button></div></form>`;
 }
@@ -132,11 +132,29 @@ async function translateJob(button) {
   } catch (error) { if (form.isConnected) throw error; }
   finally { button.disabled = false; }
 }
+function maximumRunPrice(action) {
+  const p = deployment.prices;
+  return p.run + (action.type === 'javascript' ? p.jsActivation + Math.ceil(action.cpu_ms * p.jsCpuMs) + action.subrequests * p.jsSubrequest : 0);
+}
+function updateJobPrice() {
+  const output = $('#job-run-price'); if (!output) return;
+  const name = $('#definition-form').elements.action.value;
+  const action = Object.hasOwn(config.actions, name) ? config.actions[name] : null;
+  if (!action) {
+    output.textContent = 'Choose an action'; $('#job-hook-price').textContent = 'Choose an action';
+    $('#job-run-price-note').textContent = 'Create an action before configuring a job.';
+    return;
+  }
+  const maximum = maximumRunPrice(action); const hook = maximum + deployment.prices.hook;
+  output.textContent = `${maximum.toLocaleString()} µ$ (${usd(maximum)})`;
+  $('#job-hook-price').textContent = `${hook.toLocaleString()} µ$ (${usd(hook)})`;
+  $('#job-run-price-note').textContent = `Derived from the selected action's limits. The maximum is held before each run; each retry needs its own hold and is billed separately.${action.type === 'javascript' ? ` Includes ${deployment.prices.jsActivation.toLocaleString()} µ$ daily activation, held each run and released if this account/action version is already covered for that UTC day.` : ''}`;
+}
 function updateJsPrice() {
   if (!$('#js-price')) return;
   const form = $('#definition-form'); const cpu = Number(form.elements.cpu_ms.value); const sub = Number(form.elements.subrequests.value); const p = deployment.prices;
   if ($('#source-highlight')) $('#source-highlight').innerHTML = e(form.elements.source.value).replace(/\b(export|default|async|function|return|const|let|await|if|throw|new)\b/g, '<span class="highlight">$1</span>');
-  $('#js-price').textContent = `Maximum per run: ${usd(p.run + p.jsActivation + Math.ceil(cpu * p.jsCpuMs) + sub * p.jsSubrequest)}. Includes ${usd(p.jsActivation)} activation, charged only on the first use of this version per UTC day.`;
+  $('#js-price').textContent = `Maximum per run: ${usd(maximumRunPrice({ type: 'javascript', cpu_ms: cpu, subrequests: sub }))}. Includes ${usd(p.jsActivation)} activation, charged only on the first use of this version per UTC day.`;
 }
 async function definitionsPage(kind) {
   content.innerHTML = `<div class="row-header"><div><h1 class="app-title">${e(kind[0].toUpperCase() + kind.slice(1))}</h1><p class="muted">Named, reusable pieces of your schedule.</p></div></div><div class="grid"><section class="panel"><h2>Your ${e(kind)}</h2>${definitionList(kind)}${kind === 'jobs' ? `<p class="note">Spend uses UTC days and months. Pending holds also count toward budget enforcement. Projections are on <a href="#costs">Costs</a>. Runs start within a few seconds of the scheduled minute.</p>` : ''}</section><section class="panel"><h2>${editing ? `Edit ${e(editing)}` : `New ${e(kind.slice(0, -1))}`}</h2>${definitionForm(kind)}${editing && kind === 'jobs' ? '<div class="section"><h3>Trigger tokens</h3><button id="create-trigger" class="secondary">Review new trigger</button><div id="triggers"></div></div>' : ''}${editing && ['actions', 'jobs'].includes(kind) ? `<h3>Use from a script</h3><pre>curl -X ${kind === 'jobs' ? 'POST' : 'GET'} https://cronly.org/api/${kind}/${e(editing)}${kind === 'jobs' ? '/run' : ''} \\\n  -H 'Authorization: ApiKey YOUR_KEY'
@@ -145,7 +163,7 @@ fetch('https://cronly.org/api/${kind}/${e(editing)}${kind === 'jobs' ? '/run' : 
   method: '${kind === 'jobs' ? 'POST' : 'GET'}',
   headers: { Authorization: 'ApiKey YOUR_KEY' }
 });</pre>${kind === 'actions' ? '<button id="test-action" class="secondary">Review test run</button>' : ''}` : ''}</section></div>`;
-  cronPreview(); updateJsPrice();
+  cronPreview(); updateJsPrice(); updateJobPrice();
   if (editing && kind === 'jobs') {
     const result = await api(`/api/jobs/${editing}/triggers`);
     if (!$('#triggers')) return;
@@ -287,7 +305,7 @@ async function exportRuns(button) {
     notify(`Exported ${lines.length} ${summary ? 'run summaries' : 'runs'}.`);
   } finally { button.disabled = false; }
 }
-content.addEventListener('input', () => { cronPreview(); updateJsPrice(); });
+content.addEventListener('input', () => { cronPreview(); updateJsPrice(); updateJobPrice(); });
 content.addEventListener('change', event => { if (event.target.id === 'action-type') { $('#http-fields').hidden = event.target.value !== 'http'; $('#js-fields').hidden = event.target.value !== 'javascript'; } });
 content.addEventListener('click', async event => {
   const button = event.target.closest('button'); if (!button) return;
