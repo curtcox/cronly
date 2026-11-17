@@ -68,6 +68,10 @@ Unknown names are an error when the action is saved, not when it runs.
 
 **HTTP action** (launch): method, URL, headers, body, timeout (1–30 s), success rule (status
 ranges, default 2xx), and `follow_redirects`. Templates allowed in URL, headers and body.
+Redirect following is capped at five hops, checks every destination and strips
+headers on an origin change. Method/body rewrites follow the
+[Fetch redirect rules](https://fetch.spec.whatwg.org/#http-redirect-fetch), including
+preserving HEAD on 303; discarded bodies lose their representation headers.
 
 **JavaScript action** (launch, after HTTP): an ES module whose default export is
 `async run(ctx)`. `ctx` holds `vars`, `secrets`, `run`, `input`, and a `fetch` routed through

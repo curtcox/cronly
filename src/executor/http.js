@@ -20,17 +20,25 @@ export async function guardedFetch(request, env, account, signal, redirects = 0,
   let current = request;
   for (let index = 0; ; index++) {
     const url = validateDestination(current.url);
-    await rpc(env.ACCOUNTS, account, 'rate-limit', { id: `destination:${destinationHostname(url)}`, limit: 60 });
     assert(index < maxRequests, 'subrequest_limit', 'Subrequest limit reached');
+    await rpc(env.ACCOUNTS, account, 'rate-limit', { id: `destination:${destinationHostname(url)}`, limit: 60 });
     const replayBody = ['GET', 'HEAD'].includes(current.method) ? undefined : await current.clone().arrayBuffer();
     const response = await (env.OUTBOUND_FETCH || fetch)(current, { redirect: 'manual', signal });
     if (![301, 302, 303, 307, 308].includes(response.status) || !response.headers.has('location') || index >= redirects) return { response, subrequests: index + 1 };
-    const destination = validateDestination(new URL(response.headers.get('location'), current.url).href);
-    const headers = new Headers(current.headers);
-    if (destination.origin !== url.origin) for (const name of [...headers.keys()]) headers.delete(name);
-    const method = response.status === 303 || ((response.status === 301 || response.status === 302) && current.method === 'POST') ? 'GET' : current.method;
-    await response.body?.cancel();
-    current = new Request(destination, { method, headers, body: ['GET', 'HEAD'].includes(method) ? undefined : replayBody });
+    try {
+      const destination = validateDestination(new URL(response.headers.get('location'), current.url).href);
+      const headers = new Headers(current.headers);
+      if (destination.origin !== url.origin) for (const name of [...headers.keys()]) headers.delete(name);
+      // Follow Fetch's method rewrite rules, including HEAD preservation on 303.
+      // A discarded body must not leave its representation headers on the GET.
+      const rewrite = (response.status === 303 && !['GET', 'HEAD'].includes(current.method)) || ([301, 302].includes(response.status) && current.method === 'POST');
+      const method = rewrite ? 'GET' : current.method;
+      if (rewrite) for (const name of ['content-encoding', 'content-language', 'content-location', 'content-type']) headers.delete(name);
+      current = new Request(destination, { method, headers, body: ['GET', 'HEAD'].includes(method) ? undefined : replayBody });
+    } finally {
+      // Release even refused/malformed redirect bodies before leaving the run.
+      await response.body?.cancel();
+    }
   }
 }
 /** Render, execute and redact an HTTP action within a wall-clock deadline. */
