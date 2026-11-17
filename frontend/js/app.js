@@ -129,10 +129,33 @@ fetch('https://cronly.org/api/${kind}/${e(editing)}${kind === 'jobs' ? '/run' : 
     $('#triggers').innerHTML = result.items.length ? `<ul class="list">${result.items.map(t => `<li><span class="small mono">${e(t.id)} · ${t.revoked ? 'revoked' : `${t.rate_per_minute}/min`}</span>${t.revoked ? '' : `<button class="secondary" data-revoke-trigger="${e(t.id)}">Revoke</button>`}</li>`).join('')}</ul>` : empty('No trigger tokens.');
   }
 }
+function upcomingResults(result, from, to) {
+  return `<p class="note">${e(date(from))} to ${e(date(to))} (end excluded).</p>${result.items.length ? upcomingTable(result.items) : empty('No scheduled starts in this window.')}<p class="note">Window maximum ${e(usd(result.window_total_microdollars))} · Shown subtotal ${e(usd(result.subtotal_microdollars))}${result.truncated ? ' · First 100 starts shown. The window maximum includes all starts; narrow the window to see more detail.' : ''}</p>`;
+}
+function localDateTime(time) {
+  const value = new Date(time);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}T${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`;
+}
 async function upcomingPage() {
-  const result = await api('/api/upcoming?limit=100');
-  if (currentPage() !== 'upcoming') return;
-  content.innerHTML = `<h1 class="app-title">Upcoming</h1><p class="muted">Scheduled starts and maximum prices. Budgets may pause a job before it fires.</p><form id="upcoming-filter" class="inline"><label>From<input name="from" type="datetime-local"></label><label>To<input name="to" type="datetime-local"></label><button>Show window</button></form><section class="panel" id="upcoming-results">${upcomingTable(result.items)}<p class="note">Window maximum ${e(usd(result.window_total_microdollars))} · Shown subtotal ${e(usd(result.subtotal_microdollars))}${result.truncated ? ' · First 100 shown; narrow the window for the full total.' : ''}</p></section>`;
+  const version = renderVersion;
+  const from = Math.floor(Date.now() / 60000) * 60000; const to = from + 86400000;
+  const query = new URLSearchParams({ from: new Date(from).toISOString(), to: new Date(to).toISOString(), limit: '100' });
+  const result = await api(`/api/upcoming?${query}`);
+  if (version !== renderVersion || currentPage() !== 'upcoming') return;
+  content.innerHTML = `<h1 class="app-title">Upcoming</h1><p class="muted">Scheduled starts and maximum prices. Budgets may pause a job before it fires. Times use ${e(Intl.DateTimeFormat().resolvedOptions().timeZone)}. Choose a window of at most 31 days.</p><form id="upcoming-filter" class="inline"><label>From<input name="from" type="datetime-local" value="${e(localDateTime(from))}" required></label><label>To<input name="to" type="datetime-local" value="${e(localDateTime(to))}" required></label><button>Show window</button></form><section class="panel" id="upcoming-results" aria-live="polite">${upcomingResults(result, from, to)}</section>`;
+}
+async function filterUpcoming(form, data) {
+  const results = $('#upcoming-results'); const button = form.querySelector('button');
+  if (button.disabled) return;
+  button.disabled = true; clearNotice();
+  try {
+    const from = new Date(data.get('from')).getTime(); const to = new Date(data.get('to')).getTime();
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from || to - from > 31 * 86400000) throw new Error('Choose an end after the start and a window of at most 31 days.');
+    const query = new URLSearchParams({ from: new Date(from).toISOString(), to: new Date(to).toISOString(), limit: '100' });
+    const result = await api(`/api/upcoming?${query}`);
+    if (results.isConnected) results.innerHTML = upcomingResults(result, from, to);
+  } catch (error) { if (results.isConnected) throw error; }
+  finally { button.disabled = false; }
 }
 async function runsPage(query = '') {
   runsQuery = query; const filters = new URLSearchParams(query);
@@ -265,7 +288,7 @@ content.addEventListener('submit', async event => {
       else body = { action: fields.action, cron: fields.cron.trim() || null, timezone: fields.timezone, overlap: fields.overlap, missed: fields.missed, retries: Number(fields.retries), enabled: data.has('enabled'), budget: { day: fields.budget_day === '' ? undefined : Number(fields.budget_day), month: fields.budget_month === '' ? undefined : Number(fields.budget_month) } };
       await reviewed(`/api/${kind}/${fields.name}`, 'PUT', body);
     }
-    if (form.id === 'upcoming-filter') { const query = new URLSearchParams(); for (const [k, v] of data) if (v) query.set(k, new Date(v).toISOString()); const result = await api(`/api/upcoming?${query}`); $('#upcoming-results').innerHTML = `${upcomingTable(result.items)}<p>Window maximum ${e(usd(result.window_total_microdollars))} · Shown subtotal ${e(usd(result.subtotal_microdollars))}${result.truncated ? ' · Results truncated; narrow the window.' : ''}</p>`; }
+    if (form.id === 'upcoming-filter') await filterUpcoming(form, data);
     if (form.id === 'runs-filter') { const query = new URLSearchParams(); for (const [k, v] of data) if (v) query.set(k, k === 'from' ? `${v}T00:00:00.000Z` : k === 'to' ? `${v}T23:59:59.999Z` : v); await runsPage(`?${query}`); }
     if (form.id === 'costs-filter') await filterCosts(form, data);
     if (form.id === 'key-form') await reviewed('/api/keys', 'POST', { name: fields.name, scopes: data.getAll('scopes'), daily_spend_microdollars: fields.daily_spend_microdollars === '' ? null : Number(fields.daily_spend_microdollars) }, async result => { await render(); $('#new-key-result').innerHTML = `<p>Copy your key now:</p><pre>${e(result.token)}</pre>`; });
