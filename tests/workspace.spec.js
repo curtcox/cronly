@@ -248,3 +248,68 @@ test('refuses partial run exports when an older page fails or repeats its cursor
   await expect(page.getByRole('button', { name: 'Export job NDJSON', exact: true })).toBeEnabled();
   expect(downloads).toHaveLength(0);
 });
+
+test('pages permanent transactions without replacing account forms and retries failed pages', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const cursor = 'ledger:1794916800000:~0000000000000001:read:&"<older>';
+  const queries = []; let fail = true;
+  await page.route('**/api/transactions*', async route => {
+    const position = new URL(route.request().url()).searchParams.get('cursor');
+    queries.push(position);
+    if (position && fail) return route.fulfill({ status: 503, json: { error: 'History temporarily unavailable', code: 'unavailable' } });
+    return route.fulfill({ json: {
+      items: [{ id: position ? '<img src=x onerror="window.pwned=true">' : 'newest-reference', kind: position ? 'read' : 'deposit', created_at: Date.parse('2026-11-17T12:00Z'), amount_microdollars: position ? -21 : 5000000 }],
+      next_cursor: position ? null : cursor
+    } });
+  });
+  await page.getByRole('link', { name: 'Account', exact: true }).click();
+  await expect(page.locator('#transaction-history')).toContainText('newest-reference');
+  await page.getByLabel('Name', { exact: true }).fill('unsaved-key');
+  const older = page.getByRole('button', { name: 'Older transactions', exact: false });
+  await older.click();
+  await expect(page.locator('#notice')).toContainText('History temporarily unavailable');
+  await expect(older).toBeEnabled();
+  await expect(page.locator('#transaction-history')).toContainText('newest-reference');
+  fail = false;
+  await older.click();
+  await expect(page.locator('#transaction-history')).toContainText('<img src=x onerror="window.pwned=true">');
+  await expect(page.locator('#transaction-history')).toContainText('-$0.000021');
+  await expect(older).toHaveCount(0);
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('unsaved-key');
+  expect(await page.evaluate(() => window.pwned)).toBeUndefined();
+  await page.getByRole('button', { name: 'Newest transactions', exact: true }).click();
+  await expect(page.locator('#transaction-history')).toContainText('newest-reference');
+  await expect(page.getByRole('button', { name: 'Newest transactions', exact: true })).toHaveCount(0);
+  expect(queries).toEqual([null, cursor, cursor, null]);
+});
+
+for (const failed of [false, true]) test(`ignores a ${failed ? 'failed' : 'successful'} transaction page response after leaving and returning to Account`, async ({ page }) => {
+  await login(page);
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  await page.route('**/api/transactions*', async route => {
+    const older = new URL(route.request().url()).searchParams.has('cursor');
+    if (older) await pending;
+    if (older && failed) return route.fulfill({ status: 503, json: { error: 'Stale failure', code: 'unavailable' } });
+    await route.fulfill({ json: { items: [{ id: older ? 'stale-reference' : 'current-reference', kind: 'deposit', amount_microdollars: 1000 }], next_cursor: older ? null : 'older' } });
+  });
+  await page.getByRole('link', { name: 'Account', exact: true }).click();
+  await expect(page.locator('#transaction-history')).toContainText('current-reference');
+  const oldButton = await page.getByRole('button', { name: 'Older transactions' }).elementHandle();
+  const request = page.waitForRequest('**/api/transactions?cursor=older');
+  await page.getByRole('button', { name: 'Older transactions' }).click();
+  await request;
+  await expect(page.getByRole('button', { name: 'Older transactions' })).toBeDisabled();
+  await page.getByRole('link', { name: 'Dashboard', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Account', exact: true }).click();
+  await expect(page.locator('#transaction-history')).toContainText('current-reference');
+  const response = page.waitForResponse('**/api/transactions?cursor=older');
+  release(); await response;
+  await expect.poll(() => oldButton.evaluate(button => button.disabled)).toBe(false);
+  await expect(page.locator('#transaction-history')).toContainText('current-reference');
+  await expect(page.locator('#transaction-history')).not.toContainText('stale-reference');
+  await expect(page.locator('#notice')).not.toBeVisible();
+  await expect(page.getByRole('button', { name: 'Older transactions' })).toBeEnabled();
+});
