@@ -6,6 +6,7 @@ import { PRICES } from '../utils/pricing.js';
 import { digest } from '../auth/crypto.js';
 import { retainedRuns } from './reporting.js';
 import { projection } from '../services/reporting.js';
+import { compareRuns } from '../services/run-pagination.js';
 /** Reserve the whole conversation before a provider call; retries never repeat a billed call. */
 export async function prose(route, request, env, auth) {
   const mode = route.params.mode; assert(['to-cron', 'ask', 'change'].includes(mode), 'not_found', 'Unknown prose endpoint', 404);
@@ -17,7 +18,16 @@ export async function prose(route, request, env, auth) {
   const started = await rpc(env.ACCOUNTS, auth.account, 'begin-prose', { id, mode, amount: quote, request_hash: await digest(JSON.stringify({ mode, input })), key_id: auth.key_id });
   if (started.duplicate) { if (started.response?.failed) throw new ApiError(started.response.failure_status || 502, started.response.code, started.response.error, { cost_microdollars: started.response.cost_microdollars }); assert(started.response, 'request_in_progress', 'Request already started; retry later or inspect transactions', 409); return started.response; }
   const { config, base_hash } = started;
-  const readTool = async name => name === 'list_jobs' ? config.jobs : name === 'recent_runs' ? (await retainedRuns(env, auth.account, config)).slice(0, 10) : projection(config, await rpc(env.ACCOUNTS, auth.account, 'account'));
+  // Reuse the history the model saw: retention or newer runs must not invalidate
+  // a citation while it is answering. Repeated tools also avoid another fanout.
+  let runs; let forecast;
+  const readRuns = () => runs ||= retainedRuns(env, auth.account, config).then(items => items.sort(compareRuns));
+  const readTool = async name => {
+    if (name === 'list_jobs') return config.jobs;
+    if (name === 'recent_runs') return (await readRuns()).slice(0, 10);
+    return forecast ||= Promise.all([rpc(env.ACCOUNTS, auth.account, 'account'), rpc(env.ACCOUNTS, auth.account, 'activity')])
+      .then(([balance, activity]) => projection(config, balance, activity.counts));
+  };
   let knownCharge; let response;
   try {
     const modelInput = mode === 'change' ? { ...input, jobs: config.jobs, actions: Object.keys(config.actions), variables: config.variables } : input;
@@ -28,7 +38,8 @@ export async function prose(route, request, env, auth) {
     }
     if (mode === 'ask') {
       assert(typeof value.answer === 'string' && Array.isArray(value.citations), 'invalid_prose_response', 'Invalid answer', 502);
-      const runs = await retainedRuns(env, auth.account, config); const allowed = new Set([...Object.keys(config.jobs), ...runs.map(r => r.id)]);
+      const allowed = new Set(Object.keys(config.jobs));
+      if (value.citations.some(c => !allowed.has(c))) for (const run of await readRuns()) allowed.add(run.id);
       assert(value.citations.every(c => allowed.has(c)), 'invalid_citation', 'Model cited an unknown job or run', 502);
     }
     if (mode === 'change') {
