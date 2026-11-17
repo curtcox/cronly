@@ -4,6 +4,7 @@ import { AccountDO } from '../durable-objects/account-do.js';
 import { JobDO } from '../durable-objects/job-do.js';
 import { namespace } from '../../test-utils/storage.js';
 import { rpc } from '../utils/rpc.js';
+import { price } from '../utils/pricing.js';
 
 afterEach(() => vi.useRealTimers());
 
@@ -73,7 +74,11 @@ it('includes permanent webhook activity in the same forecast as the projection A
     const { messages } = JSON.parse(options.body);
     if (messages.length === 1) {
       const { status: _status, cost_microdollars: _cost, balance_microdollars: _balance, ...value } = await request('/api/projection');
-      expected = value; expect(expected.monthly_microdollars).toBeGreaterThan(0);
+      expected = value;
+      // At noon the 30-day window includes two half UTC days. Each job's
+      // estimated charge rounds up per day, including the webhook surcharge.
+      const charge = price('hook', { type: 'http' });
+      expect(expected.monthly_microdollars).toBe(90 * charge);
       dispatch.mockClear();
       return reply([tool('projection'), tool('projection', 'repeat')]);
     }

@@ -72,7 +72,9 @@ export function projection(config, balance, webhookRuns = [], now = Date.now()) 
   for (const [name, job] of Object.entries(config.jobs)) {
     if (!job.enabled) continue;
     const action = config.actions[job.action];
-    const runPrice = price('run', action) - (action.type === 'javascript' ? PRICES.jsActivation : 0);
+    // Activity counters combine manual and webhook runs. Use the webhook
+    // maximum when no schedule exists so this estimate covers either trigger.
+    const runPrice = price(job.cron ? 'run' : 'hook', action) - (action.type === 'javascript' ? PRICES.jsActivation : 0);
     const months = {}; let count = 0;
     for (let day = Math.floor(from / 86400000) * 86400000; day < to; day += 86400000) {
       const start = Math.max(day, from); const end = Math.min(day + 86400000, to);
@@ -93,7 +95,7 @@ export function projection(config, balance, webhookRuns = [], now = Date.now()) 
   const monthly = jobs.reduce((sum, j) => sum + j.monthly_microdollars, 0); const daily = Math.ceil(monthly / 30);
   const available = balance.balance_microdollars - balance.held_microdollars;
   const days = daily ? available / daily : null;
-  return { jobs, daily_microdollars: daily, monthly_microdollars: monthly, runway_days: days, runs_until: days === null || days > 36500 ? null : new Date(now + days * 86400000).toISOString(), more_than_a_year: days === null || days > 365, estimate: '30-day maximum with UTC budget resets; JS includes one activation allowance per active job/day (shared versions may cost less); webhook-only jobs use seven UTC calendar days of billed activity' };
+  return { jobs, daily_microdollars: daily, monthly_microdollars: monthly, runway_days: days, runs_until: days === null || days > 36500 ? null : new Date(now + days * 86400000).toISOString(), more_than_a_year: days === null || days > 365, estimate: '30-day maximum with UTC budget resets; JS includes one activation allowance per active job/day (shared versions may cost less); jobs without cron use seven UTC calendar days of billed activity at the webhook maximum (manual runs may cost less)' };
 }
 /** Filter retained logs without ever treating response excerpts as markup. */
 export function filterRuns(runs, params) {

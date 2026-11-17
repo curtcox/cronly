@@ -1,7 +1,7 @@
 import { it, expect } from 'vitest';
 import { upcoming, projection, countFires, costGroups } from './reporting.js';
 import { explainCron, nextFires, cron } from './cron.js';
-import { PRICES } from '../utils/pricing.js';
+import { price, PRICES } from '../utils/pricing.js';
 const config = { actions: { ping: { type: 'http' } }, jobs: { hourly: { action: 'ping', cron: '0 * * * *', timezone: 'UTC', enabled: true, budget: {} } } };
 it('enumerates exact ordered upcoming fires and marks bounded subtotals', () => {
   const from = Date.parse('2026-11-15T00:00Z');
@@ -49,3 +49,21 @@ it('groups constructor-named job and action charges as integer costs', () => {
   const rows = [30, 60].map((amount, index) => ({ job: 'constructor', action: 'constructor', amount_microdollars: -amount, created_at: index + 1 }));
   for (const group of ['job', 'action']) expect(costGroups(rows, new URLSearchParams({ group }))).toEqual({ group, items: [{ name: 'constructor', cost_microdollars: 90 }], total_microdollars: 90 });
 });
+
+for (const action of [{ type: 'http' }, { type: 'javascript', cpu_ms: 100, subrequests: 2 }]) {
+  it(`includes webhook charges in the ${action.type} activity forecast and runway`, () => {
+    const now = Date.parse('2026-11-01T00:00Z');
+    const onDemand = { actions: { ping: action }, jobs: { hook: { action: 'ping', cron: null, enabled: true, budget: {} } } };
+    const balance = { balance_microdollars: 1000000, held_microdollars: 1000 };
+    const activation = action.type === 'javascript' ? PRICES.jsActivation : 0;
+    const daily = 2 * (price('hook', action) - activation) + activation;
+    for (const activity of [{ hook: 14 }, Array.from({ length: 14 }, () => ({ job: 'hook', created_at: now - 1000 }))]) {
+      const result = projection(onDemand, balance, activity, now);
+      expect(result.jobs).toEqual([{ job: 'hook', runs_30_days: 60, monthly_microdollars: daily * 30, daily_microdollars: daily }]);
+      expect(result.runway_days).toBe(999000 / daily);
+      expect(result.runs_until).toBe(new Date(now + 999000 / daily * 86400000).toISOString());
+    }
+    onDemand.jobs.hook.budget = { day: daily - 1, month: (daily - 1) * 30 - 1 };
+    expect(projection(onDemand, balance, { hook: 14 }, now).monthly_microdollars).toBe((daily - 1) * 30 - 1);
+  });
+}

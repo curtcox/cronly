@@ -385,7 +385,8 @@ Detailed derivation in [`docs/business/pricing.md`](../docs/business/pricing.md)
   reservation. Per API key per day. Account balance is the final budget.
 - **Projection:** for each enabled job, expected runs in the next 30 days (from cron) × max
   run price, capped by its budget; sum per day; runway = (balance − holds) / daily burn,
-  shown as a date. Webhook-only jobs use their trailing 7-day average.
+  shown as a date. Jobs without cron use their trailing 7-day average at the webhook
+  maximum, including its surcharge; manual-only activity may cost less.
 - **Fixed costs:** Workers Paid + domain + Clerk; the selected Loader adds no
   Workers for Platforms subscription. See the current cost model for provider rates.
   Price-floor tests assert `price × revenueKept ≥ 1.5 × ceil(worst-case cost)`,
