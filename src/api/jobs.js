@@ -12,10 +12,14 @@ export async function runJob(route, request, env, auth) {
 
 /** Pause/resume are ordinary quoted and billed definition changes. */
 export async function toggleJob(route, request, env, auth) {
-  const config = await rpc(env.ACCOUNTS, auth.account, 'config'); const name = route.params.name;
-  assert(Object.hasOwn(config.jobs, name), 'not_found', 'Job not found', 404);
-  const result = await rpc(env.ACCOUNTS, auth.account, 'mutate', { account: auth.account, key_id: auth.key_id, id: request.headers.get('Idempotency-Key') || crypto.randomUUID(), dry_run: new URL(request.url).searchParams.get('dry_run') === '1', operations: [{ kind: 'jobs', name, value: { ...config.jobs[name], enabled: route.handler === 'resume-job' } }] });
-  try { await rpc(env.ACCOUNTS, auth.account, 'sync-jobs'); } catch { /* Durable outbox retries. */ }
+  const dry_run = new URL(request.url).searchParams.get('dry_run') === '1';
+  const result = await rpc(env.ACCOUNTS, auth.account, 'toggle-job', {
+    account: auth.account, key_id: auth.key_id, id: request.headers.get('Idempotency-Key') || crypto.randomUUID(),
+    name: route.params.name, enabled: route.handler === 'resume-job', dry_run
+  });
+  if (!dry_run) {
+    try { await rpc(env.ACCOUNTS, auth.account, 'sync-jobs'); } catch { /* Durable outbox retries. */ }
+  }
   return result;
 }
 

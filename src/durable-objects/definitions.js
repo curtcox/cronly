@@ -42,6 +42,18 @@ export async function putConfig(tx, args, env) {
   if (!args.dry_run) await tx.put(receiptKey, { request_hash: requestHash, response });
   return response;
 }
+/** Toggle only enabled, preserving settings edited before this transaction. */
+export async function toggleJob(tx, args, env) {
+  const requestHash = await digest(JSON.stringify({ name: args.name, enabled: args.enabled }));
+  const receiptKey = `job-toggle:${args.key_id || 'session'}:${args.id}`;
+  if (!args.dry_run) {
+    const prior = await tx.get(receiptKey);
+    if (prior) { assert(prior.request_hash === requestHash, 'idempotency_conflict', 'Idempotency key used for a different job toggle', 409); return prior.response; }
+  }
+  const job = await tx.get(`def:jobs:${args.name}`);
+  assert(job, 'not_found', 'Job not found', 404);
+  return mutate(tx, { ...args, operations: [{ kind: 'jobs', name: args.name, value: { ...job, enabled: args.enabled } }] }, env, { requestHash, receiptKey, chargeId: receiptKey });
+}
 /** Validate, quote and atomically bill a definition batch; dry runs write nothing. */
 export async function mutate(tx, args, env, receipt = {}) {
   assert(Array.isArray(args.operations) && args.operations.length > 0 && args.operations.length <= 400, 'invalid_changes', 'Expected 1–400 changes');
