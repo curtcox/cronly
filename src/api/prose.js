@@ -54,7 +54,10 @@ export async function prose(route, request, env, auth) {
 /** Applying a proposal is a separate billed transaction against its original config revision. */
 export async function applyProposal(route, request, env, auth) {
   const input = await readJson(request);
-  const result = await rpc(env.ACCOUNTS, auth.account, 'apply-proposal', { id: route.params.id, account: auth.account, key_id: auth.key_id, expected_quote: input.quote_microdollars, dry_run: new URL(request.url).searchParams.get('dry_run') === '1' });
-  try { await rpc(env.ACCOUNTS, auth.account, 'sync-jobs'); } catch { /* Durable outbox retries. */ }
+  const dry_run = new URL(request.url).searchParams.get('dry_run') === '1';
+  const result = await rpc(env.ACCOUNTS, auth.account, 'apply-proposal', { id: route.params.id, account: auth.account, key_id: auth.key_id, expected_quote: input.quote_microdollars, dry_run });
+  if (!dry_run) {
+    try { await rpc(env.ACCOUNTS, auth.account, 'sync-jobs'); } catch { /* Durable outbox retries. */ }
+  }
   return result;
 }

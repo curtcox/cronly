@@ -65,7 +65,15 @@ export class AccountDO {
       }
       case 'maintenance': {
         const now = Date.now();
-        for (const prefix of ['activation:', 'proposal:', 'rate:']) for (const [key, record] of await tx.list({ prefix })) if ((record.expires_at && record.expires_at < now) || (record.reset && record.reset < now) || (record.created_at && record.created_at < now - 31 * 86400000)) await tx.delete(key);
+        for (const prefix of ['activation:', 'proposal:', 'rate:']) for (const [key, record] of await tx.list({ prefix })) {
+          // Applications are permanent receipts, even when the original proposal
+          // has expired. Compact legacy proposals without losing their response.
+          if (prefix === 'proposal:' && record.applied) {
+            if (record.expires_at) await tx.put(key, { applied: record.applied });
+            continue;
+          }
+          if ((record.expires_at && record.expires_at < now) || (record.reset && record.reset < now) || (record.created_at && record.created_at < now - 31 * 86400000)) await tx.delete(key);
+        }
         return {};
       }
       case 'prepare-run': return prepareRun(tx, args, this.env);
@@ -102,12 +110,14 @@ export class AccountDO {
       }
       case 'apply-proposal': {
         const proposal = await tx.get(`proposal:${args.id}`); assert(proposal, 'not_found', 'Proposal not found', 404);
-        if (proposal.applied) return proposal.applied;
+        if (proposal.applied) return args.dry_run ? { changes: [], quote_microdollars: 0, cost_microdollars: 0, balance_microdollars: (await funds(tx)).balance_microdollars } : proposal.applied;
         assert(proposal.expires_at > Date.now(), 'proposal_expired', 'Proposal expired', 409);
         assert(await digest(JSON.stringify(await loadConfig(tx, true))) === proposal.base_hash, 'stale_proposal', 'Account changed; request a new proposal', 409);
         assert(args.expected_quote === undefined || args.expected_quote === proposal.quote_microdollars, 'quote_changed', 'Quote does not match proposal', 409);
-        const response = proposal.operations.length ? await mutate(tx, { account: args.account, key_id: args.key_id, id: `apply:${args.id}`, operations: proposal.operations, dry_run: args.dry_run }, this.env) : { changes: [], quote_microdollars: 0, cost_microdollars: 0 };
-        if (!args.dry_run) await tx.put(`proposal:${args.id}`, { ...proposal, applied: response }); return response;
+        const response = proposal.operations.length ? await mutate(tx, { account: args.account, key_id: args.key_id, id: `apply:${args.id}`, operations: proposal.operations, dry_run: args.dry_run }, this.env) : { changes: [], quote_microdollars: 0, cost_microdollars: 0, balance_microdollars: (await funds(tx)).balance_microdollars };
+        // Retain only the receipt after application; executable proposals expire,
+        // but replay must never apply their operations over later account edits.
+        if (!args.dry_run) await tx.put(`proposal:${args.id}`, { applied: response }); return response;
       }
       case 'bill-change': {
         const amount = price('change'); if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
