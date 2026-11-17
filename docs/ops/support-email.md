@@ -39,12 +39,15 @@ Google's OAuth support-email selector requires either the currently signed-in
 Google account address or a Google Group managed by that user. A standalone
 forwarding address does not appear automatically.
 
-To use `support@cronly.org`, the owner can register a Google account **using this
-existing email address**, without creating a Gmail mailbox. The owner must
-complete personal details, email verification, password and terms steps. Then
-arrange the necessary access to `cronly-515013` and configure OAuth while signed
-in with that account. No Google account or project access grant was created by
-this email provisioning step.
+The owner completed Google account registration **using this existing email
+address**, without creating a Gmail mailbox, on 2026-11-17. The browser showed
+the authenticated identity as `support@cronly.org`. The owner completed the
+personal details, verification, password and terms steps directly.
+
+OAuth project access is the next step: an `OAuth Config Editor`
+(`roles/oauthconfig.editor`) grant is prepared for this identity on
+`cronly-515013`, awaiting explicit approval. It permits OAuth configuration and
+client credential management. No project access grant has been saved yet.
 
 References: [Google's support-email requirements](https://support.google.com/cloud/answer/15549049?hl=en),
 [using an existing address for a Google account](https://support.google.com/accounts/answer/27441?hl=en#existingemail),

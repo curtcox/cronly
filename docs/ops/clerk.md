@@ -49,11 +49,12 @@ credentials were reused. Deployments and launch approval remain disabled.
 The owner requested a dedicated Google Cloud project and separately approved its
 link to the selected existing billing account. Project `cronly-515013` was created
 on 2026-11-17. Google Auth Platform configuration is in progress; its required
-support identity and consent configuration need completion before an OAuth client
+project access and consent configuration need completion before an OAuth client
 can be created. The owner requested `support@cronly.org`, now provisioned as an
-incoming forwarding address. Google requires that address to be registered as a
-Google account (or supplied by a managed Google Group) before it can be selected
-for OAuth support. See [support email and the owner account step](support-email.md).
+incoming forwarding address, and completed its Google account registration.
+The authenticated support identity was verified in the browser. An OAuth Config
+Editor role grant on the dedicated project is prepared and awaiting approval.
+See [support email and Google identity](support-email.md).
 The project is separate from hashbin.
 
 ## Remaining integration
