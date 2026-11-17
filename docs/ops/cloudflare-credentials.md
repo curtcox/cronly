@@ -41,8 +41,8 @@ Invocation/periodic namespace filters, prices and the fail-closed brake are unch
 See [sanitized schema and query evidence](evidence/cloudflare-analytics-schema-2026-11-17.json).
 
 The app Worker and its three SQLite Durable Object namespaces were deployed on
-2026-11-17. Their IDs are recorded in GitHub's `CRONLY_DO_NAMESPACES` variable and
-must be bound on the next deployment. Schema validation alone cannot verify actual
+2026-11-17. Their verified IDs are recorded in GitHub's `CRONLY_DO_NAMESPACES` variable
+and deployed as `COST_SAFETY_DO_NAMESPACES`. Schema validation alone cannot verify actual
 usage measurements or cost reconciliation; the first live monitor remains pending.
 See [launch procedure](launch.md) and STATUS L12/L14.
 

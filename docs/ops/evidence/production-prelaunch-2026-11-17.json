@@ -1,0 +1,57 @@
+{
+  "recorded_at": "2026-11-17T17:31:37.671439+00:00",
+  "origin": "https://cronly.org",
+  "git_sha": "038d9208dd03212a7e1a6f2723d3cc5d8c2a762a",
+  "workflow_url": "https://github.com/curtcox/cronly/actions/runs/44137471609",
+  "workflow_conclusion": "success",
+  "local_and_ci_checks": {
+    "lint": "passed",
+    "unit_integration_tests": 998,
+    "browser_tests": 7,
+    "production_dependency_audit": "passed"
+  },
+  "live_public_checks": {
+    "release_sha": "passed",
+    "public_pages_without_redirects": "passed",
+    "live_clerk_configuration": "passed",
+    "unauthenticated_account_read_denied": "passed",
+    "localdev_authentication_denied": "passed"
+  },
+  "live_browser_checks": {
+    "home": "passed",
+    "workspace": "passed",
+    "clerk_email_field": "passed",
+    "clerk_google_option": "passed",
+    "sign_in_csp_violations": 0,
+    "fresh_browser_without_credentials": true
+  },
+  "durable_objects": {
+    "AccountDO": "07675d4af12f425c83739ad8d0129bbc",
+    "JobDO": "bd4ff96c6b4b4b1e9a15fe7fd76bf78e",
+    "SafetyDO": "dbdfbf0d6e83445da1162bf0babab625"
+  },
+  "controls": {
+    "invite_only": true,
+    "launch_approved": false,
+    "public_javascript_accepted": false,
+    "automatic_deployments": false,
+    "anthropic_configured": false,
+    "cost_safety_namespaces_configured": true
+  },
+  "not_accepted": [
+    "owner invitation and actual email/Google sign-in",
+    "signed Clerk/Stripe webhook delivery",
+    "real deposit and fulfillment",
+    "first healthy production cost-monitor report",
+    "production HTTP schedule/manual/hook execution",
+    "full deployed JavaScript billing/Queue/gateway acceptance",
+    "Anthropic model evaluation",
+    "legal approval and complete operator facts",
+    "WAF and billing alerts"
+  ],
+  "notes": [
+    "No sign-in credentials were submitted and no email or invitation was sent.",
+    "No customer credit, API key, payment or paid run was created by these checks.",
+    "Signing/encryption keys were independently generated, backed up in macOS Keychain and stored encrypted in GitHub production."
+  ]
+}

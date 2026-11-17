@@ -1,7 +1,8 @@
 # Production launch handoff (L9–L14)
 
 Work is on main. The first app Worker/custom-domain deployment completed on
-2026-11-17; public-page and single-user service acceptance are tracked in STATUS.md.
+2026-11-17. Public-page and signed-out Clerk checks passed on release `038d920`;
+actual single-user service acceptance is tracked in STATUS.md.
 Deployment credentials are not copied from hashbin. Use the same operating entity
 and Cloudflare account, with a separate Clerk application and Stripe product, as approved
 2026-11-15. STATUS.md is authoritative for acceptance status.
