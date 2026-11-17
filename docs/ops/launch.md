@@ -33,7 +33,7 @@ and Cloudflare account, with a separate Clerk application and Stripe product, as
    CLOUDFLARE_ACCOUNT_ID. Add the read-only analytics token separately. No .dev.vars
    or plaintext credentials belong in git. CI uploads secrets through stdin.
    The independent deployment and analytics tokens were created and stored on
-   2026-11-17; see [scopes, expiration and live schema issue](cloudflare-credentials.md).
+   2026-11-17; see [scopes, expiration and live schema checks](cloudflare-credentials.md).
 6. Run the manual Deploy production workflow. Automatic main deployments are opt-in via
    repository variable CRONLY_DEPLOY_ENABLED=true after initial setup. CI verifies lint,
    unit/cost-floor/drift tests, browser flows and the Worker build before deploy.
@@ -82,8 +82,8 @@ uses a nonterminating loop and requires the explicit native CPU-limit exception.
 The cronly.org zone is active and the `cronly-runs` queue exists. GitHub's production
 environment contains the verified Cloudflare account ID, deployment/analytics
 tokens and live Clerk keypair/webhook secret. Other application credentials and
-the app Worker remain unconfigured; the analytics storage-filter schema mismatch
-must be resolved before cost-monitor acceptance.
+the app Worker remain unconfigured. The analytics query now passes live schema
+validation; actual usage/cost-monitor acceptance requires deployed namespaces.
 Automatic deployments, launch approval
 and public JavaScript remain disabled.
 

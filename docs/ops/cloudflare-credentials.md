@@ -32,9 +32,13 @@ permissions still need the real deployment acceptance.
 A live request using the production cost-monitor query and only the `cronly`
 script plus a synthetic namespace filter reached Cloudflare's GraphQL API, but
 it was rejected: `durableObjectsStorageGroups` does not accept `namespaceId_in`.
-No other application's usage was requested. The namespace-filtered query must be
-adapted to the live schema and rechecked before claiming cost-monitor acceptance.
-Do not remove filtering or turn off the brake to work around the error.
+No other application's usage was requested. Live introspection identified
+`durableObjectsSqlStorageGroups` for cronly's SQLite-backed namespaces, with the
+required `namespaceId_in` filter. The production query now uses that dataset and
+groups by `namespaceId` before adding each namespace's peak bytes. The corrected
+query returned HTTP 200 with no GraphQL errors and empty datasets on 2026-11-17.
+Invocation/periodic namespace filters, prices and the fail-closed brake are unchanged.
+See [sanitized schema and query evidence](evidence/cloudflare-analytics-schema-2026-11-17.json).
 
 The app Worker and its Durable Object namespaces are not deployed. Schema
 validation alone cannot verify actual usage measurements or cost reconciliation.

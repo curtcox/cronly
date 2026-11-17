@@ -3,12 +3,14 @@ import { rpc } from '../utils/rpc.js';
 import { assert } from '../utils/errors.js';
 // Ported from hashbin's monitor: query total CPU, never percentiles; reject missing
 // or truncated datasets. Namespace filters are required in a shared Cloudflare account.
+// cronly uses SQLite DOs. The legacy storage dataset groups namespace ID arrays;
+// SQL storage exposes individual namespaces, which must stay separate before summing maxima.
 export const USAGE_QUERY = `query Costs($account: string!, $start: Time!, $end: Time!, $scripts: [string!], $namespaces: [string!]) {
  viewer { accounts(filter: {accountTag: $account}) {
   workers: workersInvocationsAdaptive(limit: 10, filter: {datetime_geq: $start, datetime_lt: $end, scriptName_in: $scripts}) { sum { requests cpuTimeUs } }
   invocations: durableObjectsInvocationsAdaptiveGroups(limit: 10, filter: {datetime_geq: $start, datetime_lt: $end, namespaceId_in: $namespaces}) { sum { requests } }
   periodic: durableObjectsPeriodicGroups(limit: 10, filter: {datetime_geq: $start, datetime_lt: $end, namespaceId_in: $namespaces}) { sum { duration rowsRead rowsWritten } }
-  storage: durableObjectsStorageGroups(limit: 1000, filter: {datetime_geq: $start, datetime_lt: $end, namespaceId_in: $namespaces}) { max { storedBytes } }
+  storage: durableObjectsSqlStorageGroups(limit: 1000, filter: {datetime_geq: $start, datetime_lt: $end, namespaceId_in: $namespaces}) { max { storedBytes } dimensions { namespaceId } }
  } }
 }`;
 /** Reject missing metrics rather than quietly substituting zero cost (hashbin convention). */

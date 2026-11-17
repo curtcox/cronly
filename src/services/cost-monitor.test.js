@@ -20,6 +20,34 @@ it('computes actual billable totals and rejects truncated datasets', () => {
   account.workers = Array(10).fill(account.workers[0]); expect(() => measuredCost(account)).toThrow();
 });
 
+it('sums the peak SQLite storage of each namespace rather than the largest namespace only', () => {
+  expect(measuredCost({ workers: [], invocations: [], periodic: [], storage: [
+    { max: { storedBytes: 1000000 }, dimensions: { namespaceId: 'accounts' } },
+    { max: { storedBytes: 2000000 }, dimensions: { namespaceId: 'jobs' } }
+  ] })).toBe(20);
+});
+
+it('queries namespace-filtered SQLite storage using the live Cloudflare contract', async () => {
+  const env = await recoverySetup();
+  env.ANALYTICS_FETCH.mockImplementation(async (url, request) => {
+    const { query, variables } = JSON.parse(request.body);
+    expect(url).toBe('https://api.cloudflare.com/client/v4/graphql');
+    expect(variables).toEqual({ account: 'test', scripts: ['cronly'], namespaces: ['accounts', 'jobs', 'safety'], start: '2026-11-15T00:00:00.000Z', end: '2026-11-16T00:00:00.000Z' });
+    // The 2026-11-17 live schema rejects namespaceId_in on the legacy storage dataset.
+    // SQL storage supports that filter; namespace grouping prevents max from dropping other DOs.
+    const storage = query.match(/storage:\s*(\w+)\([\s\S]*?\n/)[0];
+    if (!storage.includes('durableObjectsSqlStorageGroups(') || !storage.includes('namespaceId_in: $namespaces') || !storage.includes('dimensions { namespaceId }')) {
+      return Response.json({ errors: [{ message: 'Unsupported SQLite storage query' }] });
+    }
+    return Response.json({ data: { viewer: { accounts: [{ workers: [], invocations: [], periodic: [], storage: [
+      { max: { storedBytes: 1000000 }, dimensions: { namespaceId: 'accounts' } },
+      { max: { storedBytes: 2000000 }, dimensions: { namespaceId: 'jobs' } }
+    ] }] } } });
+  });
+  expect(await runCostMonitor(env)).toMatchObject({ brake: false, observed_microdollars: 20 });
+  expect(env.ANALYTICS_FETCH).toHaveBeenCalledOnce();
+});
+
 async function recoverySetup() {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
   const env = {

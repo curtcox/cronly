@@ -1,0 +1,89 @@
+{
+  "checked_at": "2026-11-17T15:29:57.129Z",
+  "endpoint": "https://api.cloudflare.com/client/v4/graphql",
+  "scope_note": "Only the cronly script and an all-zero synthetic namespace were requested; cronly is not deployed. Empty datasets verify query compatibility, not billable usage.",
+  "initial_query_errors": [
+    "error parsing args for \"durableObjectsStorageGroups\": filter: unknown arg namespaceId_in"
+  ],
+  "storage_filter_inputs": {
+    "AccountDurableObjectsStorageGroupsFilter_InputObject": [
+      "namespaceIds_has",
+      "namespaceIds_hasall",
+      "namespaceIds_hasany",
+      "namespaceIds_isempty",
+      "namespaceIds_nothas"
+    ],
+    "AccountDurableObjectsSqlStorageGroupsFilter_InputObject": [
+      "namespaceId",
+      "namespaceId_geq",
+      "namespaceId_gt",
+      "namespaceId_ilike",
+      "namespaceId_in",
+      "namespaceId_leq",
+      "namespaceId_like",
+      "namespaceId_lt",
+      "namespaceId_neq",
+      "namespaceId_notin",
+      "namespaceId_notlike"
+    ]
+  },
+  "billing_fields": {
+    "AccountDurableObjectsSqlStorageGroupsMax": [
+      {
+        "name": "storedBytes",
+        "description": "Max of stored bytes"
+      }
+    ],
+    "AccountDurableObjectsPeriodicGroupsSum": [
+      {
+        "name": "duration",
+        "description": "Sum of Duration - GB*s, weighted by the configured Durable Object memory limit"
+      },
+      {
+        "name": "rowsRead",
+        "description": "Sum of rows read (by sqlite backed DOs)"
+      },
+      {
+        "name": "rowsWritten",
+        "description": "Sum of rows written (by sqlite backed DOs)"
+      }
+    ],
+    "AccountWorkersInvocationsAdaptiveSum": [
+      {
+        "name": "cpuTimeUs",
+        "description": "Sum of cpu time in us"
+      },
+      {
+        "name": "duration",
+        "description": "Sum of Duration - GB*s"
+      },
+      {
+        "name": "requests",
+        "description": "Sum of Requests"
+      }
+    ]
+  },
+  "corrected_query": {
+    "checked_at": "2026-11-17T15:29:57.129Z",
+    "query_sha256": "57438ad4337cf4c314227c957c11a217b7cb23886514d2e7b029e6af0a67301a",
+    "variables": {
+      "account": "3fe46716ab4b27b1a21590ed3a0a7477",
+      "start": "2026-11-16T00:00:00.000Z",
+      "end": "2026-11-17T00:00:00.000Z",
+      "scripts": [
+        "cronly"
+      ],
+      "namespaces": [
+        "00000000000000000000000000000000"
+      ]
+    },
+    "http_status": 200,
+    "errors": [],
+    "account": {
+      "invocations": [],
+      "periodic": [],
+      "storage": [],
+      "workers": []
+    }
+  }
+}
