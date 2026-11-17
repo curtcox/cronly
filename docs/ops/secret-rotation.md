@@ -59,13 +59,16 @@ the hold at zero charge. An authentication/decryption failure also releases the 
 and returns a generic error. Rotation preserves the value, fingerprint and the user's
 last-update timestamp and records a metadata-only audit entry.
 
-If a request is interrupted after the hold, retry with the same idempotency key to
-retrieve a completed result. An unfinished rotation returns `rotation_in_progress`,
-then `rotation_expired`; retry with a new key after checking the account balance and
-secret metadata. Uncertain holds expire at their reserved maximum under the standard
-ledger policy. Completed results, including refunded failures, replay without another
-charge. The script stops on uncertain network outcomes; rerunning checks current
-metadata before issuing new rotations.
+If a request is interrupted after the hold, retry with the same idempotency key.
+An unfinished rotation resumes against its original secret and target version without
+another hold or charge, including after a restart. Concurrent retries finalize once.
+If the secret or active target changed, recovery releases the hold at zero charge and
+preserves the conflict response. Expired reservations return `rotation_expired`; check
+the account balance and metadata before starting with a new key. Uncertain holds expire
+at their reserved maximum under the standard ledger policy. Completed results, refunded
+failures and no-op results replay unchanged even after later edits or key activations.
+Dry runs always quote the current state. The script stops on uncertain network outcomes;
+rerunning checks current metadata before issuing new rotations.
 
 ## Retire an old key
 
