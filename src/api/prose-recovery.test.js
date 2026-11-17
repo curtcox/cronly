@@ -88,3 +88,60 @@ it('rolls back settlement and response together if the final response cannot per
   expect((await api()).status).toBe(409);
   expect(env.LLM_FETCH).toHaveBeenCalledTimes(1);
 });
+
+for (const mode of ['ask', 'change']) {
+  it(`leaves no prose hold when the ${mode} account snapshot cannot be read`, async () => {
+    const { env, account, api, cold, id } = await setup(mode);
+    const storage = env.ACCOUNTS.get('a').storage; const list = storage.list.bind(storage);
+    const fault = vi.spyOn(storage, 'list').mockImplementation(async options => {
+      if (options.prefix.startsWith('def:')) throw new Error('configuration unavailable');
+      return list(options);
+    });
+    expect((await api()).status).toBe(500); fault.mockRestore();
+    expect(await account('account')).toMatchObject({ balance_microdollars: 5000000, held_microdollars: 0 });
+    expect(await storage.get(`prose:${id}`)).toBeUndefined();
+    expect(env.LLM_FETCH).not.toHaveBeenCalled();
+    cold(); expect((await api()).status).toBe(200);
+    expect(env.LLM_FETCH).toHaveBeenCalledTimes(1);
+  });
+}
+
+it('translates cron without reading unrelated account definitions', async () => {
+  const { env, api } = await setup('to-cron');
+  const storage = env.ACCOUNTS.get('a').storage; const list = storage.list.bind(storage);
+  vi.spyOn(storage, 'list').mockImplementation(async options => {
+    if (options.prefix.startsWith('def:')) throw new Error('configuration unavailable');
+    return list(options);
+  });
+  expect(await api()).toMatchObject({ status: 200, cron: '0 9 * * 1-5' });
+  expect(env.LLM_FETCH).toHaveBeenCalledTimes(1);
+});
+
+it('keeps a change proposal tied to the account snapshot taken with its reservation', async () => {
+  const { env, account, api } = await setup('change');
+  await account('mutate', { account: 'a', id: 'before', operations: [{ kind: 'variables', name: 'greeting', value: { value: 'original' } }] });
+  const provider = env.LLM_FETCH.getMockImplementation();
+  env.LLM_FETCH.mockImplementation(async (...args) => {
+    const payload = JSON.parse(args[1].body);
+    expect(JSON.parse(payload.messages[0].content).variables.greeting).toBe('original');
+    expect((await account('account')).held_microdollars).toBe(proseQuote('change'));
+    await account('mutate', { account: 'a', id: 'during', operations: [{ kind: 'variables', name: 'greeting', value: { value: 'edited' } }] });
+    return provider(...args);
+  });
+  const proposal = await api(); expect(proposal.status).toBe(200);
+  await expect(account('apply-proposal', { account: 'a', id: proposal.id })).rejects.toMatchObject({ status: 409, code: 'stale_proposal' });
+  expect((await account('config')).variables.greeting).toBe('edited');
+});
+
+it('replays a validation failure with its original HTTP status and one charge', async () => {
+  const { env, account, api, cold } = await setup('change');
+  env.LLM_FETCH.mockImplementation(async () => Response.json({
+    usage: { input_tokens: 100, output_tokens: 100 }, stop_reason: 'end_turn',
+    content: [{ type: 'text', text: JSON.stringify({ explanation: 'Invalid proposal', operations: [{ kind: 'jobs', name: 'bad', delete: false, value_json: JSON.stringify({ action: 'missing', cron: null }) }] }) }]
+  }));
+  expect(await api()).toMatchObject({ status: 400, code: 'unknown_action', cost_microdollars: 4436 });
+  const balance = await account('account'); cold();
+  expect(await api()).toMatchObject({ status: 400, code: 'unknown_action', cost_microdollars: 4436 });
+  expect(await account('account')).toMatchObject({ balance_microdollars: balance.balance_microdollars, held_microdollars: 0 });
+  expect(env.LLM_FETCH).toHaveBeenCalledTimes(1);
+});

@@ -78,8 +78,12 @@ export class AccountDO {
       case 'begin-prose': {
         const prior = await tx.get(`prose:${args.id}`);
         if (prior) { assert(prior.request_hash === args.request_hash, 'idempotency_conflict', 'Idempotency key reused', 409); return { duplicate: true, response: prior.response }; }
+        // Read the frozen account view before holding credit. A failed read
+        // cannot leave an unstarted provider request to expire at its maximum.
+        const config = args.mode === 'ask' || args.mode === 'change' ? await loadConfig(tx, true) : undefined;
+        const base_hash = args.mode === 'change' ? await digest(JSON.stringify(config)) : undefined;
         await reserve(tx, { id: args.id, amount: args.amount, kind: 'prose', ttl_ms: 240000, ...await keyBudget(tx, args.key_id) });
-        await tx.put(`prose:${args.id}`, { request_hash: args.request_hash }); return {};
+        await tx.put(`prose:${args.id}`, { request_hash: args.request_hash }); return { config, base_hash };
       }
       case 'finish-prose': {
         const prior = await tx.get(`prose:${args.id}`);

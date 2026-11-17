@@ -14,9 +14,9 @@ export async function prose(route, request, env, auth) {
   if (new URL(request.url).searchParams.get('dry_run') === '1') return { quote_microdollars: quote, cost_microdollars: 0 };
   assert(env.ANTHROPIC_API_KEY, 'prose_unavailable', 'Prose is not configured', 503);
   const id = `prose:${auth.key_id || 'session'}:${request.headers.get('Idempotency-Key') || crypto.randomUUID()}`;
-  const started = await rpc(env.ACCOUNTS, auth.account, 'begin-prose', { id, amount: quote, request_hash: await digest(JSON.stringify({ mode, input })), key_id: auth.key_id });
-  if (started.duplicate) { if (started.response?.failed) throw new ApiError(502, started.response.code, started.response.error, { cost_microdollars: started.response.cost_microdollars }); assert(started.response, 'request_in_progress', 'Request already started; retry later or inspect transactions', 409); return started.response; }
-  const config = await rpc(env.ACCOUNTS, auth.account, 'config'); const base_hash = await digest(JSON.stringify(config));
+  const started = await rpc(env.ACCOUNTS, auth.account, 'begin-prose', { id, mode, amount: quote, request_hash: await digest(JSON.stringify({ mode, input })), key_id: auth.key_id });
+  if (started.duplicate) { if (started.response?.failed) throw new ApiError(started.response.failure_status || 502, started.response.code, started.response.error, { cost_microdollars: started.response.cost_microdollars }); assert(started.response, 'request_in_progress', 'Request already started; retry later or inspect transactions', 409); return started.response; }
+  const { config, base_hash } = started;
   const readTool = async name => name === 'list_jobs' ? config.jobs : name === 'recent_runs' ? (await retainedRuns(env, auth.account, config)).slice(0, 10) : projection(config, await rpc(env.ACCOUNTS, auth.account, 'account'));
   let knownCharge; let response;
   try {
@@ -43,12 +43,12 @@ export async function prose(route, request, env, auth) {
     const failure = error instanceof ApiError ? error : new ApiError(502, 'invalid_prose_response', 'Invalid prose provider response');
     const knownTokens = error.details?.known_token_cost_microdollars;
     const cost = knownCharge ?? (knownTokens === undefined ? quote : Math.min(quote, Math.ceil(knownTokens * PRICES.proseMarkup) + PRICES.proseBase));
-    response = { failed: true, error: failure.message, code: failure.code, cost_microdollars: cost };
+    response = { failed: true, failure_status: failure.status, error: failure.message, code: failure.code, cost_microdollars: cost };
   }
   // Finalization failures must not reinterpret a successful provider result. Its
   // transaction may have committed even when the acknowledgement was lost.
   const saved = await rpc(env.ACCOUNTS, auth.account, 'finish-prose', { id, actual: response.cost_microdollars, response });
-  if (saved.failed) throw new ApiError(502, saved.code, saved.error, { cost_microdollars: saved.cost_microdollars });
+  if (saved.failed) throw new ApiError(saved.failure_status || 502, saved.code, saved.error, { cost_microdollars: saved.cost_microdollars });
   return saved;
 }
 /** Applying a proposal is a separate billed transaction against its original config revision. */
