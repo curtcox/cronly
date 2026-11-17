@@ -17,9 +17,10 @@ separate application from hashbin, as approved in STATUS D1.
 | Google Cloud project number | `173186686444` |
 
 [Production dashboard](https://dashboard.clerk.com/apps/app_3MEi0XGTZX7J6dgu6ezcHdRwyHA/instances/ins_3MEi8pmakrxmN0ExfJI0UhhAicJ).
-The owner explicitly selected Email and Google. Google's production connection
-is enabled but still requires custom OAuth credentials; enabling the provider
-alone does not establish a working production Google sign-in.
+The owner explicitly selected Email and Google. The production Google connection
+now has its dedicated OAuth credentials saved and Clerk lists it as **Used for
+sign-in**, without the previous setup warning. Google publication and an actual
+sign-in remain unverified.
 
 ## Completed configuration
 
@@ -48,25 +49,42 @@ credentials were reused. Deployments and launch approval remain disabled.
 
 The owner requested a dedicated Google Cloud project and separately approved its
 link to the selected existing billing account. Project `cronly-515013` was created
-on 2026-11-17. Google Auth Platform configuration is in progress; its required
-consent configuration needs completion before an OAuth client
-can be created. The owner requested `support@cronly.org`, now provisioned as an
+on 2026-11-17. The owner requested `support@cronly.org`, now provisioned as an
 incoming forwarding address, and completed its Google account registration.
 The authenticated support identity was verified in the browser. The owner approved
-and saved its OAuth Config Editor role grant on the dedicated project. Fresh
-Google Cloud password verification is awaiting the owner in the browser.
-Creation of the web client and storage of its credentials in Clerk are approved
-but have not occurred yet.
+and saved its OAuth Config Editor role grant on the dedicated project, then
+completed fresh Google Cloud password verification directly.
+
+With explicit owner approval of Google's API Services User Data Policy, created
+the OAuth configuration named `cronly`, using `support@cronly.org` for both
+user support and developer notices. Created the web client **cronly production
+Clerk** with origin `https://cronly.org` and callback
+`https://clerk.cronly.org/v1/oauth_callback`. Its client ID and secret were
+transferred privately into Clerk's production Google connection and saved;
+the connection list confirms **Used for sign-in**. Clerk retains only `openid`,
+email and profile scopes. Credentials are not recorded in this repository.
+
+The support identity's OAuth Config Editor role does not provide the console's
+additional `serviceusage.quotas.get` or `iam.serviceAccounts.list` permissions.
+Branding was configured as the support identity; the existing project owner
+created the client. No additional IAM roles were granted to work around the
+console's permission checks.
+
+Google's audience is **External / Testing**, with no test users. **Publish app**
+is disabled until branding configuration is complete. The home page, privacy
+policy, Terms links and authorized domains are still empty; the app Worker and
+approved legal pages must be available before completing public launch branding.
+No OAuth publication, brand/domain verification or successful sign-in is claimed.
 See [support email and Google identity](support-email.md).
 The project is separate from hashbin.
 
 ## Remaining integration
 
-1. Configure the production Google connection with a Google Cloud OAuth web
-   client. Use authorized origin `https://cronly.org` and the exact callback
-   `https://clerk.cronly.org/v1/oauth_callback`; retain only the identity scopes
-   Clerk requests (`openid`, email, profile). Confirm consent-screen publication
-   and domain verification in the selected Google project. Store its client secret
+1. Complete Google branding with the live home page and approved public policies,
+   register/verify `cronly.org` as required, and confirm consent-screen publication
+   in the selected Google project. If testing before publication, authorize the
+   owner's test identity explicitly. Retain only the identity scopes Clerk requests
+   (`openid`, email, profile); the dedicated client credentials are already saved
    only in Clerk's Google connection settings.
 2. Verify issued certificates and HTTPS on both Clerk subdomains.
 3. Register `https://cronly.org/webhooks/clerk` for `user.created` and `user.updated`.

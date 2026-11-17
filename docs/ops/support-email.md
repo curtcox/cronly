@@ -48,8 +48,12 @@ With explicit owner approval, the `OAuth Config Editor`
 (`roles/oauthconfig.editor`) grant was saved for this identity on
 `cronly-515013` on 2026-11-17 and verified in the project's IAM table. It permits
 OAuth configuration and client credential management. The original project owner
-retains the existing Owner role. Google Cloud requires fresh password verification
-for the support identity; that browser sign-in is awaiting the owner.
+retains the existing Owner role. The owner completed fresh Google Cloud password
+verification directly. OAuth branding now uses `support@cronly.org` for both user
+support and developer notices. The dedicated web client and Clerk connection are
+configured; Google remains External / Testing pending public branding and launch
+acceptance. See [Clerk integration](clerk.md) for the remaining steps and the
+console permissions that the narrower editor role does not include.
 
 References: [Google's support-email requirements](https://support.google.com/cloud/answer/15549049?hl=en),
 [using an existing address for a Google account](https://support.google.com/accounts/answer/27441?hl=en#existingemail),
