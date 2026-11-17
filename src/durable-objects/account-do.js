@@ -111,9 +111,18 @@ export class AccountDO {
       }
       case 'bill-change': {
         const amount = price('change'); if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
-        const receipt = await charge(tx, { id: args.id, amount, kind: 'change', ...await keyBudget(tx, args.key_id) });
+        const prior = await tx.get(`receipt:${args.id}`);
+        if (prior) {
+          assert(!prior.request_hash || prior.request_hash === args.request_hash, 'idempotency_conflict', 'Idempotency key reused', 409);
+          return prior.change_response || { cost_microdollars: prior.charged };
+        }
+        // Bind the intended trigger settings before the cross-object reply.
+        // JobDO can then recover a failed write, but cannot apply different
+        // settings using the already-paid identity. Reuse the billing receipt.
+        const response = { cost_microdollars: amount, balance_microdollars: (await funds(tx)).balance_microdollars - amount };
+        const receipt = await charge(tx, { id: args.id, amount, kind: 'change', request_hash: args.request_hash, change_response: response, ...await keyBudget(tx, args.key_id) });
         if (!receipt.duplicate) { await tx.put(`audit:${Date.now()}:${args.id}`, { id: args.id, kind: 'trigger', created_at: Date.now() }); }
-        return { cost_microdollars: receipt.duplicate ? 0 : amount };
+        return receipt.change_response || { cost_microdollars: receipt.charged };
       }
       case 'activity': {
         const counts = Object.create(null); const state = await accountMoney(tx);

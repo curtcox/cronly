@@ -261,6 +261,16 @@ Pause publication precedes the durable pause so an outage can retry from the due
 schedule without requiring a held run. These changes bound unpaid recovery work;
 the paid-run cost allowances and 85 µ$ base price are unchanged.
 
+Credential changes also retain their original billed responses. Key creation
+shares its existing key-record write; key revocation commits an intent receipt
+with the charge and revocation. Trigger intent and response share the permanent
+billing receipt before replying to JobDO, allowing recovery of a failed trigger
+write without changing its rate or charging again. Unchanged trigger replays
+skip job writes, including after revocation. Recovery at an exhausted delegated
+key cap remains possible for the already-paid identity; new changes still enforce
+the cap. Dry runs validate and quote current input without consuming a receipt.
+The existing change allowance and prices remain unchanged.
+
 ## Verified provider sources
 
 - [Workers](https://developers.cloudflare.com/workers/platform/pricing/)

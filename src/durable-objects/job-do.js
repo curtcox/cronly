@@ -4,6 +4,7 @@ import { price } from '../utils/pricing.js';
 import { nextFires } from '../services/cron.js';
 import { compareRuns, runCursor, parseRunCursor } from '../services/run-pagination.js';
 import { sameRecord } from '../utils/records.js';
+import { digest } from '../auth/crypto.js';
 
 const DAY = 86400000;
 /** Per-job alarm and run log. Never waits for customer HTTP inside the DO. */
@@ -31,10 +32,14 @@ export class JobDO {
         const settings = await this.storage.get('settings'); assert(settings?.job, 'not_found', 'Job not found', 404);
         const prior = await this.storage.get(`trigger:${args.id}`);
         if (args.revoke) assert(prior, 'not_found', 'Trigger not found', 404);
-        else assert(!prior || prior.rate === args.rate, 'idempotency_conflict', 'Trigger id already used', 409);
+        else if (!args.dry_run) assert(!prior || prior.rate === args.rate, 'idempotency_conflict', 'Trigger id already used', 409);
         assert(prior || (await this.storage.list({ prefix: 'trigger:' })).size < 100, 'trigger_limit', 'Maximum 100 triggers per job');
-        const result = await rpc(this.env.ACCOUNTS, settings.account, 'bill-change', { id: `trigger:${settings.name}:${args.id}:${args.revoke ? 'revoke' : 'create'}`, key_id: args.key_id, dry_run: args.dry_run });
-        if (!args.dry_run) await this.storage.put(`trigger:${args.id}`, { id: args.id, rate: args.rate, revoked: args.revoke || prior?.revoked || false });
+        const request_hash = await digest(JSON.stringify({ job: settings.name, id: args.id, revoke: !!args.revoke, ...(!args.revoke ? { rate: args.rate } : {}) }));
+        const result = await rpc(this.env.ACCOUNTS, settings.account, 'bill-change', { id: `trigger:${settings.name}:${args.id}:${args.revoke ? 'revoke' : 'create'}`, request_hash, key_id: args.key_id, dry_run: args.dry_run });
+        // Revocation must preserve the creation settings: a later create replay
+        // returns its original token without restoring access or rewriting state.
+        const trigger = { id: args.id, rate: args.revoke ? prior.rate : args.rate, revoked: args.revoke || prior?.revoked || false };
+        if (!args.dry_run && !sameRecord(prior, trigger)) await this.storage.put(`trigger:${args.id}`, trigger);
         return { ...result, id: args.id };
       }
       case 'hook': {
