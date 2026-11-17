@@ -107,8 +107,11 @@ export class JobDO {
       const prior = await this.storage.get('settings');
       if (prior) {
         const settings = { ...prior, paused: 'cost_brake' }; delete settings.resume_at;
+        // Keep the due schedule retryable until the account sees the pause.
+        // Otherwise a failed publication/alarm could hide it until recovery.
+        await this.publish(settings);
         if (JSON.stringify(settings) !== JSON.stringify(prior)) await this.storage.put('settings', settings);
-        await this.arm(); await this.publish(settings);
+        await this.arm();
       }
       assert(false, 'cost_brake', 'Runs are paused pending cost reconciliation', 503);
     }

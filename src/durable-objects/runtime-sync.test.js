@@ -77,7 +77,9 @@ it('publishes analytics cost pauses and repairs publication without repeated wri
   const fault = vi.spyOn(object, 'publish').mockRejectedValueOnce(new Error('publication unavailable'));
   await expect(job('start', { id: 'blocked', input: {}, trigger: 'manual' })).rejects.toMatchObject({ status: 500 });
   fault.mockRestore();
+  expect(await job('status')).toEqual(settings);
   env.JOBS.objects.set('a:j', new JobDO({ storage: object.storage, blockConcurrencyWhile: fn => fn() }, env));
+  await expect(job('start', { id: 'blocked', input: {}, trigger: 'manual' })).rejects.toMatchObject({ status: 503, code: 'cost_brake' });
   const put = vi.spyOn(object.storage, 'put');
   const alarm = vi.spyOn(object.storage, 'setAlarm');
   for (const id of ['blocked', 'again']) await expect(job('start', { id, input: {}, trigger: 'manual' })).rejects.toMatchObject({ status: 503, code: 'cost_brake' });
@@ -91,6 +93,35 @@ it('publishes analytics cost pauses and repairs publication without repeated wri
   expect(after.held_microdollars).toBe(0);
   expect((await job('runs')).items).toHaveLength(1);
 });
+
+for (const failure of ['publication', 'settings', 'alarm']) {
+  it(`recovers a scheduled cost pause after failed ${failure} and a cold restart`, async () => {
+    const { env, account, job, object } = await setup();
+    env.SAFETY = { idFromName: id => id, get: () => ({ fetch: async () => Response.json({ brake: true }) }) };
+    const prior = await job('status'); const balance = await account('account');
+    vi.setSystemTime(prior.next_fire); await object.storage.deleteAlarm();
+    const send = vi.spyOn(env.RUN_QUEUE, 'send');
+    const fault = failure === 'publication' ? vi.spyOn(object, 'publish').mockRejectedValueOnce(new Error('publication unavailable'))
+      : failure === 'settings' ? vi.spyOn(object.storage, 'put').mockRejectedValueOnce(new Error('settings unavailable'))
+        : vi.spyOn(object.storage, 'setAlarm').mockRejectedValueOnce(new Error('alarm unavailable'));
+    await expect(object.alarm()).rejects.toThrow(); fault.mockRestore();
+    if (failure !== 'alarm') expect(await job('status')).toEqual(prior);
+    const cold = new JobDO({ storage: object.storage, blockConcurrencyWhile: fn => fn() }, env);
+    env.JOBS.objects.set('a:j', cold); await cold.alarm();
+    expect(await job('status')).toMatchObject({ paused: 'cost_brake', next_fire: prior.next_fire, last_outcome: 'success' });
+    expect((await account('account')).job_runtime.j.paused).toBe('cost_brake');
+    expect(await object.storage.getAlarm()).toBeLessThanOrEqual(Date.now() + 30 * 86400000);
+    expect(send).not.toHaveBeenCalled();
+    expect(await account('account')).toMatchObject({ balance_microdollars: balance.balance_microdollars, held_microdollars: 0 });
+    expect((await job('runs')).items).toHaveLength(1);
+    const put = vi.spyOn(object.storage, 'put'); const alarm = vi.spyOn(object.storage, 'setAlarm');
+    await cold.alarm();
+    expect(put).not.toHaveBeenCalled(); expect(alarm).not.toHaveBeenCalled();
+    await account('resume-cost-jobs'); await account('sync-jobs');
+    expect(await job('status')).toMatchObject({ paused: null, next_fire: Date.now() + 3600000 });
+    expect((await account('account')).job_runtime.j.paused).toBe(null);
+  });
+}
 
 it('keeps the operator hard stop stateless so removing it permits scheduled work', async () => {
   const { env, job, object } = await setup();
