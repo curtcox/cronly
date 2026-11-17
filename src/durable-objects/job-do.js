@@ -60,6 +60,12 @@ export class JobDO {
         return this.start({ ...args, trigger: 'webhook', scheduled_at: new Date().toISOString() });
       }
       case 'status': return await this.storage.get('settings') || {};
+      case 'test-action': {
+        // Test setup and reservation share one orchestration turn/request. Keep
+        // the same durable configure/start steps so either can recover alone.
+        await this.dispatch({ op: 'configure', account: args.account, name: `_test:${args.test_action}`, job: { action: args.test_action, test_action: args.test_action, enabled: true, cron: null, retries: 0 } });
+        return this.start(args);
+      }
       case 'start': return this.start(args);
       case 'result': return this.result(args);
       case 'recover-result': {

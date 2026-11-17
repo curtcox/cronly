@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import { price, PRICES } from '../src/utils/pricing.js';
 const origin = process.env.CRONLY_ORIGIN || 'http://localhost:8787';
+let nextRequestAt = 0;
 function localClient(user) {
   return async function api(path, method = 'GET', body, idempotency, expectedStatus = 200) {
+    // All acceptance accounts share one ingress IP. Stay below its 240/minute
+    // allowance as checks grow, while still exercising the actual limiter.
+    const wait = nextRequestAt - Date.now();
+    if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+    nextRequestAt = Date.now() + 300;
     const response = await fetch(`${origin}${path}`, { method, signal: AbortSignal.timeout(15000), headers: { Authorization: `LocalDev ${user}`, 'Content-Type': 'application/json', ...(idempotency ? { 'Idempotency-Key': idempotency } : {}) }, body: body && JSON.stringify(body) });
     const data = await response.json(); assert.equal(response.status, expectedStatus, `${path}: ${JSON.stringify(data)}`); return data;
   };
@@ -83,6 +89,28 @@ const hookPath = `/hook/${limitedTrigger.token}`;
 assert.equal((await hookApi(hookPath, 'POST', {}, 'original')).run.trigger, 'webhook');
 assert.equal((await hookApi(hookPath, 'POST', {}, 'original')).duplicate, true);
 assert.equal((await hookApi(hookPath, 'POST', {}, 'different', 429)).code, 'rate_limited');
+// Setup and start share one JobDO request; replay still executes/charges once.
+const testApi = localClient(`action-test-${crypto.randomUUID()}`);
+await testApi('/api/dev/deposit', 'POST', { amount_microdollars: 1000 }, 'fund');
+await testApi('/api/actions/ping', 'PUT', { url: 'https://example.com' });
+assert.equal((await testApi('/api/actions/ping/test?dry_run=1', 'POST', {})).quote_microdollars, PRICES.run);
+assert.equal((await testApi('/api/account')).held_microdollars, 0);
+const tested = await testApi('/api/actions/ping/test', 'POST', {}, 'same-test');
+assert.equal(tested.run.job, '_test:ping');
+assert.equal((await testApi('/api/actions/ping/test', 'POST', {}, 'same-test')).duplicate, true);
+let testedRuns;
+const testDeadline = Date.now() + 15000;
+while (Date.now() < testDeadline) {
+  testedRuns = (await testApi('/api/runs?job=_test:ping')).items;
+  if (testedRuns.some(run => run.status === 'success')) break;
+  await new Promise(resolve => setTimeout(resolve, 500));
+}
+assert.equal(testedRuns.length, 1); assert.equal(testedRuns[0].status, 'success');
+assert.equal(testedRuns[0].cost_microdollars, PRICES.run);
+assert.equal((await testApi('/api/actions/ping/test', 'POST', {}, 'same-test')).duplicate, true);
+const testAccount = await testApi('/api/account');
+assert.equal(testAccount.held_microdollars, 0); assert.equal(testAccount.balance_microdollars, 1000 - PRICES.change - PRICES.run);
+assert.equal((await testApi('/api/transactions')).items.filter(row => row.kind === 'run').length, 1);
 await api('/api/dev/deposit', 'POST', { amount_microdollars: 5000000 }, 'fund');
 const before = await api('/api/account');
 await api('/api/variables/token?dry_run=1', 'PUT', { value: 'test' });
@@ -269,4 +297,4 @@ assert.deepEqual((await inputApi('/api/runs?job=needs-input')).items, inputPause
 await inputApi('/api/actions/needs-input', 'PUT', { url: 'https://example.com/corrected' });
 await inputApi('/api/jobs/needs-input', 'PUT', { action: 'needs-input', cron: null, budget: { day: 0 } });
 assert.equal((await inputApi('/api/account')).job_runtime['needs-input'].paused, null);
-console.log('Local acceptance passed: webhook replay at a one-attempt token limit with one execution/charge; API-key and trigger receipt replay with original charges, preserved revocation/rates, private metadata and current dry-run quotes; transactional config/no-op and pause/resume receipt replay after later edits, dry-run quotes and conflicting intent rejection, deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, one settled activation across three jobs sharing an action version, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries, one log for repeated budget refusals, preserved outcomes after configuration sync, durable deposit resumption without clearing a budget pause, a real scheduled alarm with one charge, next-fire publication and final disable, and one unpaid missing-input schedule pause that survives a deposit and resumes after correction. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');
+console.log('Local acceptance passed: combined action-test setup/start with free previews, queued/completed replay and one execution/charge; webhook replay at a one-attempt token limit with one execution/charge; API-key and trigger receipt replay with original charges, preserved revocation/rates, private metadata and current dry-run quotes; transactional config/no-op and pause/resume receipt replay after later edits, dry-run quotes and conflicting intent rejection, deposits, dry runs, HTTP, JS with large UTF-8 standalone and small compact reservations, one settled activation across three jobs sharing an action version, cross-job cooldowns and duplicate runs, constructor-named jobs/actions with numeric spend/costs and budget-capped forecasts, escaped-secret redaction before console/return truncation, native network denial, gateway, separately charged retries with preserved input, ledger/cost agreement, SQLite ledger archival and duplicate deposits across archive boundaries, one log for repeated budget refusals, preserved outcomes after configuration sync, durable deposit resumption without clearing a budget pause, a real scheduled alarm with one charge, next-fire publication and final disable, and one unpaid missing-input schedule pause that survives a deposit and resumes after correction. CPU enforcement requires live acceptance (Miniflare does not enforce production CPU limits).');

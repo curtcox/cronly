@@ -226,6 +226,9 @@ reservation. Later tests reuse it, saving one account row write per run; the
 reservation's activity record still tracks recency. Creation remains atomic with
 the prepaid hold, and retained logs remain accessible after action deletion.
 The first-test worst case still needs that write, so prices and allowances hold.
+Test setup and start now share one JobDO request, saving one DO request per
+action test. Durable configuration, reservation and dispatch recovery are retained;
+the shared run allowance and prices remain set by the other audited paths.
 
 Action changes no longer fan out into writes and scheduling synchronization for
 every job in the account. Quotes and reservations resolve the current action

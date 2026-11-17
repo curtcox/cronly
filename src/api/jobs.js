@@ -29,6 +29,5 @@ export async function testAction(route, request, env, auth) {
   assert(Object.hasOwn(config.actions, route.params.name), 'not_found', 'Action not found', 404);
   const name = `_test:${route.params.name}`; const body = await readJson(request, 8192);
   if (new URL(request.url).searchParams.get('dry_run') === '1') return rpc(env.ACCOUNTS, auth.account, 'prepare-run', { id: 'preview', name, test_action: route.params.name, dry_run: true, input: body.input || {}, trigger: 'manual' });
-  await rpc(env.JOBS, `${auth.account}:${name}`, 'configure', { account: auth.account, name, job: { action: route.params.name, test_action: route.params.name, enabled: true, cron: null, retries: 0 } });
-  return rpc(env.JOBS, `${auth.account}:${name}`, 'start', { id: `${auth.account}:${name}:${auth.key_id || 'session'}:${request.headers.get('Idempotency-Key') || crypto.randomUUID()}`, input: body.input || {}, trigger: 'manual', scheduled_at: new Date().toISOString(), key_id: auth.key_id });
+  return rpc(env.JOBS, `${auth.account}:${name}`, 'test-action', { account: auth.account, test_action: route.params.name, id: `${auth.account}:${name}:${auth.key_id || 'session'}:${request.headers.get('Idempotency-Key') || crypto.randomUUID()}`, input: body.input || {}, trigger: 'manual', scheduled_at: new Date().toISOString(), key_id: auth.key_id });
 }
