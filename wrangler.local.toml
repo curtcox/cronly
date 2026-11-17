@@ -8,6 +8,7 @@ workers_dev = true
 directory = "./frontend"
 binding = "ASSETS"
 run_worker_first = true
+html_handling = "none"
 
 [vars]
 ENVIRONMENT = "local"

@@ -6,6 +6,13 @@ async function login(page) {
   await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
 }
 async function apply(page) { await expect(page.getByRole('dialog')).toBeVisible(); await page.locator('#review-apply').click(); await expect(page.getByRole('dialog')).not.toBeVisible(); await expect(page.locator('body')).not.toHaveAttribute('data-applying', 'true'); }
+test('serves every public page at its linked URL without redirects', async ({ request }) => {
+  for (const path of ['/', '/index.html', '/app.html', '/pricing.html', '/docs/', '/docs/index.html', '/docs/agents.html', '/terms.html', '/privacy.html']) {
+    const response = await request.get(path, { maxRedirects: 0 });
+    expect(response.status(), path).toBe(200);
+    expect(response.headers()['content-type'], path).toContain('text/html');
+  }
+});
 test('public site uses the logo and the workspace stays usable on mobile', async ({ page }) => {
   await page.goto('/'); await expect(page.getByRole('heading', { name: 'Small actions. Right on time.' })).toBeVisible();
   await expect(page.locator('header img')).toHaveAttribute('src', '/logo.jpeg');

@@ -125,7 +125,13 @@ const worker = {
       const idempotency = request.headers.get('Idempotency-Key'); assert(!idempotency || idempotency.length <= 128, 'invalid_idempotency_key', 'Idempotency-Key must be at most 128 characters');
       if (path.startsWith('/hook/') && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Idempotency-Key', 'Access-Control-Max-Age': '86400' } });
       const route = matchRoute(request.method, path);
-      if (!route && !path.startsWith('/api/') && env.ASSETS && request.method === 'GET') return env.ASSETS.fetch(request);
+      if (!route && !path.startsWith('/api/') && env.ASSETS && request.method === 'GET') {
+        // Explicit HTML handling avoids canonical redirects; resolve directory
+        // indexes internally so the home page and docs retain their public URLs.
+        const assetUrl = new URL(request.url);
+        if (path.endsWith('/')) assetUrl.pathname += 'index.html';
+        return env.ASSETS.fetch(new Request(assetUrl, request));
+      }
       assert(route, 'not_found', 'Not found', 404);
       auth = route.access === PUBLIC ? null : await authenticate(request, env);
       assert(canAccess(auth, route.access), 'insufficient_scope', 'Credential does not allow this operation', 403);

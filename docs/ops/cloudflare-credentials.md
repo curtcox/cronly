@@ -40,8 +40,10 @@ query returned HTTP 200 with no GraphQL errors and empty datasets on 2026-11-17.
 Invocation/periodic namespace filters, prices and the fail-closed brake are unchanged.
 See [sanitized schema and query evidence](evidence/cloudflare-analytics-schema-2026-11-17.json).
 
-The app Worker and its Durable Object namespaces are not deployed. Schema
-validation alone cannot verify actual usage measurements or cost reconciliation.
+The app Worker and its three SQLite Durable Object namespaces were deployed on
+2026-11-17. Their IDs are recorded in GitHub's `CRONLY_DO_NAMESPACES` variable and
+must be bound on the next deployment. Schema validation alone cannot verify actual
+usage measurements or cost reconciliation; the first live monitor remains pending.
 See [launch procedure](launch.md) and STATUS L12/L14.
 
 References: [Workers permissions](https://developers.cloudflare.com/workers/authorization/workers/),

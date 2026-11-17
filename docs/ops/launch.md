@@ -1,7 +1,8 @@
 # Production launch handoff (L9–L14)
 
-Work is on main. The app Worker has not been deployed. Deploying is an
-owner operation; credentials are not copied from hashbin. Use the same operating entity
+Work is on main. The first app Worker/custom-domain deployment completed on
+2026-11-17; public-page and single-user service acceptance are tracked in STATUS.md.
+Deployment credentials are not copied from hashbin. Use the same operating entity
 and Cloudflare account, with a separate Clerk application and Stripe product, as approved
 2026-11-15. STATUS.md is authoritative for acceptance status.
 
@@ -33,6 +34,11 @@ and Cloudflare account, with a separate Clerk application and Stripe product, as
    SECRETS_MASTER_KEY through a secret manager. Keep master-key backups securely;
    follow [secret-key rotation](secret-rotation.md) when replacing a master. Versioned
    `SECRETS_KEYRING` can replace the legacy binding; never overwrite a key still in use.
+   Initial independent keys were provisioned on 2026-11-17 in GitHub's production
+   environment. Recoverable copies are in the owner's macOS Keychain under service
+   `cronly.org.production`, with account names `TOKEN_SIGNING_KEY` and
+   `SECRETS_MASTER_KEY`. Use Keychain Access for recovery; never print values into
+   a chat, terminal log or repository. Preserve the master as `v1` during rotation.
 5. Put the required secrets listed in wrangler.toml into GitHub's production environment.
    A prelaunch deployment (`CRONLY_LAUNCH_APPROVED=false`) can omit
    `ANTHROPIC_API_KEY`: prose returns `503 prose_unavailable` before any hold or
