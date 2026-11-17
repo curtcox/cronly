@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import { PRICES } from '../src/utils/pricing.js';
 // Keep each browser's local ingress bucket independent, as separate visitors are
 // in production. Running the whole suite through one localhost IP exhausts it.
@@ -180,9 +181,9 @@ test('shows zero spend and reviews changes for a constructor-named job', async (
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
 });
 
-test('pages run history with the stable cursor and keeps the active filters visible', async ({ page }) => {
+test('pages and exports complete job history with inclusive UTC dates and stable cursors', async ({ page }) => {
   await login(page);
-  const time = Date.parse('2026-11-16T12:00:00Z'); const cursor = 'stable-position';
+  const time = Date.parse('2026-11-16T23:59:59.999Z'); const cursor = 'stable-position';
   const runs = Array.from({ length: 102 }, (_, index) => ({ id: `retry-${String(101 - index).padStart(3, '0')}`, job: 'pinger', status: 'failure', created_at: time, cost_microdollars: PRICES.run }));
   const queries = [];
   await page.route(/\/api\/runs(?:\?.*)?$/, async route => {
@@ -190,9 +191,11 @@ test('pages run history with the stable cursor and keeps the active filters visi
     if (!params.get('job')) return route.fulfill({ json: { items: [], summary: true, note: 'Filter by job to page complete retained logs.' } });
     queries.push(Object.fromEntries(params));
     const next = params.get('cursor') === cursor;
-    return route.fulfill({ json: { items: next ? runs.slice(100) : runs.slice(0, 100), summary: false, next_cursor: next ? null : cursor, next_before: next ? null : time } });
+    const matching = runs.filter(run => run.created_at >= Date.parse(params.get('from')) && run.created_at <= Date.parse(params.get('to')));
+    return route.fulfill({ json: { items: next ? matching.slice(100) : matching.slice(0, 100), summary: false, next_cursor: next ? null : cursor, next_before: next ? null : time } });
   });
   await page.getByRole('link', { name: 'Runs', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Export shown summaries', exact: true })).toBeVisible();
   await page.getByLabel('Job', { exact: true }).fill('pinger');
   await page.getByRole('combobox', { name: 'Outcome', exact: true }).selectOption('failure');
   await page.getByLabel('From', { exact: true }).fill('2026-11-01');
@@ -208,8 +211,40 @@ test('pages run history with the stable cursor and keeps the active filters visi
   await expect(page.getByRole('combobox', { name: 'Outcome', exact: true })).toHaveValue('failure');
   await expect(page.getByLabel('From', { exact: true })).toHaveValue('2026-11-01');
   await expect(page.getByLabel('To', { exact: true })).toHaveValue('2026-11-16');
-  expect(queries).toEqual([
-    { job: 'pinger', status: 'failure', from: '2026-11-01', to: '2026-11-16' },
-    { job: 'pinger', status: 'failure', from: '2026-11-01', to: '2026-11-16', cursor }
-  ]);
+  const filters = { job: 'pinger', status: 'failure', from: '2026-11-01T00:00:00.000Z', to: '2026-11-16T23:59:59.999Z' };
+  expect(queries).toEqual([filters, { ...filters, cursor }]);
+  const downloaded = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export job NDJSON', exact: true }).click();
+  const download = await downloaded;
+  expect(download.suggestedFilename()).toBe('cronly-runs.ndjson');
+  const exported = (await readFile(await download.path(), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  expect(exported).toEqual(runs);
+  expect(queries).toEqual([filters, { ...filters, cursor }, filters, { ...filters, cursor }]);
+  await expect(page.locator('#notice')).toContainText('Exported 102 runs.');
+  await expect(page.getByRole('button', { name: 'Export job NDJSON', exact: true })).toBeEnabled();
+  await expect(page.locator('[data-run-detail]')).toHaveCount(2);
+});
+
+test('refuses partial run exports when an older page fails or repeats its cursor', async ({ page }) => {
+  await login(page);
+  const downloads = []; page.on('download', download => downloads.push(download));
+  let failOlder = true;
+  await page.route(/\/api\/runs(?:\?.*)?$/, async route => {
+    const params = new URL(route.request().url()).searchParams;
+    if (!params.get('job')) return route.fulfill({ json: { items: [], summary: true } });
+    if (params.get('cursor') && failOlder) return route.fulfill({ status: 503, json: { error: 'History is temporarily unavailable', code: 'unavailable' } });
+    return route.fulfill({ json: { items: [{ id: 'first', job: 'pinger', status: 'success' }], summary: false, next_cursor: 'stuck' } });
+  });
+  await page.getByRole('link', { name: 'Runs', exact: true }).click();
+  await page.getByLabel('Job', { exact: true }).fill('pinger');
+  await page.getByRole('button', { name: 'Filter', exact: true }).click();
+  await page.getByRole('button', { name: 'Export job NDJSON', exact: true }).click();
+  await expect(page.locator('#notice')).toContainText('History is temporarily unavailable');
+  await expect(page.getByRole('button', { name: 'Export job NDJSON', exact: true })).toBeEnabled();
+  expect(downloads).toHaveLength(0);
+  failOlder = false;
+  await page.getByRole('button', { name: 'Export job NDJSON', exact: true }).click();
+  await expect(page.locator('#notice')).toContainText('Export could not advance');
+  await expect(page.getByRole('button', { name: 'Export job NDJSON', exact: true })).toBeEnabled();
+  expect(downloads).toHaveLength(0);
 });

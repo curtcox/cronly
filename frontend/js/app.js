@@ -138,7 +138,7 @@ async function runsPage(query = '') {
   runsQuery = query; const filters = new URLSearchParams(query);
   const result = await api(`/api/runs${query}`);
   if (currentPage() !== 'runs') return;
-  content.innerHTML = `<h1 class="app-title">Runs</h1><p class="muted">30 days or 1,000 runs per job, whichever is fewer. Every excerpt is displayed as text.</p><form id="runs-filter" class="inline"><label>Job<input name="job" placeholder="Any job" value="${e(filters.get('job') || '')}"></label><label>Outcome<select name="status"><option value="">Any outcome</option>${['success', 'failure', 'paused', 'expired', 'queued'].map(s => `<option ${filters.get('status') === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label><label>From<input name="from" type="date" value="${e(filters.get('from') || '')}"></label><label>To<input name="to" type="date" value="${e(filters.get('to') || '')}"></label><button>Filter</button><button type="button" id="export-runs" class="secondary">Export NDJSON</button></form><section class="panel">${result.items.length ? table(['Job / time', 'Outcome', 'Charge'], runRows(result.items)) : empty('No matching runs.')}<p class="note">${result.summary ? e(result.note) : 'Full log page, at most 100 runs.'}</p>${result.next_cursor ? `<button class="secondary" data-runs-cursor="${e(result.next_cursor)}">Older runs →</button>` : ''}</section>`;
+  content.innerHTML = `<h1 class="app-title">Runs</h1><p class="muted">30 days or 1,000 runs per job, whichever is fewer. Every excerpt is displayed as text. Date filters include the whole selected UTC day.</p><form id="runs-filter" class="inline"><label>Job<input name="job" placeholder="Any job" value="${e(filters.get('job') || '')}"></label><label>Outcome<select name="status"><option value="">Any outcome</option>${['success', 'failure', 'paused', 'expired', 'queued'].map(s => `<option ${filters.get('status') === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label><label>From<input name="from" type="date" value="${e((filters.get('from') || '').slice(0, 10))}"></label><label>To<input name="to" type="date" value="${e((filters.get('to') || '').slice(0, 10))}"></label><button>Filter</button><button type="button" id="export-runs" class="secondary">${result.summary ? 'Export shown summaries' : 'Export job NDJSON'}</button></form><section class="panel">${result.items.length ? table(['Job / time', 'Outcome', 'Charge'], runRows(result.items)) : empty('No matching runs.')}<p class="note">${result.summary ? e(result.note) : 'Full log page, at most 100 runs.'}</p>${result.next_cursor ? `<button class="secondary" data-runs-cursor="${e(result.next_cursor)}">Older runs →</button>` : ''}</section>`;
 }
 async function costsPage() {
   const result = await api('/api/costs?group=day');
@@ -175,6 +175,26 @@ async function render() {
   finally { if (version === renderVersion) content.setAttribute('aria-busy', 'false'); }
 }
 function download(name, text, type = 'application/json') { const url = URL.createObjectURL(new Blob([text], { type })); const link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+async function exportRuns(button) {
+  button.disabled = true;
+  try {
+    const query = new URLSearchParams(runsQuery);
+    // Export the matching job history from its beginning, even from an older
+    // visible page. Global history remains an explicitly labelled summary.
+    query.delete('cursor'); query.delete('before');
+    const lines = []; const cursors = new Set(); let summary;
+    for (;;) {
+      const result = await api(`/api/runs?${query}`);
+      lines.push(...result.items.map(run => JSON.stringify(run)));
+      summary = result.summary;
+      if (summary || !result.next_cursor) break;
+      if (cursors.has(result.next_cursor)) throw new Error('Export could not advance through run history. Please try again.');
+      cursors.add(result.next_cursor); query.set('cursor', result.next_cursor);
+    }
+    download('cronly-runs.ndjson', lines.length ? lines.join('\n') + '\n' : '', 'application/x-ndjson');
+    notify(`Exported ${lines.length} ${summary ? 'run summaries' : 'runs'}.`);
+  } finally { button.disabled = false; }
+}
 content.addEventListener('input', () => { cronPreview(); updateJsPrice(); });
 content.addEventListener('change', event => { if (event.target.id === 'action-type') { $('#http-fields').hidden = event.target.value !== 'http'; $('#js-fields').hidden = event.target.value !== 'javascript'; } });
 content.addEventListener('click', async event => {
@@ -195,7 +215,7 @@ content.addEventListener('click', async event => {
       runInput(`/api/actions/${editing}/test`, `Test ${editing}`, 'Test');
     }
     if (button.id === 'export-config') download('cronly.json', JSON.stringify(config, null, 2));
-    if (button.id === 'export-runs') { const result = await api(`/api/runs${runsQuery}`); download('cronly-runs.ndjson', result.items.map(r => JSON.stringify(r)).join('\n'), 'application/x-ndjson'); }
+    if (button.id === 'export-runs') await exportRuns(button);
     if (button.id === 'translate-job') {
       const input = { text: $('#job-prose').value, timezone: $('#job-timezone').value };
       await reviewed('/api/prose/to-cron', 'POST', input, async result => { $('#job-cron').value = result.cron; cronPreview(); notify(`Translation cost ${usd(result.cost_microdollars)}. Review the cron and save separately.`); });
@@ -217,7 +237,7 @@ content.addEventListener('submit', async event => {
       await reviewed(`/api/${kind}/${fields.name}`, 'PUT', body);
     }
     if (form.id === 'upcoming-filter') { const query = new URLSearchParams(); for (const [k, v] of data) if (v) query.set(k, new Date(v).toISOString()); const result = await api(`/api/upcoming?${query}`); $('#upcoming-results').innerHTML = `${upcomingTable(result.items)}<p>Window maximum ${e(usd(result.window_total_microdollars))} · Shown subtotal ${e(usd(result.subtotal_microdollars))}${result.truncated ? ' · Results truncated; narrow the window.' : ''}</p>`; }
-    if (form.id === 'runs-filter') { const query = new URLSearchParams(); for (const [k, v] of data) if (v) query.set(k, v); await runsPage(`?${query}`); }
+    if (form.id === 'runs-filter') { const query = new URLSearchParams(); for (const [k, v] of data) if (v) query.set(k, k === 'from' ? `${v}T00:00:00.000Z` : k === 'to' ? `${v}T23:59:59.999Z` : v); await runsPage(`?${query}`); }
     if (form.id === 'costs-filter') $('#costs-results').innerHTML = costTable(await api(`/api/costs?group=${fields.group}`));
     if (form.id === 'key-form') await reviewed('/api/keys', 'POST', { name: fields.name, scopes: data.getAll('scopes'), daily_spend_microdollars: fields.daily_spend_microdollars === '' ? null : Number(fields.daily_spend_microdollars) }, async result => { await render(); $('#new-key-result').innerHTML = `<p>Copy your key now:</p><pre>${e(result.token)}</pre>`; });
     if (form.id === 'config-form') await reviewed('/api/config', 'PUT', JSON.parse(fields.config));
