@@ -96,7 +96,7 @@ export class JobDO {
     if (settings.job?.enabled && settings.job.cron && !settings.paused) settings.next_fire = Date.parse(nextFires(settings.job.cron, settings.job.timezone, 1)[0]);
     await this.storage.put('settings', settings); await this.publish(settings); await this.arm();
   }
-  async start(args) {
+  async start(args, rearm = true) {
     assert(this.env.COST_SAFETY_HARD_STOP !== 'true', 'cost_brake', 'Runs are paused by the operator', 503);
     if (this.env.SAFETY && (await rpc(this.env.SAFETY, 'global', 'status')).brake) {
       const prior = await this.storage.get('settings');
@@ -139,7 +139,10 @@ export class JobDO {
     }
     // A failed enqueue is retried from the durable pending row, without a second hold.
     await this.send(run, settings);
-    await this.arm(); return { run, cost_microdollars: 0, reserved_microdollars: reservation.amount };
+    // The scheduled alarm advances next_fire and rearms once after dispatch. Its
+    // pending outbox already has a durable wakeup if that outer turn fails.
+    if (rearm) await this.arm();
+    return { run, cost_microdollars: 0, reserved_microdollars: reservation.amount };
   }
   async send(run, settings) {
     await this.env.RUN_QUEUE.send({ account: settings.account, name: settings.name, id: run.id });
@@ -277,7 +280,7 @@ export class JobDO {
         // Persist advancement after reserving/enqueuing; deterministic IDs survive alarm retries.
         const late = Date.now() - due > 60000;
         if (!late || settings.job.missed === 'run_once') {
-          try { await this.start({ id: `${settings.account}:${settings.name}:${due}`, trigger: 'schedule', scheduled_at: new Date(due).toISOString(), input: {} }); }
+          try { await this.start({ id: `${settings.account}:${settings.name}:${due}`, trigger: 'schedule', scheduled_at: new Date(due).toISOString(), input: {} }, false); }
           catch (error) { if (![402, 409, 429, 503].includes(error.status)) throw error; }
         }
         settings = await this.storage.get('settings');

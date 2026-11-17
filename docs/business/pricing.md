@@ -194,6 +194,13 @@ audit also forces index eviction, alongside the existing archival and recovery
 scenarios. Standalone holds and eviction can still use the saved write, so the
 conservative 37-write bound and 87 µ$ base price are unchanged.
 
+Scheduled runs rearm once after advancing their next-fire time. The pending outbox
+still commits with a recovery alarm before queue dispatch; failed dispatch,
+advancement or final rearming recovers after restart without a second hold or
+execution. This skips a redundant history scan and avoids moving the intermediate
+alarm forward during dispatch. Manual runs and retries retain immediate rearming.
+The conservative bound and prices are unchanged.
+
 ## Verified provider sources
 
 - [Workers](https://developers.cloudflare.com/workers/platform/pricing/)
