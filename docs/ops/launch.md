@@ -1,6 +1,6 @@
 # Production launch handoff (L9–L14)
 
-Work is on main. Nothing has been deployed by this implementation. Deploying is an
+Work is on main. The app Worker has not been deployed. Deploying is an
 owner operation; credentials are not copied from hashbin. Use the same operating entity
 and Cloudflare account, with a separate Clerk application and Stripe product, as approved
 2026-11-15. STATUS.md is authoritative for acceptance status.
@@ -44,6 +44,29 @@ and Cloudflare account, with a separate Clerk application and Stripe product, as
    configuration is optional and owner-controlled.
 
 ## Live acceptance before opening payments
+
+Before Clerk/Stripe credentials are available, the sandbox runtime itself can be
+checked independently with the existing Wrangler login:
+
+```sh
+CRONLY_LIVE_ACCEPTANCE=1 npm run test:sandbox:runtime
+```
+
+This deploys a uniquely named `cronly-sandbox-probe-*` Worker on workers.dev using
+the production `executeJavaScript` and log wrapper. It accepts only eight fixed
+cases, authenticates with an ephemeral secret sent through stdin, expires after
+ten minutes and rate-limits requests. The fixture gateway makes no internet
+requests. Controls must succeed before explicit CPU/subrequest rejections count;
+the other checks cover native fetch/connect denial, concurrent log isolation and
+synthetic-secret redaction. Estimated provider cost is below $0.10 per suite at
+[current rates](https://developers.cloudflare.com/dynamic-workers/pricing/).
+The runner removes its Worker in `finally` and writes a sanitized JSON report to
+the printed temporary path, including cleanup status. If interrupted, remove
+only the unique Worker named in that report/config with `wrangler delete`.
+
+The probe does not provision app credentials or customer credit, exercise the
+production billing/Queue/gateway path, or enable `JS_LIVE_ACCEPTED`. Complete the
+service acceptance below before enabling JavaScript for customers.
 
 - Set GitHub secret JS_ACCEPTANCE_ACCOUNT to the invited owner's Clerk ID. Other accounts cannot
   invoke JS until JS_LIVE_ACCEPTED=true. Keep a daily cap on the owner's test API key.

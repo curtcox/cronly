@@ -17,6 +17,7 @@
     "verify:production": "node scripts/verify-production.mjs",
     "test:local": "node scripts/verify-local.mjs",
     "test:sandbox:live": "node scripts/verify-sandbox-live.mjs",
+    "test:sandbox:runtime": "node scripts/probe-sandbox-live.mjs",
     "docs:generate": "node scripts/generate-openapi.mjs && node scripts/sdk-integrity.mjs",
     "legal:generate": "node scripts/operator-profile.mjs",
     "legal:check": "node scripts/operator-profile.mjs --check",
