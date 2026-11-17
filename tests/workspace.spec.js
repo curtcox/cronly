@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { PRICES } from '../src/utils/pricing.js';
+// Keep each browser's local ingress bucket independent, as separate visitors are
+// in production. Running the whole suite through one localhost IP exhausts it.
+test.beforeEach(async ({ context }, testInfo) => {
+  await context.setExtraHTTPHeaders({ 'CF-Connecting-IP': `2001:db8::${(testInfo.workerIndex + 1).toString(16)}:${(testInfo.line + 1).toString(16)}` });
+});
 async function login(page) {
   await page.goto('/app.html'); await page.getByLabel('Local account name').fill(`browser-${crypto.randomUUID()}`);
   await page.getByRole('button', { name: 'Use local account' }).click();
@@ -51,7 +56,9 @@ test('quotes before depositing or saving, escapes definitions and previews cron'
   await page.getByLabel('Cron (blank for on demand only)').fill('*/5 * * * *'); await expect(page.locator('#cron-preview')).toContainText('Every 5 minutes');
   await page.getByLabel('Cron (blank for on demand only)').fill('');
   await page.getByRole('button', { name: /Review save/ }).click(); await apply(page); await expect(page.locator('.list')).toContainText('pinger');
-  await page.getByRole('button', { name: 'Run', exact: true }).click(); await apply(page); await expect(page.locator('#notice')).toContainText('Run queued');
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await page.getByRole('button', { name: 'Review run price', exact: true }).click();
+  await apply(page); await expect(page.locator('#notice')).toContainText('Run queued');
   await page.getByRole('link', { name: 'Runs', exact: true }).click(); await expect(page.locator('table')).toContainText('pinger');
   await page.screenshot({ path: '/tmp/cronly-workspace.png', fullPage: true });
 });
@@ -70,8 +77,89 @@ test('keeps balance visible across workspace pages and tests an action without a
   await page.getByRole('link', { name: 'Actions', exact: true }).click();
   await page.getByRole('button', { name: 'Edit', exact: true }).click();
   await page.getByRole('button', { name: 'Review test run', exact: true }).click();
+  await page.getByRole('button', { name: 'Review run price', exact: true }).click();
   await expect(page.locator('#review-price')).toContainText(`${PRICES.run} µ$`); await apply(page);
   await expect(page.locator('#notice')).toContainText('Test queued');
+});
+
+test('validates manual and action-test input before quoting and applies the reviewed input', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const user = await page.evaluate(() => sessionStorage.getItem('cronly-local-user'));
+  const headers = { Authorization: `LocalDev ${user}` };
+  expect((await page.request.post('/api/dev/deposit', { headers, data: { amount_microdollars: 5000000 } })).ok()).toBe(true);
+  expect((await page.request.put('/api/actions/message', { headers, data: { url: 'https://example.com', method: 'POST', body: '{{input.message}}' } })).ok()).toBe(true);
+  expect((await page.request.put('/api/jobs/messenger', { headers, data: { action: 'message', cron: null } })).ok()).toBe(true);
+  const balance = async () => (await (await page.request.get('/api/account', { headers })).json()).balance_microdollars;
+  const initialBalance = await balance();
+  const calls = [];
+  await page.route(/\/api\/(?:jobs\/messenger\/run|actions\/message\/test)(?:\?.*)?$/, async route => {
+    const request = route.request(); const dry = new URL(request.url()).searchParams.has('dry_run');
+    calls.push({ path: new URL(request.url()).pathname, dry, body: request.postDataJSON(), key: request.headers()['idempotency-key'] });
+    // Real reservation previews validate required fields; a stub prevents outbound
+    // work so this browser test can inspect the exact confirmed dispatch payload.
+    if (dry) await route.continue();
+    else await route.fulfill({ json: { reserved_microdollars: PRICES.run } });
+  });
+  for (const kind of ['jobs', 'actions']) {
+    await page.getByRole('link', { name: kind === 'jobs' ? 'Jobs' : 'Actions', exact: true }).click();
+    if (kind === 'actions') await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    const start = page.getByRole('button', { name: kind === 'jobs' ? 'Run' : 'Review test run', exact: true });
+    const previousCalls = calls.length;
+    await start.click();
+    await page.locator('#run-input-cancel').click();
+    expect(calls).toHaveLength(previousCalls);
+    await start.click();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.getByLabel('Input / JSON').fill('{');
+    await page.getByRole('button', { name: 'Review run price', exact: true }).click();
+    await expect(page.locator('#run-input-error')).toBeVisible();
+    for (const input of [null, { message: 42 }, {}]) {
+      await page.getByLabel('Input / JSON').fill(JSON.stringify(input));
+      await page.getByRole('button', { name: 'Review run price', exact: true }).click();
+      await expect(page.locator('#run-input-error')).toContainText(input === null || input.message === 42 ? 'invalid_input' : 'missing_input');
+    }
+    const input = { message: '<img src=x onerror="window.pwned=true">' };
+    await page.getByLabel('Input / JSON').fill(JSON.stringify(input));
+    await page.getByRole('button', { name: 'Review run price', exact: true }).click();
+    await expect(page.locator('#review-price')).toContainText(`${PRICES.run} µ$`);
+    await expect(page.locator('#review-detail')).toHaveText(JSON.stringify({ input }, null, 2));
+    expect(await page.evaluate(() => window.pwned)).toBeUndefined();
+    expect(await balance()).toBe(initialBalance);
+    await apply(page);
+    await expect(page.locator('#notice')).toContainText(kind === 'jobs' ? 'Run queued' : 'Test queued');
+    const [preview, dispatch] = calls.slice(-2);
+    expect(preview.dry).toBe(true); expect(dispatch.dry).toBe(false);
+    expect(dispatch.body).toEqual({ input }); expect(preview.body).toEqual(dispatch.body);
+    expect(dispatch.path).toBe(kind === 'jobs' ? '/api/jobs/messenger/run' : '/api/actions/message/test');
+    expect(dispatch.key).toBeTruthy();
+  }
+  expect(calls.filter(call => !call.dry)).toHaveLength(2);
+});
+
+test('cancelling a pending run preview does not reopen confirmation', async ({ page }) => {
+  await login(page);
+  const user = await page.evaluate(() => sessionStorage.getItem('cronly-local-user'));
+  const headers = { Authorization: `LocalDev ${user}` };
+  await page.request.post('/api/dev/deposit', { headers, data: { amount_microdollars: 5000000 } });
+  await page.request.put('/api/actions/ping', { headers, data: { url: 'https://example.com' } });
+  await page.request.put('/api/jobs/pinger', { headers, data: { action: 'ping', cron: null } });
+  let release;
+  const ready = new Promise(resolve => { release = resolve; });
+  await page.route('**/api/jobs/pinger/run?dry_run=1', async route => {
+    await ready;
+    await route.fulfill({ json: { quote_microdollars: PRICES.run } });
+  });
+  await page.getByRole('link', { name: 'Jobs', exact: true }).click();
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  const request = page.waitForRequest('**/api/jobs/pinger/run?dry_run=1');
+  await page.getByRole('button', { name: 'Review run price', exact: true }).click();
+  await request;
+  await page.locator('#run-input-cancel').click();
+  release();
+  await expect(page.locator('#run-input-quote')).toBeEnabled();
+  await expect(page.locator('#review')).not.toBeVisible();
+  await expect(page.locator('#run-input')).not.toBeVisible();
 });
 
 test('shows zero spend and reviews changes for a constructor-named job', async ({ page }) => {

@@ -6,6 +6,7 @@ let runsQuery = '';
 let renderVersion = 0;
 const currentPage = () => location.hash.slice(1) || 'dashboard';
 let config; let account; let forecast; let deployment; let pendingApply; let editing = null;
+let pendingRun;
 const date = value => value ? new Date(value).toLocaleString() : '—';
 const json = value => e(JSON.stringify(value, null, 2));
 function notify(message, error = false) { $('#notice').hidden = false; $('#notice').className = `notice${error ? ' error' : ''}`; $('#notice').textContent = message; }
@@ -19,8 +20,9 @@ function review(title, quote, detail, callback, button = 'Apply') {
   $('#review-detail').textContent = typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2);
   $('#review-apply').textContent = button; pendingApply = callback; $('#review').showModal();
 }
-async function reviewed(path, method, body, callback) {
+async function reviewed(path, method, body, callback, isCurrent = () => true) {
   const quote = await api(`${path}${path.includes('?') ? '&' : '?'}dry_run=1`, method, body);
+  if (!isCurrent()) return;
   const idempotency = crypto.randomUUID();
   review('Review before applying', quote.quote_microdollars || 0, quote.changes || body || quote, async () => {
     const result = await api(path, method, body, idempotency);
@@ -28,6 +30,34 @@ async function reviewed(path, method, body, callback) {
   });
 }
 $('#review-cancel').addEventListener('click', () => { pendingApply = null; $('#review').close(); });
+function runInput(path, label, queued = 'Run') {
+  pendingRun = { path, queued };
+  $('#run-input-title').textContent = label;
+  $('#run-input-value').value = '{}';
+  $('#run-input-error').hidden = true;
+  $('#run-input').showModal();
+}
+$('#run-input-cancel').addEventListener('click', () => $('#run-input').close());
+$('#run-input').addEventListener('close', () => { pendingRun = null; });
+$('#run-input-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!pendingRun || $('#run-input-quote').disabled) return;
+  const run = pendingRun; const { path, queued } = run;
+  $('#run-input-quote').disabled = true;
+  $('#run-input-error').hidden = true;
+  try {
+    const input = JSON.parse($('#run-input-value').value);
+    await reviewed(path, 'POST', { input }, async result => {
+      await render(); notify(`${queued} queued; held ${usd(result.reserved_microdollars)}.`);
+    }, () => pendingRun === run && $('#run-input').open);
+    if (pendingRun === run) $('#run-input').close();
+  } catch (error) {
+    if (pendingRun === run && $('#run-input').open) {
+      $('#run-input-error').textContent = error.message;
+      $('#run-input-error').hidden = false;
+    }
+  } finally { $('#run-input-quote').disabled = false; }
+});
 $('#review-apply').addEventListener('click', async () => {
   const callback = pendingApply; if (!callback) return;
   document.body.dataset.applying = 'true';
@@ -155,14 +185,14 @@ content.addEventListener('click', async event => {
     if (button.dataset.edit) { editing = button.dataset.edit; await definitionsPage(page); }
     if (button.id === 'new-definition') { editing = null; await definitionsPage(page); }
     if (button.dataset.delete) await reviewed(`/api/${page}/${button.dataset.delete}`, 'DELETE');
-    if (button.dataset.run) await reviewed(`/api/jobs/${button.dataset.run}/run`, 'POST', {}, async result => { await render(); notify(`Run queued; held ${usd(result.reserved_microdollars)}.`); });
+    if (button.dataset.run) runInput(`/api/jobs/${button.dataset.run}/run`, `Run ${button.dataset.run}`);
     if (button.dataset.toggle) await reviewed(`/api/jobs/${button.dataset.toggle}/${config.jobs[button.dataset.toggle].enabled ? 'pause' : 'resume'}`, 'POST', {});
     if (button.dataset.runDetail) { const result = await api(`/api/runs/${encodeURIComponent(button.dataset.runDetail)}`); review('Run detail', result.run.cost_microdollars || 0, result.run, async () => {}, 'Close'); }
     if (button.id === 'create-trigger') await reviewed(`/api/jobs/${editing}/triggers`, 'POST', {}, async result => { await render(); notify('Trigger created. Copy its URL now.'); review('Trigger URL — keep it private', 0, result.url, async () => {}, 'Close'); });
     if (button.dataset.revokeTrigger) await reviewed(`/api/jobs/${editing}/triggers/${button.dataset.revokeTrigger}`, 'DELETE');
     if (button.dataset.revokeKey) await reviewed(`/api/keys/${button.dataset.revokeKey}`, 'DELETE');
     if (button.id === 'test-action') {
-      await reviewed(`/api/actions/${editing}/test`, 'POST', {}, async result => { await render(); notify(`Test queued; held ${usd(result.reserved_microdollars)}.`); });
+      runInput(`/api/actions/${editing}/test`, `Test ${editing}`, 'Test');
     }
     if (button.id === 'export-config') download('cronly.json', JSON.stringify(config, null, 2));
     if (button.id === 'export-runs') { const result = await api(`/api/runs${runsQuery}`); download('cronly-runs.ndjson', result.items.map(r => JSON.stringify(r)).join('\n'), 'application/x-ndjson'); }
