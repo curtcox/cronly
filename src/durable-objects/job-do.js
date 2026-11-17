@@ -68,12 +68,7 @@ export class JobDO {
       }
       case 'start': return this.start(args);
       case 'result': return this.result(args);
-      case 'recover-result': {
-        const run = await this.readRun(args.id);
-        const staged = await this.storage.get(`run:${args.id}`);
-        if (run && (staged?.completion || ['success', 'failure', 'expired'].includes(run.status))) return this.result({ id: args.id });
-        return {};
-      }
+      case 'recover-result': return this.result(args, true);
       case 'wake': {
         const settings = await this.storage.get('settings'); if (!settings?.job) return {};
         if (settings.paused === (args.reason || 'insufficient_balance') || args.force) await this.reconcile();
@@ -179,20 +174,20 @@ export class JobDO {
     const retry = (await this.storage.get(`history:${run.id}`))?.retry;
     await this.history({ ...run, enqueued: true }, false, null, retry);
   }
-  async result(args) {
-    const run = await this.readRun(args.id); assert(run, 'not_found', 'Run not found', 404);
-    const settings = await this.storage.get('settings');
-    if (run.status === 'success' || run.status === 'failure' || run.status === 'expired') {
-      // Older completions may still need publication. New completions publish
-      // atomically with settlement, including when its response was lost.
-      const summary = await this.storage.get(`history:${args.id}`);
-      try { if (!summary?.settlement?.runtime_published) await this.publish(settings); }
-      finally { await this.dispatchRetry(args.id); }
-      return { duplicate: true };
-    }
+  async result(args, recover = false) {
+    const summary = await this.storage.get(`history:${args.id}`);
+    // The compact completion is authoritative. Redelivery must not load the
+    // retained body (up to 16 KB) merely to acknowledge an already finished run.
+    if (['success', 'failure', 'expired'].includes(summary?.status)) return this.completed(args.id, summary);
+    const run = summary ? await this.record(summary) : await this.storage.get(`run:${args.id}`);
+    if (recover && !run) return {};
+    assert(run, 'not_found', 'Run not found', 404);
+    if (['success', 'failure', 'expired'].includes(run.status)) return this.completed(args.id, summary);
     const staged = await this.storage.get(`run:${args.id}`);
+    if (recover && !staged?.completion) return {};
     const outcome = staged?.completion || args.result;
     assert(outcome, 'missing_result', 'Run result is missing', 409);
+    const settings = await this.storage.get('settings');
     // Persist the observed result before settlement can remove its execution hold.
     // Redelivery and the existing pending alarm can now finish the same outcome.
     if (!staged?.completion) await this.storage.put(`run:${args.id}`, { ...run, completion: outcome });
@@ -210,8 +205,15 @@ export class JobDO {
     await this.dispatchRetry(args.id);
     await this.prune(); await this.arm(); return result;
   }
-  async dispatchRetry(id) {
-    const summary = await this.storage.get(`history:${id}`);
+  async completed(id, summary) {
+    // Older completions may still need publication. New completions publish
+    // atomically with settlement, including when its response was lost.
+    try { if (!summary?.settlement?.runtime_published) await this.publish(await this.storage.get('settings')); }
+    finally { await this.dispatchRetry(id, summary); }
+    return { duplicate: true };
+  }
+  async dispatchRetry(id, summary) {
+    summary ||= await this.storage.get(`history:${id}`);
     if (!summary?.retry?.dispatch) return;
     const { retry, ...completed } = summary;
     try { await this.start({ ...retry, id: `${id}:retry`, retry: true }); }

@@ -299,3 +299,12 @@ beside these. Model choice remains Opus pending the owner-run 100-case compariso
 Fixed costs are the shared Workers Paid plan, domain, invite-only account overhead
 and bounded public/free traffic. No Workers for Platforms monthly plan is required.
 Verify actual domain/account bills and analytics schema during L14.
+
+
+Completed Queue redelivery now reads only its compact completion index. The
+private publication marker and retry outbox determine any remaining recovery
+without loading full retained logs or unchanged settings. Explicit result replays
+use the same path. Staged outcomes and legacy publication remain recoverable;
+claimed runs with no saved outcome stay pending. This removes repeated reads and
+log deserialization on each duplicate delivery without changing the conservative
+row-write/request allowances or the 85 µ$ run price.

@@ -153,6 +153,67 @@ it('does not republish a completed run on redelivery after a newer outcome', asy
   expect(JSON.stringify((await rpc(env.JOBS, 'a:pinger', 'runs')).items)).not.toContain('runtime_published');
 });
 
+for (const status of ['success', 'failure', 'expired']) {
+  it(`acknowledges a completed ${status} from one compact read when its body is unavailable after restart`, async () => {
+    const { api, messages, env } = await setup();
+    await api('/api/jobs/pinger/run', 'POST', {});
+    const id = messages[0].id; const object = env.JOBS.get('a:pinger');
+    await object.result({ id, result: { status, response_excerpt: 'saved output' } });
+    const before = await api('/api/account');
+    const cold = new JobDO({ storage: object.storage, blockConcurrencyWhile: fn => fn() }, env);
+    env.JOBS.objects.set('a:pinger', cold);
+    const get = cold.storage.get.bind(cold.storage);
+    const reads = vi.spyOn(cold.storage, 'get').mockImplementation(async key => {
+      if (key !== `history:${id}`) throw new Error('full log and settings unavailable');
+      return get(key);
+    });
+    const list = vi.spyOn(cold.storage, 'list'); const put = vi.spyOn(cold.storage, 'put');
+    const ack = vi.fn();
+    await consume({ body: messages[0], ack }, env, {});
+    expect(ack).toHaveBeenCalledOnce(); expect(reads).toHaveBeenCalledExactlyOnceWith(`history:${id}`);
+    // Explicit result replays use the same compact receipt and cannot replace it.
+    reads.mockClear();
+    expect(await cold.result({ id, result: { status: 'failure' } })).toEqual({ duplicate: true });
+    expect(reads).toHaveBeenCalledExactlyOnceWith(`history:${id}`);
+    expect(list).not.toHaveBeenCalled(); expect(put).not.toHaveBeenCalled();
+    expect(env.OUTBOUND_FETCH).not.toHaveBeenCalled(); reads.mockRestore();
+    expect(await api('/api/account')).toMatchObject({ balance_microdollars: before.balance_microdollars, held_microdollars: 0, job_runtime: before.job_runtime });
+    expect(await cold.readRun(id)).toMatchObject({ status, response_excerpt: 'saved output' });
+  });
+}
+
+it('leaves a claimed run with no staged outcome pending on Queue redelivery', async () => {
+  const { api, messages, env } = await setup();
+  await api('/api/jobs/pinger/run', 'POST', {});
+  const id = messages[0].id;
+  await rpc(env.ACCOUNTS, 'a', 'claim-run', { id });
+  const object = env.JOBS.get('a:pinger');
+  env.JOBS.objects.set('a:pinger', new JobDO({ storage: object.storage, blockConcurrencyWhile: fn => fn() }, env));
+  const ack = vi.fn();
+  await consume({ body: messages[0], ack }, env, {});
+  expect(ack).toHaveBeenCalledOnce(); expect(env.OUTBOUND_FETCH).not.toHaveBeenCalled();
+  expect(await rpc(env.JOBS, 'a:pinger', 'run', { id })).toMatchObject({ status: 'queued' });
+  expect(await api('/api/account')).toMatchObject({ held_microdollars: PRICES.run });
+  expect(await object.storage.get(`run:${id}`)).toBeUndefined();
+});
+
+it('repairs a legacy completed body without a compact index on Queue redelivery', async () => {
+  const { api, messages, env } = await setup();
+  await api('/api/jobs/pinger/run', 'POST', {});
+  const id = messages[0].id; const object = env.JOBS.get('a:pinger');
+  await object.result({ id, result: { status: 'success' } });
+  await object.storage.put(`run:${id}`, await object.readRun(id));
+  await object.storage.delete(`history:${id}`);
+  const accountStorage = env.ACCOUNTS.get('a').storage;
+  const runtime = await accountStorage.get('runtime:pinger');
+  await accountStorage.put('runtime:pinger', { ...runtime, last_outcome: null });
+  env.JOBS.objects.set('a:pinger', new JobDO({ storage: object.storage, blockConcurrencyWhile: fn => fn() }, env));
+  const ack = vi.fn();
+  await consume({ body: messages[0], ack }, env, {});
+  expect(ack).toHaveBeenCalledOnce(); expect(env.OUTBOUND_FETCH).not.toHaveBeenCalled();
+  expect((await api('/api/account')).job_runtime.pinger.last_outcome).toBe('success');
+});
+
 it('acknowledges an unknown expired delivery without fabricating a run', async () => {
   const { env } = await setup(); const ack = vi.fn();
   await consume({ body: { account: 'a', name: 'pinger', id: 'unknown' }, ack }, env, {});
