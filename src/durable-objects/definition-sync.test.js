@@ -12,7 +12,7 @@ afterEach(() => vi.useRealTimers());
 async function setup(count = 3) {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
   const messages = [];
-  const env = { ENVIRONMENT: 'local', RUN_QUEUE: { send: async body => messages.push(body) } };
+  const env = { ENVIRONMENT: 'local', SECRETS_MASTER_KEY: 'test-master', RUN_QUEUE: { send: async body => messages.push(body) } };
   env.ACCOUNTS = namespace(AccountDO, env); env.JOBS = namespace(JobDO, env);
   const account = (op, args) => rpc(env.ACCOUNTS, 'a', op, args);
   const mutate = (id, operations, extra = {}) => account('mutate', { account: 'a', id, operations, ...extra });
@@ -40,6 +40,7 @@ for (const operation of ['create', 'update', 'delete']) {
     expect(result).toMatchObject({ cost_microdollars: PRICES.change });
     expect(put.mock.calls.some(([key]) => key.startsWith('def:jobs:') || key.startsWith('sync:'))).toBe(false);
     expect(configure.every(fetch => fetch.mock.calls.length === 0)).toBe(true);
+    expect(alarm).not.toHaveBeenCalled();
     expect([...env.JOBS.objects].map(([name, job]) => [name, job.storage.rows, job.storage.alarm])).toEqual(jobs);
     // Count all mutation/outbox writes, not just the rows left after commit.
     const writes = put.mock.calls.length + remove.mock.calls.length + alarm.mock.calls.length;
@@ -91,4 +92,55 @@ it('keeps explicit job edits and deletions in the durable outbox in a mixed acti
   expect(await env.JOBS.get('a:j-0').storage.get('settings')).toMatchObject({ job: { action: 'replacement', cron: '0 * * * *', budget: { day: 500 } } });
   expect(await env.JOBS.get('a:j-1').storage.get('settings')).toMatchObject({ job: null, next_fire: null });
   expect(env.JOBS.get('a:j-2').storage.rows).toEqual(untouched);
+});
+
+for (const deadline of [null, 500, 60000]) {
+  it(`leaves ${deadline === null ? 'an absent alarm' : `a ${deadline}ms account alarm`} alone for non-job edits`, async () => {
+    const { mutate, storage } = await setup();
+    if (deadline === null) await storage.deleteAlarm();
+    else await storage.setAlarm(Date.now() + deadline);
+    const before = await storage.getAlarm(); const alarm = vi.spyOn(storage, 'setAlarm');
+    await mutate('non-job', [
+      { kind: 'variables', name: 'url', value: { value: 'https://example.com' } },
+      { kind: 'secrets', name: 'token', value: { value: 'private-value' } },
+      { kind: 'actions', name: 'ping', value: { url: '{{var.url}}', headers: { Authorization: '{{secret.token}}' } } }
+    ]);
+    expect(alarm).not.toHaveBeenCalled();
+    expect(await storage.getAlarm()).toBe(before);
+    expect(await storage.list({ prefix: 'sync:' })).toHaveLength(0);
+  });
+}
+
+for (const deadline of [null, 500, 60000]) {
+  it(`coalesces a job edit with ${deadline === null ? 'no existing wakeup' : `a ${deadline}ms wakeup`} and drains it after restart`, async () => {
+    const { env, mutate, storage } = await setup();
+    if (deadline === null) await storage.deleteAlarm();
+    else await storage.setAlarm(Date.now() + deadline);
+    const alarm = vi.spyOn(storage, 'setAlarm');
+    await mutate('job-edit', [{ kind: 'jobs', name: 'j-0', value: { action: 'ping', cron: '0 * * * *' } }]);
+    const expected = Date.now() + Math.min(deadline ?? Infinity, 1000);
+    expect(await storage.getAlarm()).toBe(expected);
+    expect(alarm).toHaveBeenCalledTimes(deadline === 500 ? 0 : 1);
+    expect(await storage.get('sync:j-0')).toBeDefined();
+    vi.setSystemTime(expected);
+    // Cloudflare clears the delivered alarm before entering the callback.
+    await storage.deleteAlarm();
+    const cold = new AccountDO({ storage }, env);
+    await cold.alarm();
+    expect(await storage.list({ prefix: 'sync:' })).toHaveLength(0);
+    expect(await env.JOBS.get('a:j-0').storage.get('settings')).toMatchObject({ job: { cron: '0 * * * *' }, next_fire: Date.parse('2026-11-16T13:00:00Z') });
+  });
+}
+
+it('rolls back a job edit and its charge if its durable wakeup cannot commit', async () => {
+  const { mutate, storage } = await setup();
+  await storage.deleteAlarm();
+  const before = structuredClone(storage.rows);
+  const fault = vi.spyOn(storage, 'setAlarm').mockRejectedValueOnce(new Error('alarm unavailable'));
+  const operations = [{ kind: 'jobs', name: 'j-0', value: { action: 'ping', cron: '0 * * * *' } }];
+  await expect(mutate('retry', operations)).rejects.toMatchObject({ status: 500 });
+  expect(storage.rows).toEqual(before); expect(await storage.getAlarm()).toBe(null);
+  fault.mockRestore();
+  expect(await mutate('retry', operations)).toMatchObject({ cost_microdollars: PRICES.change });
+  expect(await storage.getAlarm()).toBe(Date.now() + 1000);
 });

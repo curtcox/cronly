@@ -227,6 +227,10 @@ without persisting derived price changes on each job. A single action create,
 edit or deletion stays within the existing change allowance even with 100 jobs;
 only explicitly edited/deleted jobs need durable scheduling outboxes. Existing
 execution holds and job pauses retain their original state.
+Action, variable and secret mutations also skip the account alarm write: they
+create no scheduling outbox. Explicit job edits schedule a recovery wakeup only
+when an existing alarm will not already run soon enough, retaining earlier hold
+expiry deadlines. These administrative savings leave paid-run prices unchanged.
 
 ## Verified provider sources
 

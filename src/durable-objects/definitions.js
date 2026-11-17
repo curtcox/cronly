@@ -62,6 +62,11 @@ export async function mutate(tx, args, env) {
   await tx.put(`audit:${Date.now()}:${args.id}`, { id: args.id, changes, created_at: Date.now(), key_id: args.key_id || null });
   const result = { changes, quote_microdollars: quote, cost_microdollars: quote, balance_microdollars: balance_microdollars - quote };
   await tx.put(receiptKey, { request_hash: requestHash, response: result });
-  await tx.setAlarm(Date.now() + 1000);
+  if (changes.some(change => change.kind === 'jobs')) {
+    const next = Date.now() + 1000; const alarm = await tx.getAlarm();
+    // Non-job definitions have no scheduling outbox. Explicit job edits need a
+    // wakeup, but must not postpone an earlier prepaid hold's expiry.
+    if (alarm === null || alarm > next) await tx.setAlarm(next);
+  }
   return result;
 }

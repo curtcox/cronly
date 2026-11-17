@@ -112,6 +112,8 @@ await api('/api/actions/http', 'PUT', { url: 'https://example.com/edited' });
 const synced = await api('/api/account');
 for (const name of ['http', 'js', 'gateway']) assert.equal(synced.job_runtime[name].last_outcome, 'success');
 assert.equal(synced.job_runtime.blocked.last_outcome, 'failure'); assert.equal(synced.held_microdollars, 0);
+assert.equal(synced.job_runtime['no-budget'].paused, 'budget_day');
+assert.deepEqual((await api('/api/runs?job=no-budget')).items, pauses);
 // Exercise a real JobDO alarm, not just manual queue dispatch. Its budget bounds
 // spending if acceptance fails before the final disable mutation can run. A fresh
 // account keeps polling independent of the preceding ledger audit's rate window.
