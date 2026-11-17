@@ -113,7 +113,17 @@ and public JavaScript remain disabled.
   Replace draft markers with effective dates before public availability.
 - Record evidence and deployment SHA in STATUS.md, then enable automatic deploys if desired.
 
-A global emergency stop is Worker variable COST_SAFETY_HARD_STOP=true. It is checked by
+A global emergency stop is Worker variable COST_SAFETY_HARD_STOP=true. Set it
+directly in the Worker dashboard for an immediate stop. Deployments preserve
+dashboard variables, so a routine release cannot remove this stop. To manage it
+through CI, set repository variable CRONLY_COST_SAFETY_HARD_STOP=true and run
+Deploy production. Clearing the stop through CI requires the explicit value false
+and another deployment; leaving the repository variable empty preserves the
+deployed setting. Invalid values refuse deployment. If the repository variable
+is set, it takes precedence over the dashboard on the next deployment; keep it
+aligned with the intended incident response.
+
+The stop is checked by
 JobDO, executor and gateway. Queued runs skipped before execution by this stop or
 the analytics brake release their holds with a zero charge; skipped JavaScript
 runs do not record a paid daily activation. The persisted daily cost brake also pauses schedules;

@@ -25,6 +25,7 @@ APP_ORIGIN = "https://cronly.org"
 # Required for live runs: COST_SAFETY_DO_NAMESPACES (comma-separated cronly namespace IDs).
 # JS_ACCEPTANCE_ACCOUNT allows the owner to perform live acceptance; JS_LIVE_ACCEPTED=true unlocks JS after acceptance.
 # COST_SAFETY_HARD_STOP=true provides an immediate operator brake.
+# CI preserves dashboard variables; CRONLY_COST_SAFETY_HARD_STOP explicitly sets/clears this brake.
 
 [[durable_objects.bindings]]
 name = "ACCOUNTS"
