@@ -101,6 +101,11 @@ and public JavaScript remain disabled.
   invoke JS until JS_LIVE_ACCEPTED=true. Keep a daily cap on the owner's test API key.
 - `npm run verify:production` checks public pages, release SHA, live Clerk configuration,
   access denial and LocalDev rejection. Optional CRONLY_API_KEY adds one billed read.
+  Public checks retry up to six times with two seconds between attempts while code
+  and secrets propagate. The optional billed read runs only after those checks pass
+  and is never retried automatically, including after a lost response. CRONLY_ORIGIN
+  must be an HTTPS origin; redirects fail verification. Failures identify the path
+  and status without printing credentials, response bodies or transport details.
 - Run a real $5 deposit on Account. Confirm the card fee is itemized, full credit is
   credited once, repeated signed webhooks do not add credit twice, and refunds are
   operationally possible. Set repository variable CRONLY_LAUNCH_APPROVED=true only after reviewing
