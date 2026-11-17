@@ -14,6 +14,10 @@ and Cloudflare account, with a separate Clerk application and Stripe product, as
    owner first. Use live publishable/secret keys; allow only https://cronly.org as the
    authorized party. Point its signed user.created/user.updated webhook to
    https://cronly.org/webhooks/clerk. Do not enable public sign-up.
+   The separate application, production instance, Invite-only mode, verified DNS
+   records and GitHub live key storage were completed on 2026-11-17; Google OAuth,
+   certificates, signed webhook and owner sign-in remain tracked in
+   [Clerk setup](clerk.md).
 3. Configure Stripe Checkout for USD cards and a separate cronly product. Point signed
    checkout.session.completed/async_payment_succeeded webhooks to /webhooks/stripe.
    Payments itemize credit and non-refundable card cost. Verify tax obligations with
@@ -72,8 +76,9 @@ Live runtime checks passed on 2026-11-16: [recorded evidence](evidence/sandbox-r
 The finite arithmetic test also succeeded at 10 ms, so the CPU rejection probe
 uses a nonterminating loop and requires the explicit native CPU-limit exception.
 The cronly.org zone is active and the `cronly-runs` queue exists. GitHub's production
-environment contains the verified Cloudflare account ID; application/deploy tokens
-and the app Worker remain unconfigured. Automatic deployments, launch approval
+environment contains the verified Cloudflare account ID and live Clerk keypair;
+the deploy token, other application credentials and app Worker remain unconfigured.
+Automatic deployments, launch approval
 and public JavaScript remain disabled.
 
 - Set GitHub secret JS_ACCEPTANCE_ACCOUNT to the invited owner's Clerk ID. Other accounts cannot
