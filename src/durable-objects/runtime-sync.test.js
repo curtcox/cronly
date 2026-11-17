@@ -106,3 +106,40 @@ it('keeps the operator hard stop stateless so removing it permits scheduled work
   expect(send).toHaveBeenCalledTimes(1);
   expect((await job('status')).paused).toBe(null);
 });
+
+for (const reason of ['insufficient_balance', 'cost_brake']) for (const failure of ['publication', 'settings', 'alarm']) {
+  it(`recovers a ${reason} wake after failed ${failure} and a cold restart`, async () => {
+    const { env, account, job, object } = await setup();
+    const paused = { ...await job('status'), paused: reason };
+    await object.storage.put('settings', paused); await object.publish(paused);
+    await object.storage.deleteAlarm();
+    const fault = failure === 'publication' ? vi.spyOn(object, 'publish').mockRejectedValueOnce(new Error('publication unavailable'))
+      : failure === 'settings' ? vi.spyOn(object.storage, 'put').mockRejectedValueOnce(new Error('settings unavailable'))
+        : vi.spyOn(object.storage, 'setAlarm').mockRejectedValueOnce(new Error('alarm unavailable'));
+    await expect(job('wake', { reason })).rejects.toMatchObject({ status: 500 }); fault.mockRestore();
+    if (failure !== 'alarm') expect(await job('status')).toEqual(paused);
+    env.JOBS.objects.set('a:j', new JobDO({ storage: object.storage, blockConcurrencyWhile: fn => fn() }, env));
+    await job('wake', { reason });
+    expect(await job('status')).toMatchObject({ paused: null, last_outcome: 'success' });
+    expect((await account('account')).job_runtime.j).toMatchObject({ paused: null, next_fire: Date.parse('2026-11-16T13:00:00Z') });
+    // Retained logs can wake sooner, but the schedule must have a durable alarm.
+    expect(await object.storage.getAlarm()).toBe(Date.parse('2026-11-16T13:00:00Z'));
+    const put = vi.spyOn(object.storage, 'put'); const alarm = vi.spyOn(object.storage, 'setAlarm');
+    await job('wake', { reason });
+    expect(put).not.toHaveBeenCalled(); expect(alarm).not.toHaveBeenCalled();
+  });
+}
+
+for (const paused of ['budget_day', 'budget_month', 'cost_brake', 'deleted']) {
+  it(`preserves a ${paused} pause and its alarm on a balance wake`, async () => {
+    const { job, object } = await setup();
+    const settings = { ...await job('status'), paused, resume_at: Date.now() + 60000 };
+    await object.storage.put('settings', settings); await object.publish(settings); await object.arm();
+    const before = await object.storage.getAlarm();
+    const put = vi.spyOn(object.storage, 'put'); const alarm = vi.spyOn(object.storage, 'setAlarm');
+    await job('wake', { reason: 'insufficient_balance' });
+    expect(await job('status')).toEqual(settings);
+    expect(await object.storage.getAlarm()).toBe(before);
+    expect(put).not.toHaveBeenCalled(); expect(alarm).not.toHaveBeenCalled();
+  });
+}

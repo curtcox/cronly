@@ -57,8 +57,8 @@ export class JobDO {
       }
       case 'wake': {
         const settings = await this.storage.get('settings'); if (!settings?.job) return {};
-        if (settings.paused === 'insufficient_balance' || args.force) await this.reconcile();
-        else await this.publish(settings);
+        if (settings.paused === (args.reason || 'insufficient_balance') || args.force) await this.reconcile();
+        else { await this.publish(settings); await this.arm(); }
         return {};
       }
       case 'runs': {
@@ -96,7 +96,9 @@ export class JobDO {
     settings.job = Object.hasOwn(config.jobs, settings.name) ? config.jobs[settings.name] : null;
     if (!settings.job) { settings.next_fire = null; settings.paused = 'deleted'; }
     if (settings.job?.enabled && settings.job.cron && !settings.paused) settings.next_fire = Date.parse(nextFires(settings.job.cron, settings.job.timezone, 1)[0]);
-    await this.storage.put('settings', settings); await this.publish(settings); await this.arm();
+    // Retain the pause until publication succeeds. A repeated wake also rearms
+    // after a failed alarm write, even when settings already show the resumption.
+    await this.publish(settings); await this.storage.put('settings', settings); await this.arm();
   }
   async start(args, rearm = true) {
     assert(this.env.COST_SAFETY_HARD_STOP !== 'true', 'cost_brake', 'Runs are paused by the operator', 503);
