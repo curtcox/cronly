@@ -60,3 +60,13 @@ it('quotes current prices for persisted jobs while honoring an older queued hold
   await rpc(env.ACCOUNTS, 'alice', 'reserve', { id: 'higher', amount: 100, kind: 'run', job: 'j' });
   expect(await rpc(env.ACCOUNTS, 'alice', 'settle', { id: 'higher', actual: 100 })).toMatchObject({ charged: 100 });
 });
+
+it('quotes current definitions on dry-run replay without returning an earlier paid charge', async () => {
+  const { api, env } = setup(); await api('/api/dev/deposit', 'POST', { amount_microdollars: 1000 });
+  const headers = { 'Idempotency-Key': 'save' };
+  expect((await api('/api/variables/greeting', 'PUT', { value: 'hello' }, headers)).cost_microdollars).toBe(100);
+  const balance = (await rpc(env.ACCOUNTS, 'alice', 'account')).balance_microdollars;
+  expect(await api('/api/variables/greeting?dry_run=1', 'PUT', { value: 'different' }, headers)).toMatchObject({ status: 200, cost_microdollars: 0, quote_microdollars: 100, balance_microdollars: balance });
+  expect((await api('/api/variables/greeting')).value).toBe('hello');
+  expect((await rpc(env.ACCOUNTS, 'alice', 'account')).balance_microdollars).toBe(balance);
+});

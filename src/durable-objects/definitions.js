@@ -4,6 +4,7 @@ import { encryptSecret, secretMetadata } from '../executor/secrets.js';
 import { digest } from '../auth/crypto.js';
 import { charge, funds } from './ledger.js';
 import { price } from '../utils/pricing.js';
+import { configDiff } from '../services/config.js';
 /** Assemble the bounded account graph from individually stored definitions. */
 export async function loadConfig(tx, publicView = false) {
   const config = {};
@@ -22,12 +23,31 @@ export async function keyBudget(tx, id) {
   assert(key && !key.revoked && key.expires_at > Date.now(), 'invalid_auth', 'API key revoked or expired', 401);
   return { key_id: id, key_budget: key.daily_spend_microdollars === null ? {} : { day: key.daily_spend_microdollars } };
 }
+/** Bind imports to the submitted document, never a diff recomputed on retry. */
+export async function putConfig(tx, args, env) {
+  const requestHash = await digest(JSON.stringify(args.config));
+  const receiptKey = `config-import:${args.key_id || 'session'}:${args.id}`;
+  if (!args.dry_run) {
+    const prior = await tx.get(receiptKey);
+    if (prior) { assert(prior.request_hash === requestHash, 'idempotency_conflict', 'Idempotency key used for a different import', 409); return prior.response; }
+  }
+  const operations = configDiff(await loadConfig(tx, true), args.config);
+  if (operations.some(op => op.kind === 'secrets')) assert(args.can_delete_secrets, 'insufficient_scope', 'secrets:write is required to remove secrets', 403);
+  // Use the existing mutation receipt for paid imports: this keeps the ordinary
+  // write allowance and commits the original response with billing and settings.
+  if (operations.length) return mutate(tx, { ...args, operations }, env, { requestHash, receiptKey, chargeId: receiptKey });
+  const response = { changes: [], quote_microdollars: 0, cost_microdollars: 0, balance_microdollars: (await funds(tx)).balance_microdollars };
+  // An empty import must also be final; replay must not remove definitions that
+  // someone created later. Quotes never consume the caller's idempotency key.
+  if (!args.dry_run) await tx.put(receiptKey, { request_hash: requestHash, response });
+  return response;
+}
 /** Validate, quote and atomically bill a definition batch; dry runs write nothing. */
-export async function mutate(tx, args, env) {
+export async function mutate(tx, args, env, receipt = {}) {
   assert(Array.isArray(args.operations) && args.operations.length > 0 && args.operations.length <= 400, 'invalid_changes', 'Expected 1–400 changes');
-  const requestHash = await digest(JSON.stringify(args.operations));
-  const receiptKey = `idempotency:${args.key_id || 'session'}:${args.id}`;
-  const prior = await tx.get(receiptKey);
+  const requestHash = receipt.requestHash || await digest(JSON.stringify(args.operations));
+  const receiptKey = receipt.receiptKey || `idempotency:${args.key_id || 'session'}:${args.id}`;
+  const prior = !args.dry_run && await tx.get(receiptKey);
   if (prior) { assert(prior.request_hash === requestHash, 'idempotency_conflict', 'Idempotency key used for a different request', 409); return prior.response; }
   const config = await loadConfig(tx);
   if (args.expected_config_hash) assert(await digest(JSON.stringify(await loadConfig(tx, true))) === args.expected_config_hash, 'config_conflict', 'Configuration changed while preparing the import; retry its quote', 409);
@@ -49,7 +69,7 @@ export async function mutate(tx, args, env) {
   const quote = changes.length * price('change');
   const { balance_microdollars } = await funds(tx);
   if (args.dry_run) return { changes, quote_microdollars: quote, cost_microdollars: 0, balance_microdollars };
-  await charge(tx, { id: `change:${args.id}:${args.key_id || 'session'}`, amount: quote, kind: 'change', ...await keyBudget(tx, args.key_id) });
+  await charge(tx, { id: receipt.chargeId || `change:${args.id}:${args.key_id || 'session'}`, amount: quote, kind: 'change', ...await keyBudget(tx, args.key_id) });
   for (const operation of args.operations) {
     const { kind, name } = operation;
     if (kind === 'jobs') await tx.put(`job-index:${name}`, { name, account: args.account, updated_at: Date.now() });
@@ -59,7 +79,7 @@ export async function mutate(tx, args, env) {
     // current action, and public reads derive its quote without rewriting jobs.
     if (kind === 'jobs') await tx.put(`sync:${name}`, { name, account: args.account, version: crypto.randomUUID() });
   }
-  await tx.put(`audit:${Date.now()}:${args.id}`, { id: args.id, changes, created_at: Date.now(), key_id: args.key_id || null });
+  await tx.put(`audit:${Date.now()}:${receipt.chargeId || args.id}`, { id: receipt.chargeId || args.id, changes, created_at: Date.now(), key_id: args.key_id || null });
   const result = { changes, quote_microdollars: quote, cost_microdollars: quote, balance_microdollars: balance_microdollars - quote };
   await tx.put(receiptKey, { request_hash: requestHash, response: result });
   if (changes.some(change => change.kind === 'jobs')) {

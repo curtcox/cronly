@@ -1,7 +1,7 @@
 import { errorResponse, assert } from '../utils/errors.js';
 import { digest } from '../auth/crypto.js';
 import { prepareRun, claimRun } from './runs.js';
-import { loadConfig, mutate, keyBudget } from './definitions.js';
+import { loadConfig, mutate, keyBudget, putConfig } from './definitions.js';
 import { rpc } from '../utils/rpc.js';
 import { price } from '../utils/pricing.js';
 import { parseScopes } from '../auth/scopes.js';
@@ -73,6 +73,7 @@ export class AccountDO {
       case 'claim-run': return claimRun(tx, args.id);
       case 'config': return loadConfig(tx, args.public_view !== false);
       case 'mutate': return mutate(tx, args, this.env);
+      case 'put-config': return putConfig(tx, args, this.env);
       case 'begin-secret-rotation': return beginSecretRotation(tx, args, this.env);
       case 'finish-secret-rotation': return finishSecretRotation(tx, args, this.env);
       case 'begin-prose': {

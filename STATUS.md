@@ -62,7 +62,7 @@ disagrees with it, this file wins and the other document is stale.
 | L8 | Web UI with balance + runway header on every signed-in page; Playwright tests | code | ✅ | All workspace pages, runtime status/runway, direct action tests, quote dialogs and logo implemented; mobile and browser save/run/escaping/cron flows pass. Run-history paging uses stable cursors and preserves visible job/outcome/date filters. §5. |
 | L9 | Prose: free cron explain; Claude to-cron, ask, change proposals + apply; holds and billing; to-cron eval | code/ops | 🟨 | Structured client, held read-only conversations, usage billing, separate stale-checked proposals and 100-case two-model eval implemented. Finalization is immutable and separate from provider failures: lost acknowledgements recover the saved result, status and authoritative settled charge without repeating Claude. Account snapshots share the reservation transaction, so failed reads leave no prose hold; cron translation avoids account definitions. Live eval requires owner Anthropic access. §3.5. Needs D3 and an Anthropic API key (ops). |
 | L10 | JavaScript actions: sandbox, outbound gateway, CPU/subrequest limits and pricing, editor | code/ops | 🟨 | Content-addressed Worker Loader, blocked native networking, counted gateway, daily activation settlement and editor implemented; real local JS succeeds. Activation follows the claim's UTC day and discounts only settled payments, including concurrent claims and operator/analytics safety refunds; reserved budget periods stay unchanged. Real SQLite/Queue verifies one activation across three jobs sharing a version. Shared redaction runs inside the sandbox before console/return truncation; its code participates in version/activation hashing. Live CPU-limit acceptance required. §2.2, §3.4. Needs D2. |
-| L11 | Agent surface: OpenAPI + drift test, `llms.txt`, agent docs, MCP server, `/api/config`, browser snippet | code | ✅ | Atomic config with conflict checks, OpenAPI drift test, scoped MCP protocol tests, llms.txt/agent docs and immutable SHA-384 SRI trigger SDK verified. §4.4, §4.5. |
+| L11 | Agent surface: OpenAPI + drift test, `llms.txt`, agent docs, MCP server, `/api/config`, browser snippet | code | ✅ | Transactional config imports replay the original receipt after lost responses, later edits and no-op imports; dry runs quote current state without consuming receipts. Atomic config with conflict checks, OpenAPI drift test, scoped MCP protocol tests, llms.txt/agent docs and immutable SHA-384 SRI trigger SDK verified. §4.4, §4.5. |
 | L12 | Abuse and cost safety: limits, destination rules, rate-limit rules, daily cost reconciliation and brake, invite-only sign-up | code/ops | 🟨 | Account/job/destination caps, native ingress limiter, destination checks, conservative daily analytics reconciliation and stale-report brake implemented. Registry reconciliation and recovery scan bounded pages beyond 1,000 accounts; versioned durable scan cursors/outboxes survive partial enqueue/ack failures and cold restarts. Analytics pauses publish runtime before committing settings, retaining due schedules for recovery after publication/storage/alarm outages; repeated refusals skip settings writes. Recovery wakes only cost-brake pauses, preserving unrelated budget/balance pauses. Queued HTTP/JS runs skipped by the operator hard stop refund their holds without recording a paid activation, including settlement/completion recovery. Live schema/WAF/billing alerts and Clerk Restricted mode remain owner steps. §8. |
 | L13 | Terms of Service and Privacy Policy (acceptable use, refunds, suspension) | legal | 🟨 | Service-specific drafts prepared; owner directed shared entity/jurisdiction with hashbin and separate contacts, approving placeholders for now. Offline profile renders escaped facts into both drafts with drift checks; approved-launch deploys require complete pinned facts. Actual facts, cronly contacts and policy approval remain. Checkout is gated by launch approval. |
 | L14 | Production: cronly.org DNS and custom domain, live Clerk and Stripe, secrets, end-to-end test with a real deposit, `verify:production` | ops | 🟨 | Custom-domain config, guarded CI deploy, secret upload, production verifier and live sandbox acceptance script prepared; provision credentials/DNS and perform real deposit/live acceptance per docs/ops/launch.md. §10.13. |
@@ -757,3 +757,19 @@ calendar days of billed counts rather than sampling retained logs.
   independence, concurrent changes and validation-error replay. Prices and paid-run
   cost allowances are unchanged. L9–L14 live/owner/legal acceptance remains open;
   no production deployment or credential changes occurred.
+
+
+## L4/L11 config import recovery acceptance — 2026-11-16
+
+- Config diffing, receipt lookup, scope checks and billing now share one account
+  transaction. Identical imports recover the original response after lost replies,
+  concurrent delivery, later account edits or a cold restart. Successful no-op
+  imports retain their identity so a retry cannot delete definitions added later.
+- Changed import documents reject reused keys. Imports have separate receipt and
+  billing identities from named-definition changes. Secret deletion scopes and key
+  spend caps remain transactional; failed receipt writes roll back the whole import.
+- Dry runs quote the current account without consuming or replaying a paid receipt,
+  including named-definition saves. Paid imports keep the existing write allowance.
+- Lint and all 831 unit/integration tests pass, including eight import regressions
+  and the definition dry-run regression. All five browser
+  flows and the production dry-run build pass. Live/owner launch work remains open.
