@@ -191,9 +191,10 @@ export class JobDO {
     const { retry, ...completed } = summary;
     try { await this.start({ ...retry, id: `${id}:retry`, retry: true }); }
     catch (error) {
-      // Refusals end this retry. Infrastructure failures retain the outbox for
-      // Queue redelivery or the pending run's already-funded recovery alarm.
-      if (![402, 403, 404, 409, 429].includes(error.status) && !['cost_brake', 'sandbox_acceptance_required'].includes(error.code)) throw error;
+      // Revoked/expired keys and newly required input cannot authorize this
+      // retry either. Keeping those refusals would wake an unpaid loop forever.
+      // Infrastructure failures retain the outbox for funded recovery.
+      if (![400, 401, 402, 403, 404, 409, 429].includes(error.status) && !['cost_brake', 'sandbox_acceptance_required'].includes(error.code)) throw error;
     }
     await this.storage.put(`history:${id}`, completed);
     if (this.historyCache) this.historyCache = this.historyCache.map(r => r.id === id ? completed : r);
