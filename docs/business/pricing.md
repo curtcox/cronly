@@ -221,6 +221,12 @@ five-invocation and 3,000-read allowances. The rounded HTTP cost falls from 53 t
 keep their original maximum; persisted job quotes use the current price. Further
 S4 reductions and live/owner launch acceptance remain open.
 
+Action tests create their permanent history-routing index only on the first
+reservation. Later tests reuse it, saving one account row write per run; the
+reservation's activity record still tracks recency. Creation remains atomic with
+the prepaid hold, and retained logs remain accessible after action deletion.
+The first-test worst case still needs that write, so prices and allowances hold.
+
 Action changes no longer fan out into writes and scheduling synchronization for
 every job in the account. Quotes and reservations resolve the current action
 without persisting derived price changes on each job. A single action create,
