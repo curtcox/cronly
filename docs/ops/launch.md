@@ -2,7 +2,7 @@
 
 Work is on main. The first app Worker/custom-domain deployment completed on
 2026-11-17. Public-page and signed-out Clerk checks passed on release `038d920`;
-actual single-user service acceptance is tracked in STATUS.md.
+actual single-user service acceptance is tracked in STATUS.md, with evidence in `docs/acceptance/`.
 Deployment credentials are not copied from hashbin. Use the same operating entity
 and Cloudflare account, with a separate Clerk application and Stripe product, as approved
 2026-11-15. STATUS.md is authoritative for acceptance status.
@@ -91,7 +91,7 @@ and Cloudflare account, with a separate Clerk application and Stripe product, as
    reviewed launch gate, then make the real $5 deposit and check fulfillment once.
    Keep sign-up invite-only and public JavaScript disabled during acceptance.
 5. Use this same account for the HTTP/manual/schedule/hook checks below and a
-   capped API key for sandbox acceptance. Record each result in STATUS.md; opening
+   capped API key for sandbox acceptance. Record each result in `docs/acceptance/` and update its STATUS.md row; opening
    a sign-in form alone does not complete L14.
 
 ## Live acceptance before opening payments
@@ -161,7 +161,7 @@ and public JavaScript remain disabled.
   `npm run legal:generate` and `npm run legal:check`, and pin the shared source revision.
   Approved-launch deploys also require `node scripts/operator-profile.mjs --require-complete`.
   Replace draft markers with effective dates before public availability.
-- Record evidence and deployment SHA in STATUS.md, then enable automatic deploys if desired.
+- Record evidence and deployment SHA in `docs/acceptance/`, update STATUS.md, then enable automatic deploys if desired.
 
 A global emergency stop is Worker variable COST_SAFETY_HARD_STOP=true. Set it
 directly in the Worker dashboard for an immediate stop. Deployments preserve

@@ -20,6 +20,7 @@ rather than rewriting it.
 | Design | [`todo/master_plan.md`](todo/master_plan.md) |
 | Prices, costs and why | [`docs/business/pricing.md`](docs/business/pricing.md) |
 | Why something finished was built the way it was | `done/<plan>.md` |
+| Evidence that a row was accepted (dated records) | [`docs/acceptance/`](docs/acceptance/README.md) |
 
 ## Conventions (planned; enforce them from L1)
 
@@ -43,8 +44,9 @@ rather than rewriting it.
 - **File sizes** have per-type limits (source code 32 KiB, HTML/CSS 64 KiB, prose 48 KiB, data
   64 KiB, raster images 256 KiB, and 256 KiB for the generated `frontend/openapi.json`; the full
   list is `RULES` in `scripts/check-file-sizes.mjs`). When a file outgrows its limit, split it.
-  `scripts/file-size-baseline.json` grandfathers files that were already over (STATUS `B2`);
-  they may not grow. After shrinking one, run `npm run check:file-sizes -- --update-baseline`.
+  `scripts/file-size-baseline.json` is empty; it only grandfathers files when a new or tighter
+  rule arrives (`--write-baseline`), and those may not grow. After shrinking one, run
+  `npm run check:file-sizes -- --update-baseline`.
   Never raise or add baseline entries to make a check pass. `npm install` enables the pre-push
   hook in `.githooks/`, which also rejects big files committed and deleted again before a push.
 - **Errors** are JSON `{ error, code, ... }` with the right HTTP status; `402` for balance or

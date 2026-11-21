@@ -1,8 +1,4 @@
 {
   "comment": "Files over their size limit when the check arrived. They may not grow; after shrinking one, run: npm run check:file-sizes -- --update-baseline. See scripts/check-file-sizes.mjs.",
-  "files": {
-    "frontend/js/app.js": 44528,
-    "STATUS.md": 105534,
-    "tests/workspace.spec.js": 55986
-  }
+  "files": {}
 }

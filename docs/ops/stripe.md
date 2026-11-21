@@ -94,4 +94,4 @@ without broader write grants. [Sanitized acceptance evidence](evidence/stripe-ca
    deduplication and balance-paused job recovery. Confirm both completed and
    async-success delivery for the same session cannot credit it twice.
 3. Verify the refund procedure with the owner and record deployment SHA and
-   sanitized evidence in STATUS.md. No live charge or refund is claimed here.
+   sanitized evidence in `docs/acceptance/`. No live charge or refund is claimed here.
