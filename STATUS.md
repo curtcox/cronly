@@ -81,6 +81,7 @@ disagrees with it, this file wins and the other document is stale.
 | ID | Item | Owner | Status | Notes / reference |
 |----|------|-------|--------|-------------------|
 | B1 | Anything in master plan §11 that customers ask for | — | ⬜ | Add a row per request. |
+| B2 | Work down the file size ratchet | code | 🚧 | Per-type limits run in the pre-push hook, unit tests and CI (`scripts/check-file-sizes.mjs`, ported from hashbin). Grandfathered in `scripts/file-size-baseline.json`: `STATUS.md` (prose, 48 KiB; move acceptance records out), `tests/workspace.spec.js` and `frontend/js/app.js` (code, 32 KiB; split into sibling modules). Done when the baseline is empty. |
 
 ## Acceptance record — 2026-11-15
 

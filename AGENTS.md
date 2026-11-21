@@ -40,6 +40,13 @@ rather than rewriting it.
 - **Prose never applies changes by itself.** LLM output becomes a proposal; applying it is a
   separate, billed API call.
 - **Frontend:** no framework, no bundler. Escape anything dynamic before `innerHTML`.
+- **File sizes** have per-type limits (source code 32 KiB, HTML/CSS 64 KiB, prose 48 KiB, data
+  64 KiB, raster images 256 KiB, and 256 KiB for the generated `frontend/openapi.json`; the full
+  list is `RULES` in `scripts/check-file-sizes.mjs`). When a file outgrows its limit, split it.
+  `scripts/file-size-baseline.json` grandfathers files that were already over (STATUS `B2`);
+  they may not grow. After shrinking one, run `npm run check:file-sizes -- --update-baseline`.
+  Never raise or add baseline entries to make a check pass. `npm install` enables the pre-push
+  hook in `.githooks/`, which also rejects big files committed and deleted again before a push.
 - **Errors** are JSON `{ error, code, ... }` with the right HTTP status; `402` for balance or
   budget refusals.
 

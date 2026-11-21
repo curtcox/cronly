@@ -11,6 +11,7 @@
     "dev:local": "wrangler dev --config wrangler.local.toml --local",
     "deploy": "wrangler deploy",
     "lint": "eslint src scripts frontend workers test-utils --no-error-on-unmatched-pattern",
+    "check:file-sizes": "node scripts/check-file-sizes.mjs",
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
@@ -23,7 +24,8 @@
     "legal:generate": "node scripts/operator-profile.mjs",
     "legal:check": "node scripts/operator-profile.mjs --check",
     "eval:prose": "node scripts/eval-prose.mjs",
-    "secrets:rotate": "node scripts/rotate-secrets.mjs"
+    "secrets:rotate": "node scripts/rotate-secrets.mjs",
+    "prepare": "node scripts/install-git-hooks.mjs"
   },
   "dependencies": {
     "@clerk/backend": "2.33.9",

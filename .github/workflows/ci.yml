@@ -11,6 +11,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      - run: npm run check:file-sizes
       - run: npm test
       - run: npm audit --omit=dev
       - run: npx playwright install --with-deps chromium
