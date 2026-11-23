@@ -45,7 +45,7 @@ the design. Pricing numbers and their derivation live in
 | **Action** | Named thing to do: an HTTP request template or a JavaScript module | `ping-health`, `nightly-report` |
 | **Job** | An action plus *when*: a cron expression and time zone, plus policies and a budget. One action can have several jobs. | `ping-health` every 5 min, `America/Chicago` |
 | **Trigger** | A way to run a job now: "Run now" in the UI, `POST /api/jobs/{name}/run`, or a webhook URL with a trigger token | `https://cronly.org/hook/tk_…` |
-| **Run** | One execution of a job, with its log, outcome and cost | run `r_01J…` at 2026-11-16T09:00Z, 200 OK, 85 µ$ |
+| **Run** | One execution of a job, with its log, outcome and cost | run `r_01J…` at 2026-11-16T09:00Z, 200 OK, 84 µ$ |
 | **Budget** | Limits on what a job may spend: per run, per day, per month | max 1,000 µ$/day |
 | **Balance** | Prepaid credit in micro-dollars, topped up with Stripe | $4.81 |
 
@@ -375,9 +375,9 @@ Detailed derivation in [`docs/business/pricing.md`](../docs/business/pricing.md)
 
 | Operation | Price | Worst-case marginal cost (est.) |
 |-----------|-------|----------------------|
-| HTTP run (scheduled, manual, or retry) | 85 µ$ | 52 µ$ |
+| HTTP run (scheduled, manual, or retry) | 84 µ$ | 51 µ$ |
 | Webhook-triggered run | run price + 5 µ$ | run bound + 2 µ$ |
-| JS run | 85 µ$ + ceil(0.05 µ$ × CPU-ms limit) + 5 µ$ per allowed subrequest | HTTP bound + configured CPU + counted gateway |
+| JS run | 84 µ$ + ceil(0.05 µ$ × CPU-ms limit) + 5 µ$ per allowed subrequest | HTTP bound + configured CPU + counted gateway |
 | JS daily activation | 3,300 µ$ per account/action version/UTC execution day | 2,000 µ$ |
 | Change (create/update/delete action, variable, secret, job, key, trigger) | 100 µ$ | 20 µ$ including billing and audit |
 | Prose request | ceil(1.64 × actual Anthropic token cost) + 500 µ$ | token cost + bookkeeping |

@@ -329,8 +329,9 @@ export class JobDO {
       if (!settings.paused && settings.job?.enabled && due && due <= Date.now()) {
         // Persist advancement after reserving/enqueuing; deterministic IDs survive alarm retries.
         const late = Date.now() - due > 60000;
+        let started = null;
         if (!late || settings.job.missed === 'run_once') {
-          try { await this.start({ id: `${settings.account}:${settings.name}:${due}`, trigger: 'schedule', scheduled_at: new Date(due).toISOString(), input: {} }, false); }
+          try { started = await this.start({ id: `${settings.account}:${settings.name}:${due}`, trigger: 'schedule', scheduled_at: new Date(due).toISOString(), input: {} }, false); }
           catch (error) { if (![402, 409, 429, 503].includes(error.status) && error.code !== 'missing_input') throw error; }
         }
         settings = await this.storage.get('settings');
@@ -339,7 +340,12 @@ export class JobDO {
         // publication retryable, including skipped runs with no pending outbox.
         if (!settings.paused) {
           settings.next_fire = Date.parse(nextFires(settings.job.cron, settings.job.timezone, 1)[0]);
-          await this.publish(settings); await this.storage.put('settings', settings);
+          // S4: a run this turn freshly queued settles with runtime read from these settings, so
+          // its settlement publishes the advancement (one runtime write and request fewer). If
+          // the write below fails, the alarm retry finds a duplicate and publishes here instead.
+          const settles = started && !started.duplicate && started.run?.status === 'queued';
+          if (!settles) await this.publish(settings);
+          await this.storage.put('settings', settings);
         }
       }
       await this.prune(); await this.arm();

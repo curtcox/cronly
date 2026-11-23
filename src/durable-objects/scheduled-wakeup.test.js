@@ -30,20 +30,41 @@ async function setup() {
 
 it('rearms scheduled dispatch once after advancement while preserving the atomic outbox wakeup', async () => {
   const { job, account, messages, due } = await setup();
-  const arm = vi.spyOn(job, 'arm'); const alarm = vi.spyOn(job.storage, 'setAlarm');
+  const arm = vi.spyOn(job, 'arm'); const alarm = vi.spyOn(job.storage, 'setAlarm'); const publish = vi.spyOn(job, 'publish');
   await job.alarm();
   expect(messages).toHaveLength(1); expect(arm).toHaveBeenCalledTimes(1);
   expect(alarm.mock.calls.map(([time]) => time)).toEqual([due + 1000, due + 60000]);
-  expect((await account('account')).job_runtime.j.next_fire).toBe(due + 60000);
   expect((await job.readRun(messages[0].id)).expires_at).toBe(due + 120000);
+  // S4: the queued run's settlement publishes the advancement, saving a runtime write and request.
+  expect(publish).not.toHaveBeenCalled();
+  expect((await account('account')).job_runtime.j.next_fire).toBe(due);
+  await job.result({ id: messages[0].id, result: { status: 'success' } });
+  expect((await account('account')).job_runtime.j).toMatchObject({ next_fire: due + 60000, last_outcome: 'success' });
 });
 
-for (const failure of ['enqueue', 'publication', 'advancement', 'rearm']) {
+it('publishes the advancement itself when the dispatched run settles before advancement commits', async () => {
+  const { env, account, job, messages, due } = await setup();
+  const put = job.storage.put.bind(job.storage);
+  const fault = vi.spyOn(job.storage, 'put').mockImplementation(async (key, value) => {
+    if (key === 'settings' && value.next_fire > due) throw new Error('advancement unavailable');
+    return put(key, value);
+  });
+  await expect(job.alarm()).rejects.toThrow(); fault.mockRestore();
+  // The run completes first, publishing the old schedule; the alarm retry finds a duplicate.
+  await job.result({ id: messages[0].id, result: { status: 'success' } });
+  expect((await account('account')).job_runtime.j.next_fire).toBe(due);
+  vi.setSystemTime(due + 1000);
+  const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
+  env.JOBS.objects.set('a:j', cold); await cold.alarm();
+  expect((await account('account')).job_runtime.j.next_fire).toBe(due + 60000);
+  expect(messages).toHaveLength(1);
+});
+
+for (const failure of ['enqueue', 'advancement', 'rearm']) {
   it(`recovers scheduled dispatch after failed ${failure} and restart without another reservation`, async () => {
     const { env, account, job, messages, due } = await setup();
     let fault;
     if (failure === 'enqueue') fault = vi.spyOn(env.RUN_QUEUE, 'send').mockRejectedValueOnce(new Error('queue unavailable'));
-    else if (failure === 'publication') fault = vi.spyOn(job, 'publish').mockRejectedValueOnce(new Error('runtime unavailable'));
     else if (failure === 'rearm') fault = vi.spyOn(job, 'arm').mockRejectedValueOnce(new Error('alarm unavailable'));
     else {
       const put = job.storage.put.bind(job.storage);
@@ -60,11 +81,14 @@ for (const failure of ['enqueue', 'publication', 'advancement', 'rearm']) {
     env.JOBS.objects.set('a:j', cold); await cold.alarm();
     expect(messages).toHaveLength(1);
     expect((await cold.storage.get('settings')).next_fire).toBe(due + 60000);
-    expect((await account('account')).job_runtime.j.next_fire).toBe(due + 60000);
+    // A retried dispatch finds its run already queued and publishes the advancement itself;
+    // after a failed rearm the advancement was committed and settlement publishes it.
+    expect((await account('account')).job_runtime.j.next_fire).toBe(failure === 'rearm' ? due : due + 60000);
     expect(await cold.storage.getAlarm()).toBe(due + 60000);
     expect((await account('account')).held_microdollars).toBe(PRICES.run);
     await cold.result({ id: messages[0].id, result: { status: 'success' } });
     expect(await account('account')).toMatchObject({ held_microdollars: 0, spent_today_microdollars: 200 + PRICES.run });
+    expect((await account('account')).job_runtime.j.next_fire).toBe(due + 60000);
   });
 }
 

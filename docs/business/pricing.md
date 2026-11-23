@@ -11,15 +11,15 @@ constants as the API; historical numbers in the master plan are superseded here.
 
 | Operation | Price | Estimated worst-case marginal cost |
 |---|---|---|
-| HTTP run | 85 µ$ | ceil(policy run bound), currently 52 µ$ |
+| HTTP run | 84 µ$ | ceil(policy run bound), currently 51 µ$ |
 | Webhook run | HTTP/JS price + 5 µ$ | run bound + 2 µ$ |
 | Change: action, variable, secret (including key rotation), job, key, trigger | 100 µ$ | 20 µ$ |
 | API-key read | 21 µ$ base + 2 µ$ per job scanned for aggregate history | ceil(12 µ$ base + 1.2 µ$/job) |
-| devicebasedauth.org credential: read or first-attempt run | API-key price + 7 µ$ (reads 28 µ$ base, HTTP runs 92 µ$) | API-key bound + 3.64 µ$ verification |
+| devicebasedauth.org credential: read or first-attempt run | API-key price + 7 µ$ (reads 28 µ$ base, HTTP runs 91 µ$) | API-key bound + 3.64 µ$ verification |
 | devicebasedauth.org online decision | 56 µ$ per decision, allowed or not | 34 µ$ (14 µ$ DBA charge + change-sized hold) |
 | devicebasedauth.org link start | 100 µ$ (a change); finish and unlink free | 34 µ$ (14 µ$ DBA sign-in charge + change) |
 | Web session reads, cron explain, quotes, mutation dry runs | Free, rate-limited | Bounded fixed operating cost |
-| JavaScript run | 85 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
+| JavaScript run | 84 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
 | JS daily activation | 3,300 µ$ on first invocation of each action version per UTC day | 2,000 µ$ provider activation |
 | Prose | ceil(1.64 × actual model-token cost) + 500 µ$ | actual tokens + bookkeeping |
 
@@ -78,7 +78,7 @@ reviewed Terms and applicable law.
 
 Rates live only in `src/utils/cost-policy.js`; prices only in `src/utils/pricing.js`;
 model rates only in `src/utils/llm-policy.js`. Included allowances are ignored.
-The HTTP bound includes 37 row writes, 27 DO requests, five Worker invocations and
+The HTTP bound includes 36 row writes, 27 DO requests, five Worker invocations and
 3,000 compact-index row reads, six Queue operations, CPU,
 awake time and 16 KB retained logs; orchestration caches compact summaries instead of loading log bodies. Read and change bounds include actual ledger,
 key-budget, audit and rate-counter bookkeeping rather than just one request.
@@ -326,3 +326,17 @@ use the same path. Staged outcomes and legacy publication remain recoverable;
 claimed runs with no saved outcome stay pending. This removes repeated reads and
 log deserialization on each duplicate delivery without changing the conservative
 row-write/request allowances or the 85 µ$ run price.
+
+Scheduled dispatch no longer publishes its schedule advancement separately when it has
+just queued a fresh run: that run's settlement already writes the job's runtime row from
+the advanced settings, in the same account transaction. Duplicate, expired, refused and
+skipped dispatches still publish before advancing, so an alarm retried after a failed
+advancement publishes it itself. Until the run settles, the account's `next_fire` shows
+the due time of the run in progress. This removes one runtime row write and one DO request
+from the scheduled worst case. Remeasured on 2026-11-23 without the eviction allowance,
+the 456-path audit's worst run needs 36 writes (scheduled, refused budget retry, standalone
+hold, rollover, activity eviction), so the policy bound falls from 37 to 36 writes; the 27
+DO-request bound is set by manual runs and is unchanged. The rounded HTTP cost falls from 52
+to 51 µ$ and the base HTTP/JS run price from 85 to 84 µ$ (91 µ$ for a DBA caller's first
+attempt). Existing reservations keep their original maximum; persisted job quotes use the
+current price.

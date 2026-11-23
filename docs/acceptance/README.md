@@ -12,7 +12,7 @@ status; these files hold the detail behind it.
 | [2026-11-17](2026-11-17.md) | Production setup: Clerk, Google OAuth, support email, Cloudflare tokens, Stripe, deployment and proposal review |
 | [2026-11-18](2026-11-18.md) | S5 devicebasedauth.org integration (device-bound keys, account linking) |
 | [2026-11-22](2026-11-22.md) | S5 devicebasedauth.org: hashbin parity, device sessions, online decisions |
-| [2026-11-23](2026-11-23.md) | S5 devicebasedauth.org: resource-scoped grants (`job:<name>`) |
+| [2026-11-23](2026-11-23.md) | S5 resource-scoped DBA grants; S4 scheduled advancement published by settlement (85 → 84 µ$) |
 
 **Adding a record:** append a `## <IDs> <what> — <date>` section to that day's file (create
 `YYYY-MM-DD.md` and add it to the table if it is new). Link evidence under `docs/ops/evidence/`

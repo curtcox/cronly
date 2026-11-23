@@ -78,7 +78,9 @@ it('includes permanent webhook activity in the same forecast as the projection A
       // At noon the 30-day window includes two half UTC days. Each job's
       // estimated charge rounds up per day, including the webhook surcharge.
       const charge = price('hook', { type: 'http' });
-      expect(expected.monthly_microdollars).toBe(90 * charge);
+      // 29 whole days plus two half days at 2 (older) and 1 (newer) webhook runs a day.
+      const job = rate => 29 * Math.ceil(rate * charge) + 2 * Math.ceil(rate / 2 * charge);
+      expect(expected.monthly_microdollars).toBe(job(2) + job(1));
       dispatch.mockClear();
       return reply([tool('projection'), tool('projection', 'repeat')]);
     }
