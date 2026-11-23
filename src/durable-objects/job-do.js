@@ -154,7 +154,9 @@ export class JobDO {
           const pausedRun = { id: args.id, status: 'paused', reason: error.code, created_at: Date.now(), cost_microdollars: 0, job: settings.name };
           await this.history(pausedRun, false, settings);
         }
-        await this.arm();
+        // The pause's transaction already committed its resumption wakeup. Callers passing
+        // rearm=false (alarm, completion) arm once at the end of the same turn.
+        if (rearm) await this.arm();
       }
       throw error;
     }
@@ -205,7 +207,7 @@ export class JobDO {
     settings.last_outcome = result.status;
     const retry = shouldRetry ? { dispatch: true, input: retryData.input || {}, key_id: run.key_id, attempt: run.attempt + 1, trigger: run.trigger, scheduled_at: run.scheduled_at } : undefined;
     await this.history(result, true, changed ? settings : null, retry);
-    await this.dispatchRetry(args.id);
+    await this.dispatchRetry(args.id, null, false);
     await this.prune(); await this.arm(); return result;
   }
   async completed(id, summary) {
@@ -215,13 +217,14 @@ export class JobDO {
     finally { await this.dispatchRetry(id, summary); }
     return { duplicate: true };
   }
-  async dispatchRetry(id, summary) {
+  /** Reserve a failed run's private retry, then clear its outbox; `rearm` is false when the caller arms afterwards. */
+  async dispatchRetry(id, summary, rearm = true) {
     summary ||= await this.storage.get(`history:${id}`);
     if (!summary?.retry?.dispatch) return;
     const { retry, ...completed } = summary;
     try {
       if (isDbaKeyId(retry.key_id)) await this.checkDbaCredential(retry.key_id);
-      await this.start({ ...retry, id: `${id}:retry`, retry: true });
+      await this.start({ ...retry, id: `${id}:retry`, retry: true }, rearm);
     } catch (error) {
       // Revoked/expired keys and newly required input cannot authorize this
       // retry either. Keeping those refusals would wake an unpaid loop forever.
@@ -316,7 +319,7 @@ export class JobDO {
         if (run.expires_at <= Date.now()) await this.result({ id: run.id, result: { status: 'expired', error: 'Result was not received before the deadline' } });
         else if (!run.enqueued) await this.send(run, settings);
       }
-      for (const summary of await this.summaries()) if (summary.retry?.dispatch) await this.dispatchRetry(summary.id);
+      for (const summary of await this.summaries()) if (summary.retry?.dispatch) await this.dispatchRetry(summary.id, null, false);
       // Expiry reporting can update the outcome or pause a refused retry.
       settings = await this.storage.get('settings');
       if (settings.resume_at && settings.resume_at <= Date.now()) {

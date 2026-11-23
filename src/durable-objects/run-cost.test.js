@@ -139,7 +139,7 @@ for (const activityMode of ['ordinary', 'eviction']) for (const holdMode of ['co
         const runs = withRetry && !refusedRetry ? 2 : 1;
         expect(messages).toHaveLength(runs); expect(fetches).toBe(6 * runs);
         const measured = { ...usage };
-        expect(measured.writes, JSON.stringify(measured)).toBeLessThanOrEqual(runs * (COST_POLICY.runRowWrites - (holdMode === 'compact' ? 2 : 0)) + (mode === 'hook' ? 1 : 0) + (activityMode === 'eviction' ? 1 : 0));
+        expect(measured.writes, JSON.stringify(measured)).toBeLessThanOrEqual(runs * (COST_POLICY.runRowWrites - (holdMode === 'compact' ? 2 : 0)) + (mode === 'hook' ? 1 : 0));
         expect(measured.requests, JSON.stringify(measured)).toBeLessThanOrEqual(runs * COST_POLICY.runDoRequests - (mode === 'test' ? 1 : 0));
         expect(measured.workerRequests, JSON.stringify(measured)).toBeLessThanOrEqual(runs * COST_POLICY.runWorkerRequests);
         expect(measured.reads, JSON.stringify(measured)).toBeLessThanOrEqual(runs * 3000);

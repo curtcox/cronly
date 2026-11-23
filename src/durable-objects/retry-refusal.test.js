@@ -67,3 +67,27 @@ for (const holdMode of ['compact', 'standalone']) for (const refusal of ['revoke
     expect(writes).not.toHaveBeenCalled(); expect(messages).toHaveLength(1);
   });
 }
+
+it('pauses a budget-refused retry with one rearm, leaving the resumption wakeup', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
+  const messages = [];
+  const env = { ENVIRONMENT: 'local', RUN_QUEUE: { send: async body => messages.push(body) }, OUTBOUND_FETCH: vi.fn(async () => new Response('failed', { status: 500 })) };
+  env.ACCOUNTS = namespace(AccountDO, env); env.JOBS = namespace(JobDO, env);
+  const account = (op, args) => rpc(env.ACCOUNTS, 'a', op, args);
+  await account('init', { account: 'a' }); await account('deposit', { id: 'fund', amount: 10000 });
+  await account('mutate', { account: 'a', id: 'defs', operations: [
+    { kind: 'actions', name: 'ping', value: { url: 'https://example.com' } },
+    { kind: 'jobs', name: 'j', value: { action: 'ping', cron: '0 0 1 * *', retries: 1, budget: { day: PRICES.run } } }
+  ] });
+  await account('sync-jobs');
+  await rpc(env.JOBS, 'a:j', 'start', { id: 'parent', input: {}, trigger: 'manual' });
+  const job = env.JOBS.get('a:j'); const alarms = vi.spyOn(job.storage, 'setAlarm');
+  await consume({ body: messages[0], ack() {} }, env, {});
+  // S4: the pause commits its wakeup; completion arms once instead of also rearming inside start().
+  const tomorrow = Date.parse('2026-11-17T00:00:00Z');
+  expect(alarms.mock.calls.map(([time]) => time)).toEqual([tomorrow]);
+  expect(await job.storage.getAlarm()).toBe(tomorrow);
+  expect(await job.storage.get('settings')).toMatchObject({ paused: 'budget_day', resume_at: tomorrow });
+  expect((await job.storage.get('history:parent')).retry).toBeUndefined();
+  expect(messages).toHaveLength(1);
+});

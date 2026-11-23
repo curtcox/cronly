@@ -1,5 +1,5 @@
 import { worstCaseCost, COST_POLICY } from './cost-policy.js';
-export const PRICES = Object.freeze({ run: 84, hook: 5, change: 100, read: 21, readJob: 2, jsActivation: 3300, jsCpuMs: 0.05, jsSubrequest: 5, proseBase: 500, proseMarkup: 1.64, minimumDepositCents: 500, dbaRequest: 7, dbaDecision: 56 });
+export const PRICES = Object.freeze({ run: 82, hook: 5, change: 100, read: 21, readJob: 2, jsActivation: 3300, jsCpuMs: 0.05, jsSubrequest: 5, proseBase: 500, proseMarkup: 1.64, minimumDepositCents: 500, dbaRequest: 7, dbaDecision: 56 });
 /**
  * Quote the maximum integer charge before any billable work starts. `dba` is a request
  * authenticated by a devicebasedauth.org credential: its reads and the first attempt of the runs
