@@ -75,17 +75,18 @@ that keeps DBA reads and runs above the floor. Details: `docs/business/pricing.m
 
 ## Owner steps (ops)
 
-1. Deploy: migrations `v3` (`DbaLinkDO`) and `v4` (`DbaRevocationsDO`, `DbaReplayCacheDO`) are in
+1. ~~Deploy~~ (done 2026-11-23, `bbebdde`): migrations `v3` (`DbaLinkDO`) and `v4` (`DbaRevocationsDO`, `DbaReplayCacheDO`) are in
    both wrangler configs. Add all three namespaces' IDs to `CRONLY_DO_NAMESPACES` (CI variable,
    deployed as `COST_SAFETY_DO_NAMESPACES`) so the cost monitor counts them.
 2. `DBA_ISSUER` is a plain `[vars]` entry (`https://devicebasedauth.org`, also the default). For
    local work, run DBA's `dev:local` on another port and set it in `wrangler.local.toml`; DBA's
    local issuer must register `http://localhost:8787/auth/dba/callback` for client `cronly.org`.
 3. At devicebasedauth.org, as the cronly.org audience owner: confirm audience `cronly.org`,
-   namespace `cronly`, redirect URI `https://cronly.org/auth/dba/callback`; set the revocation
+   namespace `cronly`, redirect URI `https://cronly.org/auth/dba/callback` (confirmed from the
+   public audience record 2026-11-23); set the revocation
    webhook to `https://cronly.org/api/dba/events` and send a test event.
-4. Optional: set the `DBA_RTT_SECRET` GitHub secret (`openssl rand -hex 32`; CI pushes it) so
-   grants with latency rules can be timed; without it they are refused.
+4. ~~Optional: set the `DBA_RTT_SECRET` GitHub secret~~ (done 2026-11-23, production environment;
+   CI pushes it) so grants with latency rules can be timed.
 5. Fund the cronly operator account at DBA (link sign-ins and online decisions are billed).
 6. Optional: create a DBA API key for the cronly.org audience and set the `DBA_API_KEY` GitHub
    secret (CI pushes it) to enable online-only grants; without it they answer `online_required`.
