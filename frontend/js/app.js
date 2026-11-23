@@ -132,9 +132,10 @@ async function boot() {
   if (!state.deployment.clerk_publishable_key) { content.innerHTML = '<section class="signed-out"><h1 class="app-title">Sign-in is being configured</h1><p>cronly is preparing for its invite-only launch.</p></section>' + deviceOption(); return; }
   const encoded = state.deployment.clerk_publishable_key.split('_').at(-1); const domain = atob(encoded).replace(/\$$/, '');
   if (!/^[a-z0-9.-]+$/.test(domain)) throw new Error('Invalid Clerk frontend domain');
-  const script = document.createElement('script'); script.crossOrigin = 'anonymous'; script.dataset.clerkPublishableKey = state.deployment.clerk_publishable_key; script.src = `https://${domain}/npm/@clerk/clerk-js@5/dist/clerk.browser.js`;
-  await new Promise((resolve, reject) => { script.onload = resolve; script.onerror = reject; document.head.append(script); });
-  await window.Clerk.load(); setAuth(window.Clerk);
+  // Clerk refuses sign-in from clerk-js v5 ("outdated version"); since v6 its sign-in UI is a separate package.
+  const load = (src, data = {}) => new Promise((resolve, reject) => { const script = document.createElement('script'); script.crossOrigin = 'anonymous'; Object.assign(script.dataset, data); script.src = src; script.onload = resolve; script.onerror = reject; document.head.append(script); });
+  await Promise.all([load(`https://${domain}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`, { clerkPublishableKey: state.deployment.clerk_publishable_key }), load(`https://${domain}/npm/@clerk/ui@1/dist/ui.browser.js`)]);
+  await window.Clerk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } }); setAuth(window.Clerk);
   if (window.Clerk.user) await signedIn();
   else { content.innerHTML = '<section class="signed-out panel"><h1 class="app-title">Welcome to cronly</h1><p>Sign in to manage your actions and schedules.</p><button id="clerk-login">Sign in</button><p class="note">Launch is invite-only.</p></section>' + deviceOption(); $('#clerk-login').addEventListener('click', () => window.Clerk.openSignIn({ fallbackRedirectUrl: '/app.html' })); window.Clerk.addListener(({ user }) => { if (user) signedIn(); }); }
 }
