@@ -159,6 +159,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -276,6 +279,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -327,6 +333,9 @@
         "security": [
           {
             "ApiKey": []
+          },
+          {
+            "DeviceCredential": []
           },
           {
             "ClerkSession": []
@@ -444,6 +453,9 @@
         "security": [
           {
             "ApiKey": []
+          },
+          {
+            "DeviceCredential": []
           },
           {
             "ClerkSession": []
@@ -565,6 +577,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -625,6 +640,9 @@
         "security": [
           {
             "ApiKey": []
+          },
+          {
+            "DeviceCredential": []
           },
           {
             "ClerkSession": []
@@ -716,6 +734,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -805,6 +826,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -884,6 +908,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -935,6 +962,9 @@
         "security": [
           {
             "ApiKey": []
+          },
+          {
+            "DeviceCredential": []
           },
           {
             "ClerkSession": []
@@ -1056,6 +1086,9 @@
         "security": [
           {
             "ClerkSession": []
+          },
+          {
+            "DeviceCredential": []
           }
         ],
         "parameters": [
@@ -1244,6 +1277,9 @@
         "security": [
           {
             "ClerkSession": []
+          },
+          {
+            "DeviceCredential": []
           }
         ],
         "parameters": [
@@ -1324,6 +1360,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -1377,6 +1416,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -1428,6 +1470,9 @@
         "security": [
           {
             "ApiKey": []
+          },
+          {
+            "DeviceCredential": []
           },
           {
             "ClerkSession": []
@@ -1488,6 +1533,9 @@
         "security": [
           {
             "ApiKey": []
+          },
+          {
+            "DeviceCredential": []
           },
           {
             "ClerkSession": []
@@ -1577,6 +1625,9 @@
         "security": [
           {
             "ApiKey": []
+          },
+          {
+            "DeviceCredential": []
           },
           {
             "ClerkSession": []
@@ -1784,6 +1835,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -1871,6 +1925,9 @@
         "security": [
           {
             "ApiKey": []
+          },
+          {
+            "DeviceCredential": []
           },
           {
             "ClerkSession": []
@@ -1962,6 +2019,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -2049,6 +2109,9 @@
         "security": [
           {
             "ApiKey": []
+          },
+          {
+            "DeviceCredential": []
           },
           {
             "ClerkSession": []
@@ -2140,6 +2203,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -2227,6 +2293,9 @@
         "security": [
           {
             "ClerkSession": []
+          },
+          {
+            "DeviceCredential": []
           }
         ],
         "parameters": [],
@@ -2271,7 +2340,7 @@
       "post": {
         "operationId": "post__api_keys",
         "summary": "keys",
-        "x-access": "session",
+        "x-access": "account_session",
         "security": [
           {
             "ClerkSession": []
@@ -2349,7 +2418,7 @@
       "delete": {
         "operationId": "delete__api_keys__id",
         "summary": "keys",
-        "x-access": "session",
+        "x-access": "account_session",
         "security": [
           {
             "ClerkSession": []
@@ -2418,6 +2487,356 @@
           },
           "429": {
             "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/api/dba/link": {
+      "get": {
+        "operationId": "get__api_dba_link",
+        "summary": "dba-link-status",
+        "x-access": "session",
+        "security": [
+          {
+            "ClerkSession": []
+          },
+          {
+            "DeviceCredential": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful result; money is integer micro-dollars.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credential"
+          },
+          "402": {
+            "description": "Insufficient balance or budget"
+          },
+          "403": {
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "description": "Stale proposal, overlap or idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete__api_dba_link",
+        "summary": "dba-link-delete",
+        "x-access": "account_session",
+        "security": [
+          {
+            "ClerkSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "1"
+              ]
+            },
+            "description": "Validate and quote without applying or charging."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful result; money is integer micro-dollars.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credential"
+          },
+          "402": {
+            "description": "Insufficient balance or budget"
+          },
+          "403": {
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "description": "Stale proposal, overlap or idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/api/dba/link/start": {
+      "post": {
+        "operationId": "post__api_dba_link_start",
+        "summary": "dba-link-start",
+        "x-access": "account_session",
+        "security": [
+          {
+            "ClerkSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "1"
+              ]
+            },
+            "description": "Validate and quote without applying or charging."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful result; money is integer micro-dollars.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credential"
+          },
+          "402": {
+            "description": "Insufficient balance or budget"
+          },
+          "403": {
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "description": "Stale proposal, overlap or idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/dba/link/finish": {
+      "post": {
+        "operationId": "post__api_dba_link_finish",
+        "summary": "dba-link-finish",
+        "x-access": "account_session",
+        "security": [
+          {
+            "ClerkSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "1"
+              ]
+            },
+            "description": "Validate and quote without applying or charging."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful result; money is integer micro-dollars.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credential"
+          },
+          "402": {
+            "description": "Insufficient balance or budget"
+          },
+          "403": {
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "description": "Stale proposal, overlap or idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DbaLinkFinish"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/dba/events": {
+      "post": {
+        "operationId": "post__api_dba_events",
+        "summary": "dba-events",
+        "x-access": "public",
+        "security": [],
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "1"
+              ]
+            },
+            "description": "Validate and quote without applying or charging."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful result; money is integer micro-dollars.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credential"
+          },
+          "402": {
+            "description": "Insufficient balance or budget"
+          },
+          "403": {
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "description": "Stale proposal, overlap or idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
           }
         }
       }
@@ -2506,6 +2925,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -2564,6 +2986,9 @@
         "security": [
           {
             "ApiKey": []
+          },
+          {
+            "DeviceCredential": []
           },
           {
             "ClerkSession": []
@@ -2653,6 +3078,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -2733,6 +3161,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -2791,6 +3222,9 @@
         "security": [
           {
             "ApiKey": []
+          },
+          {
+            "DeviceCredential": []
           },
           {
             "ClerkSession": []
@@ -2880,6 +3314,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -2960,6 +3397,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -3018,6 +3458,9 @@
         "security": [
           {
             "ApiKey": []
+          },
+          {
+            "DeviceCredential": []
           },
           {
             "ClerkSession": []
@@ -3107,6 +3550,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -3187,6 +3633,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -3245,6 +3694,9 @@
         "security": [
           {
             "ApiKey": []
+          },
+          {
+            "DeviceCredential": []
           },
           {
             "ClerkSession": []
@@ -3334,6 +3786,9 @@
             "ApiKey": []
           },
           {
+            "DeviceCredential": []
+          },
+          {
             "ClerkSession": []
           }
         ],
@@ -3417,6 +3872,12 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "Clerk JWT"
+      },
+      "DeviceCredential": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "devicebasedauth.org device credential: `DBA <credential>` plus a `DPoP: <proof>` header signed by the device key, or a short-lived `Bearer <token>` whose JWS typ is dba-access+jwt. Granted actions cronly:<scope> become scopes; reads are metered like API keys; the grant's spend_usd_per_month is a UTC-month cap. The DBA account must be linked (POST /api/dba/link/start)."
       }
     },
     "schemas": {
@@ -3587,6 +4048,25 @@
             }
           }
         }
+      },
+      "DbaLinkFinish": {
+        "type": "object",
+        "required": [
+          "code",
+          "state"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Authorization code from the devicebasedauth.org redirect."
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 256
+          }
+        },
+        "additionalProperties": false
       },
       "Response": {
         "type": "object",

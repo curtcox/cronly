@@ -13,9 +13,13 @@ import { rotateSecret } from './executor/rotate-secret.js';
 import { definitions, keys } from './api/definitions.js';
 import { clerkWebhook } from './auth/clerk-webhook.js';
 import { checkout, stripeWebhook } from './api/payments.js';
+import { dbaLink } from './api/dba.js';
+import { dbaEvent } from './api/dba-events.js';
+import { authorizeDbaOnline } from './auth/dba-online.js';
+import { dbaPreflight, withDbaCors } from './auth/dba-cors.js';
 import { explainCron } from './services/cron.js';
-import { PUBLIC, SESSION, USER_SCOPES, canAccess } from './auth/scopes.js';
-import { authenticate } from './auth/middleware.js';
+import { PUBLIC, SESSION, ACCOUNT_SESSION, USER_SCOPES, canAccess } from './auth/scopes.js';
+import { authenticate, forwardAuth } from './auth/middleware.js';
 import { money } from './durable-objects/ledger.js';
 import { errorResponse, assert, readJson } from './utils/errors.js';
 import { rpc } from './utils/rpc.js';
@@ -23,6 +27,9 @@ import { price, PRICES } from './utils/pricing.js';
 export { SafetyDO } from './durable-objects/safety-do.js';
 export { AccountDO } from './durable-objects/account-do.js';
 export { JobDO } from './durable-objects/job-do.js';
+export { DbaLinkDO } from './durable-objects/dba-link-do.js';
+export { DbaRevocationsDO } from './durable-objects/dba-revocations-do.js';
+export { ReplayCacheDO as DbaReplayCacheDO } from './vendor/devicebasedauth/replay-do.js';
 
 // Routes are the sole dispatch source: an undeclared endpoint cannot execute.
 export const API_ROUTES = [
@@ -52,8 +59,14 @@ export const API_ROUTES = [
   { method: 'POST', path: '/api/jobs/:name/run', access: 'run', handler: 'run-job' },
   { method: 'POST', path: '/api/secrets/:name/rotate', access: 'secrets:write', handler: 'rotate-secret' },
   { method: 'GET', path: '/api/keys', access: SESSION, handler: 'keys' },
-  { method: 'POST', path: '/api/keys', access: SESSION, handler: 'keys' },
-  { method: 'DELETE', path: '/api/keys/:id', access: SESSION, handler: 'keys' },
+  { method: 'POST', path: '/api/keys', access: ACCOUNT_SESSION, handler: 'keys' },
+  { method: 'DELETE', path: '/api/keys/:id', access: ACCOUNT_SESSION, handler: 'keys' },
+  { method: 'GET', path: '/api/dba/link', access: SESSION, handler: 'dba-link-status' },
+  { method: 'POST', path: '/api/dba/link/start', access: ACCOUNT_SESSION, handler: 'dba-link-start' },
+  { method: 'POST', path: '/api/dba/link/finish', access: ACCOUNT_SESSION, handler: 'dba-link-finish' },
+  { method: 'DELETE', path: '/api/dba/link', access: ACCOUNT_SESSION, handler: 'dba-link-delete' },
+  // devicebasedauth.org's revocation webhook: public, but only an issuer-signed event applies.
+  { method: 'POST', path: '/api/dba/events', access: PUBLIC, handler: 'dba-events' },
   { method: 'POST', path: '/api/cron/explain', access: PUBLIC, handler: 'cron-explain' },
   ...['variables', 'secrets', 'actions', 'jobs'].flatMap(kind => ['GET', 'PUT', 'DELETE'].map(method => ({ method, path: `/api/${kind}/:name`, access: method === 'GET' ? 'read' : kind === 'secrets' ? 'secrets:write' : 'change', handler: 'definitions', kind })))
 ];
@@ -83,6 +96,7 @@ async function handle(route, request, env, auth) {
     case 'rotate-secret': return rotateSecret(request, env, auth, route.params.name);
     case 'definitions': return definitions(route, request, env, auth);
     case 'keys': return keys(route, request, env, auth);
+    case 'dba-link-status': case 'dba-link-start': case 'dba-link-finish': case 'dba-link-delete': return dbaLink(route, request, env, auth);
     case 'clerk-webhook': return clerkWebhook(request, env);
     case 'stripe-webhook': return stripeWebhook(request, env);
     case 'checkout': return checkout(request, env, auth, dryRun);
@@ -90,7 +104,7 @@ async function handle(route, request, env, auth) {
     case 'audit': return rpc(env.ACCOUNTS, auth.account, 'list', { prefix: 'audit:', reverse: true, cursor: url.searchParams.get('cursor') });
     case 'cron-explain': { const body = await readJson(request); return { ...explainCron(body.cron, body.timezone), cost_microdollars: 0 }; }
     case 'openapi': return openapi(API_ROUTES);
-    case 'public-config': return { local: env.ENVIRONMENT === 'local', clerk_publishable_key: env.CLERK_PUBLISHABLE_KEY || null, prices: PRICES, costs: Object.fromEntries(['run', 'hook', 'change', 'read'].map(op => [op, Math.ceil(worstCaseCost(op))])) };
+    case 'public-config': return { local: env.ENVIRONMENT === 'local', clerk_publishable_key: env.CLERK_PUBLISHABLE_KEY || null, prices: PRICES, costs: { ...Object.fromEntries(['run', 'hook', 'change', 'read', 'dba_link', 'dba_decision'].map(op => [op, Math.ceil(worstCaseCost(op))])), dba_request: Math.ceil(worstCaseCost('read', {}, { dba: true }) - worstCaseCost('read')) } };
     case 'health': return { status: 'ok', environment: env.ENVIRONMENT, git_sha: env.GIT_SHA || 'local' };
     case 'quote': {
       const op = url.searchParams.get('op'); assert(['run', 'hook', 'change', 'read', 'prose'].includes(op), 'invalid_operation', 'Unknown operation');
@@ -118,11 +132,15 @@ const worker = {
     for (const message of batch.messages) { try { await consume(message, env, ctx); } catch (error) { console.error('Queue operation failed', error.code || 'internal_error'); message.retry(); } }
   },
   async fetch(request, env) {
+    const path = new URL(request.url).pathname;
+    return withDbaCors(request, path, await worker.respond(request, env, path));
+  },
+  async respond(request, env, path) {
     let cost = 0; let auth = null;
     try {
-      const path = new URL(request.url).pathname;
       if (env.PUBLIC_LIMITER && (path.startsWith('/api/') || path.startsWith('/webhooks/') || path.startsWith('/hook/') || path === '/mcp')) { const limit = await env.PUBLIC_LIMITER.limit({ key: request.headers.get('CF-Connecting-IP') || 'local' }); assert(limit.success, 'rate_limited', 'Request rate exceeded', 429); }
       const idempotency = request.headers.get('Idempotency-Key'); assert(!idempotency || idempotency.length <= 128, 'invalid_idempotency_key', 'Idempotency-Key must be at most 128 characters');
+      const preflight = dbaPreflight(request, path); if (preflight) return preflight;
       if (path.startsWith('/hook/') && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Idempotency-Key', 'Access-Control-Max-Age': '86400' } });
       const route = matchRoute(request.method, path);
       if (!route && !path.startsWith('/api/') && env.ASSETS && request.method === 'GET') {
@@ -130,15 +148,24 @@ const worker = {
         // indexes internally so the home page and docs retain their public URLs.
         const assetUrl = new URL(request.url);
         if (path.endsWith('/')) assetUrl.pathname += 'index.html';
+        // The registered devicebasedauth.org redirect URI is extensionless; the workspace handles it.
+        if (path === '/auth/dba/callback') assetUrl.pathname = '/app.html';
         return env.ASSETS.fetch(new Request(assetUrl, request));
       }
       assert(route, 'not_found', 'Not found', 404);
+      if (route.handler === 'dba-events') { await dbaEvent(request, env); return new Response(null, { status: 204 }); }
       auth = route.access === PUBLIC ? null : await authenticate(request, env);
+      // A grant that only devicebasedauth.org can decide is asked about (and billed) first.
+      if (auth?.dba && !canAccess(auth, route.access)) cost += await authorizeDbaOnline(request, env, auth, route.access);
       assert(canAccess(auth, route.access), 'insufficient_scope', 'Credential does not allow this operation', 403);
-      if (route.handler === 'mcp') return mcp(request, env, auth, (path, method, body) => worker.fetch(new Request(new URL(path, request.url), { method, headers: { Authorization: request.headers.get('Authorization'), 'Content-Type': 'application/json', 'Idempotency-Key': request.headers.get('Idempotency-Key') || crypto.randomUUID() }, body: method === 'GET' ? undefined : JSON.stringify(body) }), env));
+      if (route.handler === 'mcp') return mcp(request, env, auth, (path, method, body) => {
+        const inner = new Request(new URL(path, request.url), { method, headers: { Authorization: request.headers.get('Authorization'), 'Content-Type': 'application/json', 'Idempotency-Key': request.headers.get('Idempotency-Key') || crypto.randomUUID() }, body: method === 'GET' ? undefined : JSON.stringify(body) });
+        // A device credential's DPoP proof was spent on /mcp; tool calls reuse its verified identity.
+        return worker.fetch(auth.dba ? forwardAuth(inner, auth) : inner, env);
+      });
       if (auth) await rpc(env.ACCOUNTS, auth.account, 'rate-limit', { id: 'api', limit: 120 });
       if (auth?.key_id && request.method === 'GET') {
-        const metered = await rpc(env.ACCOUNTS, auth.account, 'meter-read', { id: `read:${crypto.randomUUID()}`, key_id: auth.key_id, resource: route.handler === 'runs' ? 'runs' : null, job: new URL(request.url).searchParams.get('job') }); cost = metered.cost_microdollars; auth.read_names = metered.names;
+        const metered = await rpc(env.ACCOUNTS, auth.account, 'meter-read', { id: `read:${crypto.randomUUID()}`, key_id: auth.key_id, resource: route.handler === 'runs' ? 'runs' : null, job: new URL(request.url).searchParams.get('job'), ...(auth.dba ? { dba: true } : {}) }); cost += metered.cost_microdollars; auth.read_names = metered.names;
       }
       const data = await handle(route, request, env, auth);
       const balance = auth ? await rpc(env.ACCOUNTS, auth.account, 'account') : {};

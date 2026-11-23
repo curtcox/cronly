@@ -13,6 +13,10 @@ html_handling = "none"
 [vars]
 ENVIRONMENT = "local"
 APP_ORIGIN = "http://localhost:8787"
+# devicebasedauth.org issuer (S5). Its dev:local also defaults to port 8787: run one of them
+# on another port, e.g. DBA_ISSUER = "http://localhost:8788", and register
+# http://localhost:8787/auth/dba/callback for client cronly.org there.
+DBA_ISSUER = "https://devicebasedauth.org"
 
 SECRETS_MASTER_KEY = "local-only-master-key-never-use-in-production"
 TOKEN_SIGNING_KEY = "local-only-signing-key-never-use-in-production"
@@ -65,6 +69,28 @@ class_name = "SafetyDO"
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["SafetyDO"]
+
+[[durable_objects.bindings]]
+name = "DBA_LINKS"
+class_name = "DbaLinkDO"
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["DbaLinkDO"]
+
+# devicebasedauth.org revocation webhook pushes (S5) and the DPoP replay cache shared by every
+# isolate, so a captured proof works once across all of them (vendored ReplayCacheDO).
+[[durable_objects.bindings]]
+name = "DBA_REVOCATIONS"
+class_name = "DbaRevocationsDO"
+
+[[durable_objects.bindings]]
+name = "DBA_REPLAY"
+class_name = "DbaReplayCacheDO"
+
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["DbaRevocationsDO", "DbaReplayCacheDO"]
 
 [[ratelimits]]
 name = "PUBLIC_LIMITER"

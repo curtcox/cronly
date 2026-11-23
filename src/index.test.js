@@ -14,7 +14,7 @@ describe('Worker', () => {
 });
 
 import { API_ROUTES, matchRoute } from './index.js';
-import { PUBLIC, SESSION, USER_SCOPES } from './auth/scopes.js';
+import { PUBLIC, SESSION, ACCOUNT_SESSION, USER_SCOPES } from './auth/scopes.js';
 import { AccountDO } from './durable-objects/account-do.js';
 import { JobDO } from './durable-objects/job-do.js';
 import { namespace } from '../test-utils/storage.js';
@@ -22,7 +22,7 @@ import { rpc } from './utils/rpc.js';
 it('declares access for every dispatchable route', () => {
   expect(new Set(API_ROUTES.map(r => `${r.method} ${r.path}`)).size).toBe(API_ROUTES.length);
   for (const route of API_ROUTES) {
-    for (const access of [route.access].flat()) expect([PUBLIC, SESSION, ...USER_SCOPES]).toContain(access);
+    for (const access of [route.access].flat()) expect([PUBLIC, SESSION, ACCOUNT_SESSION, ...USER_SCOPES]).toContain(access);
     expect(matchRoute(route.method, route.path.replaceAll(/:[a-z_]+/g, 'example'))?.handler).toBe(route.handler);
   }
 });

@@ -145,3 +145,44 @@ test('shows zero spend and reviews changes for a constructor-named job', async (
   await page.getByRole('button', { name: 'Resume', exact: true }).click(); await apply(page);
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
 });
+
+test('links devicebasedauth.org from the account page and escapes credential details (S5)', async ({ page }) => {
+  await login(page);
+  await page.goto('/app.html#account');
+  const section = page.locator('#dba');
+  await expect(section.getByRole('heading', { name: 'devicebasedauth.org' })).toBeVisible();
+  await expect(section).toContainText('Not linked');
+  await expect(section).toContainText('dba enroll --aud cronly.org --action cronly:run');
+  await expect(section).toContainText("import { DBA } from 'https://devicebasedauth.org/sdk/dba.js'");
+
+  // Starting a link is quoted (one change) before cronly pays DBA for the sign-in.
+  const started = [];
+  await page.route('**/api/dba/link/start', async route => {
+    if (new URL(route.request().url()).searchParams.get('dry_run') === '1') return route.continue();
+    started.push(route.request().headers()['idempotency-key']);
+    await route.fulfill({ json: { url: 'https://devicebasedauth.org/oauth/authorize?client_id=cronly.org', cost_microdollars: PRICES.change } });
+  });
+  await page.route('https://devicebasedauth.org/**', route => route.fulfill({ contentType: 'text/html', body: '<h1>devicebasedauth.org sign-in</h1>' }));
+  await section.getByRole('button', { name: 'Link devicebasedauth.org' }).click();
+  await expect(page.locator('#review-price')).toContainText(`${PRICES.change} µ$`);
+  expect(started).toEqual([]);
+  await page.locator('#review-apply').click();
+  await expect(page.getByRole('heading', { name: 'devicebasedauth.org sign-in' })).toBeVisible();
+  expect(started).toHaveLength(1);
+
+  // The callback page posts code + state once signed in, and removes them from the address bar.
+  const posted = [];
+  await page.route('**/api/dba/link/finish', async route => { posted.push(route.request().postDataJSON()); await route.fulfill({ json: { linked: true, dba_account: 'dba_<b>x</b>', linked_at: Date.parse('2026-11-18T12:00Z'), credentials: [], cost_microdollars: 0 } }); });
+  await page.route('**/api/dba/link', route => route.fulfill({ json: { linked: true, superseded: false, dba_account: 'dba_<b>x</b>', linked_at: Date.parse('2026-11-18T12:00Z'), cost_microdollars: 0,
+    credentials: [{ id: 'crd_TESTTESTTEST', device_id: 'dev_TESTTESTTEST', device_name: '<img src=x onerror="window.pwned=true">', monthly_spend_microdollars: 5000000, expires_at: Date.parse('2026-12-18T12:00Z') }] } }));
+  await page.goto('/auth/dba/callback?code=one-time-code&state=the-state');
+  await expect(page.locator('#notice')).toContainText('Linked devicebasedauth.org account dba_<b>x</b>.');
+  expect(posted).toEqual([{ code: 'one-time-code', state: 'the-state' }]);
+  expect(new URL(page.url()).pathname).toBe('/app.html');
+  expect(new URL(page.url()).search).toBe('');
+  await expect(section).toContainText('Linked to devicebasedauth.org account dba_<b>x</b>');
+  await expect(section).toContainText('<img src=x onerror="window.pwned=true">');
+  await expect(section).toContainText('$5.00 per UTC month');
+  await expect(section.getByRole('button', { name: 'Unlink devicebasedauth.org' })).toBeVisible();
+  expect(await page.evaluate(() => window.pwned)).toBeUndefined();
+});

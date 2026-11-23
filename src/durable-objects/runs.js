@@ -45,12 +45,14 @@ export async function prepareRun(tx, args, env = {}) {
       if (type === 'input') assert(Object.hasOwn(args.input, name), 'missing_input', `Missing webhook input: ${name}`);
     }
   }
-  const amount = price(args.trigger === 'webhook' ? 'hook' : 'run', action);
+  // A run started by a devicebasedauth.org credential also pays for verifying it; retries do not.
+  const dba = args.dba === true && !args.retry && args.trigger === 'manual';
+  const amount = price(args.trigger === 'webhook' ? 'hook' : 'run', action, { dba });
   if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
   // This permanent index routes retained test logs, including after action
   // deletion. Activity already tracks recency in the reservation's balance row.
   if (args.test_action && !await tx.get(`job-index:${args.name}`)) await tx.put(`job-index:${args.name}`, { name: args.name, account: args.account, updated_at: now });
-  const hold = await reserve(tx, { id: args.id, amount, job: args.name, action: job.action, kind: 'run', budget: job.budget, ...await keyBudget(tx, args.key_id), execution: { version: action.type === 'javascript' ? await javascriptVersion(action) : null, action, vars, secrets, job, input: args.input, trigger: args.trigger, scheduled_at: args.scheduled_at, attempt: args.attempt || 0 }, ttl_ms: 120000 }, now, { name: args.name, now, items: activity });
+  const hold = await reserve(tx, { id: args.id, amount, job: args.name, action: job.action, kind: 'run', budget: job.budget, ...(dba ? { dba } : {}), ...await keyBudget(tx, args.key_id), execution: { version: action.type === 'javascript' ? await javascriptVersion(action) : null, action, vars, secrets, job, input: args.input, trigger: args.trigger, scheduled_at: args.scheduled_at, attempt: args.attempt || 0 }, ttl_ms: 120000 }, now, { name: args.name, now, items: activity });
   return prepared(hold);
 }
 /** A queue redelivery cannot re-execute an already claimed external request. */

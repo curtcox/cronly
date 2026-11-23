@@ -15,6 +15,8 @@ html_handling = "none"
 [vars]
 ENVIRONMENT = "production"
 APP_ORIGIN = "https://cronly.org"
+# devicebasedauth.org issuer for device credentials and account linking (S5).
+DBA_ISSUER = "https://devicebasedauth.org"
 
 # Required secrets, uploaded by CI before deployment:
 # CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY, CLERK_WEBHOOK_SECRET,
@@ -23,6 +25,8 @@ APP_ORIGIN = "https://cronly.org"
 # SECRETS_MASTER_KEY or SECRETS_KEYRING (atomic JSON: {"active":"v2","keys":{...}}).
 # Keep previous keys until all accounts and in-flight snapshots have migrated; docs/ops/secret-rotation.md.
 # Optional: CLOUDFLARE_ANALYTICS_TOKEN, CLOUDFLARE_ACCOUNT_ID, ALERT_WEBHOOK_URL
+# Optional: DBA_API_KEY (a cronly.org audience-owner key at devicebasedauth.org) enables online
+# decisions for gated, step-up, use-limited and require.online grants; without it they answer 403.
 # LAUNCH_APPROVED=true only after Terms/Privacy and invite-only setup are approved.
 # Required for live runs: COST_SAFETY_DO_NAMESPACES (comma-separated cronly namespace IDs).
 # JS_ACCEPTANCE_ACCOUNT allows the owner to perform live acceptance; JS_LIVE_ACCEPTED=true unlocks JS after acceptance.
@@ -69,6 +73,28 @@ class_name = "SafetyDO"
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["SafetyDO"]
+
+[[durable_objects.bindings]]
+name = "DBA_LINKS"
+class_name = "DbaLinkDO"
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["DbaLinkDO"]
+
+# devicebasedauth.org revocation webhook pushes (S5) and the DPoP replay cache shared by every
+# isolate, so a captured proof works once across all of them (vendored ReplayCacheDO).
+[[durable_objects.bindings]]
+name = "DBA_REVOCATIONS"
+class_name = "DbaRevocationsDO"
+
+[[durable_objects.bindings]]
+name = "DBA_REPLAY"
+class_name = "DbaReplayCacheDO"
+
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["DbaRevocationsDO", "DbaReplayCacheDO"]
 
 [[ratelimits]]
 name = "PUBLIC_LIMITER"

@@ -32,6 +32,7 @@ jobs:
       LAUNCH_APPROVED: ${{ vars.CRONLY_LAUNCH_APPROVED }}
       JS_LIVE_ACCEPTED: ${{ vars.CRONLY_JS_LIVE_ACCEPTED }}
       ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+      DBA_API_KEY: ${{ secrets.DBA_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

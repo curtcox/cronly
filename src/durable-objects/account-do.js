@@ -11,6 +11,7 @@ import { accountMoney, accountMetric } from './account-money.js';
 import { listLedger } from './ledger-history.js';
 import { getHold, listHolds, putHold } from './hold-storage.js';
 import { runActivity } from './run-activity.js';
+import { dbaAccountOp } from './dba-account.js';
 
 /** Account definitions and money share one transactional, SQLite-backed object. */
 export class AccountDO {
@@ -65,7 +66,7 @@ export class AccountDO {
       }
       case 'maintenance': {
         const now = Date.now();
-        for (const prefix of ['activation:', 'proposal:', 'rate:']) for (const [key, record] of await tx.list({ prefix })) {
+        for (const prefix of ['activation:', 'proposal:', 'rate:', 'dba-oidc:', 'dba-key:']) for (const [key, record] of await tx.list({ prefix })) {
           // Applications are permanent receipts, even when the original proposal
           // has expired. Compact legacy proposals without losing their response.
           if (prefix === 'proposal:' && record.applied) {
@@ -143,7 +144,7 @@ export class AccountDO {
       case 'run-route': { const hold = await getHold(tx, args.id) || await tx.get(`receipt:${args.id}`); if (hold?.job) return { job: hold.job }; const profile = await tx.get('profile'); const prefix = `${profile.id}:`; assert(args.id.startsWith(prefix), 'not_found', 'Run not found', 404); const parts = args.id.slice(prefix.length).split(':'); const name = parts[0] === '_test' ? parts.slice(0, 2).join(':') : parts[0]; assert(await tx.get(`job-index:${name}`), 'not_found', 'Run not found', 404); return { job: name }; }
       case 'meter-read': {
         const names = args.resource === 'runs' ? (args.job ? [args.job] : (await runActivity(tx)).map(([name]) => name)) : [];
-        const receipt = await charge(tx, { id: args.id, amount: price('read', { job_count: names.length }), read_job_count: names.length, kind: 'read', ...await keyBudget(tx, args.key_id) });
+        const receipt = await charge(tx, { id: args.id, amount: price('read', { job_count: names.length }, { dba: args.dba === true }), read_job_count: names.length, kind: 'read', ...(args.dba === true ? { dba: true } : {}), ...await keyBudget(tx, args.key_id) });
         return { cost_microdollars: receipt.charged, names };
       }
       case 'rate-limit': {
@@ -226,6 +227,7 @@ export class AccountDO {
         assert(key && !key.revoked && key.hash === args.hash && key.expires_at > Date.now(), 'invalid_auth', 'Invalid API key', 401);
         return { scopes: key.scopes };
       }
+      case 'dba-link-begin': case 'dba-link-take': case 'dba-link-set': case 'dba-unlink': case 'dba-link-status': case 'dba-authenticate': case 'dba-key-status': case 'dba-key-revoked': return dbaAccountOp(tx, args);
       default: assert(false, 'unknown_operation', 'Unknown internal operation', 404);
     }
   }

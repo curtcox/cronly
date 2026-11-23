@@ -4,6 +4,8 @@ import { nextFires } from '../services/cron.js';
 import { compareRuns, runCursor, parseRunCursor } from '../services/run-pagination.js';
 import { sameRecord } from '../utils/records.js';
 import { digest } from '../auth/crypto.js';
+import { isDbaKeyId } from './dba-account.js';
+import { dbaStatusRevoked } from '../auth/dba.js';
 
 const DAY = 86400000;
 /** Per-job alarm and run log. Never waits for customer HTTP inside the DO. */
@@ -217,8 +219,10 @@ export class JobDO {
     summary ||= await this.storage.get(`history:${id}`);
     if (!summary?.retry?.dispatch) return;
     const { retry, ...completed } = summary;
-    try { await this.start({ ...retry, id: `${id}:retry`, retry: true }); }
-    catch (error) {
+    try {
+      if (isDbaKeyId(retry.key_id)) await this.checkDbaCredential(retry.key_id);
+      await this.start({ ...retry, id: `${id}:retry`, retry: true });
+    } catch (error) {
       // Revoked/expired keys and newly required input cannot authorize this
       // retry either. Keeping those refusals would wake an unpaid loop forever.
       // Infrastructure failures retain the outbox for funded recovery.
@@ -226,6 +230,18 @@ export class JobDO {
     }
     await this.storage.put(`history:${id}`, completed);
     if (this.historyCache) this.historyCache = this.historyCache.map(r => r.id === id ? completed : r);
+  }
+  /**
+   * A retry started by a devicebasedauth.org credential re-checks it at DBA (pushed revocations,
+   * then the status list) before it is reserved; a revoked one is marked, so the reservation is
+   * refused (401) and the retry dropped. An unreachable status list keeps the outbox for later.
+   */
+  async checkDbaCredential(credentialId) {
+    const account = (await this.storage.get('settings'))?.account; if (!account) return;
+    const key = await rpc(this.env.ACCOUNTS, account, 'dba-key-status', { credential_id: credentialId });
+    // Missing, revoked and expired rows are already refused by the reservation itself.
+    if (!key.found || key.revoked || !key.status || key.expires_at <= Date.now()) return;
+    if (await dbaStatusRevoked(this.env, key.status)) await rpc(this.env.ACCOUNTS, account, 'dba-key-revoked', { credential_id: credentialId });
   }
   async summaries() {
     if (!this.historyCache) this.historyCache = [...(await this.storage.list({ prefix: 'history:' })).values()];

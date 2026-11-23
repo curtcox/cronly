@@ -4,7 +4,7 @@ import { rpc } from './utils/rpc.js';
 import { assert, errorResponse } from './utils/errors.js';
 import { destinationHostname, validateDestination } from './executor/destinations.js';
 export { default } from './index.js';
-export { AccountDO, JobDO, SafetyDO, API_ROUTES } from './index.js';
+export { AccountDO, JobDO, SafetyDO, DbaLinkDO, DbaRevocationsDO, DbaReplayCacheDO, API_ROUTES } from './index.js';
 
 /** Only capability passed to a sandbox; all native network access is disabled. */
 export class OutboundGateway extends WorkerEntrypoint {

@@ -10,6 +10,8 @@ status; these files hold the detail behind it.
 | [2026-11-16, part 1](2026-11-16-part-1.md) | S1, S4 billing and run-cost work, L4–L10 recovery and redaction, up to atomic completion publication |
 | [2026-11-16, part 2](2026-11-16-part-2.md) | S4 completion cost audit onward: run history, action changes, account wakeups, retries, config and credential recovery, Cloudflare runtime |
 | [2026-11-17](2026-11-17.md) | Production setup: Clerk, Google OAuth, support email, Cloudflare tokens, Stripe, deployment and proposal review |
+| [2026-11-18](2026-11-18.md) | S5 devicebasedauth.org integration (device-bound keys, account linking) |
+| [2026-11-22](2026-11-22.md) | S5 devicebasedauth.org: hashbin parity, device sessions, online decisions |
 
 **Adding a record:** append a `## <IDs> <what> — <date>` section to that day's file (create
 `YYYY-MM-DD.md` and add it to the table if it is new). Link evidence under `docs/ops/evidence/`

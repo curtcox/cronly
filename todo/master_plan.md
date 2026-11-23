@@ -257,6 +257,7 @@ undeclared route.
 | API key | `Authorization: ApiKey crk_…` | scripts, agents, CI |
 | Trigger token | in the hook URL: `/hook/tk_…` | webhooks and web pages; can only run one job |
 | Local dev | `Authorization: LocalDev <user>` | local mode only |
+| devicebasedauth.org device credential | `Authorization: DBA <credential>` + `DPoP: <proof>`, or `Bearer <dba-access+jwt>` | device-bound scripts, agents and browsers; needs a linked account ([plan](dba_integration.md), S5) |
 
 API keys have **scopes** (`read`, `run`, `change`, `prose`, `secrets:write`) and an optional
 **spend cap** per day, so an agent can be handed a key that can run jobs and ask questions but

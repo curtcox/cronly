@@ -15,6 +15,9 @@ constants as the API; historical numbers in the master plan are superseded here.
 | Webhook run | HTTP/JS price + 5 µ$ | run bound + 2 µ$ |
 | Change: action, variable, secret (including key rotation), job, key, trigger | 100 µ$ | 20 µ$ |
 | API-key read | 21 µ$ base + 2 µ$ per job scanned for aggregate history | ceil(12 µ$ base + 1.2 µ$/job) |
+| devicebasedauth.org credential: read or first-attempt run | API-key price + 7 µ$ (reads 28 µ$ base, HTTP runs 92 µ$) | API-key bound + 3.64 µ$ verification |
+| devicebasedauth.org online decision | 56 µ$ per decision, allowed or not | 34 µ$ (14 µ$ DBA charge + change-sized hold) |
+| devicebasedauth.org link start | 100 µ$ (a change); finish and unlink free | 34 µ$ (14 µ$ DBA sign-in charge + change) |
 | Web session reads, cron explain, quotes, mutation dry runs | Free, rate-limited | Bounded fixed operating cost |
 | JavaScript run | 85 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
 | JS daily activation | 3,300 µ$ on first invocation of each action version per UTC day | 2,000 µ$ provider activation |
@@ -37,6 +40,20 @@ rollback and cold restarts are covered for compact and standalone reservations.
 Real local Worker/Queue acceptance also verifies one activation charge across
 three jobs sharing a version, with matching run logs, ledger, costs and balance.
 
+### devicebasedauth.org (S5)
+
+Verifying a DBA credential on each request costs cronly the link-index lookup, one write and
+one delete in the shared DPoP replay cache, and the account's credential row: `dbaVerification`,
+3.64 µ$. That pushed reads (21 µ$ vs. a 15.64 µ$ bound) and runs (85 µ$ vs. 55.5 µ$) below the
+floor, so D5/D6's standing approval of upward floor corrections adds `dbaRequest` (7 µ$) to reads
+and to manual runs and action tests a DBA caller starts. Retries and scheduled runs are not
+re-verified, so they do not pay it. Changes (100 µ$ vs. 23.64 µ$) absorb it.
+
+DBA bills cronly.org 14 µ$ for each online decision (including denials) and each OIDC
+sign-in. The owner chose to pass both on (2026-11-22): `dba_decision` (56 µ$) is held under the
+credential's monthly cap before DBA is asked, charged once DBA answers and released when it
+cannot (5xx, unfunded, unreachable). Starting a link charges a change before cronly asks DBA.
+
 A regular hourly HTTP job is about $0.06120 per 30 days; a minutely job is $3.6720. These
 are run charges only. Changes, API polling, prose and JS activation are additional.
 
@@ -46,7 +63,8 @@ Internal money is integer micro-dollars: $1 = 1,000,000 µ$; 1¢ = 10,000 µ$.
 Round charges and costs up. A balance cannot go negative; every billable operation
 reserves its maximum before external work, and settles no more than that hold.
 Lost or uncertain results expire against the held maximum. Outstanding holds count
-against account availability, job UTC daily/monthly budgets and key UTC daily caps.
+against account availability, job UTC daily/monthly budgets, key UTC daily caps and
+devicebasedauth.org credentials' UTC monthly caps (a grant's `spend_usd_per_month`, in µ$).
 
 Minimum credit: $5. The card payment cost is itemized on top, using hashbin's grossUp:
 `ceil((creditCents + 30) / (1 - 0.029))`. A $5 credit costs $5.46, including $0.46 of

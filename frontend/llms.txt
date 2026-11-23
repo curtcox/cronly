@@ -7,6 +7,7 @@ Prepaid scheduling of named HTTP or JavaScript actions. Standard 5-field cron, I
 - Prices and costs: https://cronly.org/pricing.html
 
 Authenticate with Authorization: ApiKey crk_… . Scopes: read, run, change, prose, secrets:write; optional daily spend cap. API reads are billed. Browser session reads are free and rate-limited.
+Device-bound alternative: link a devicebasedauth.org account on Account, enroll with `dba enroll --aud cronly.org --action cronly:run`, then send Authorization: DBA <credential> plus a DPoP proof (or Bearer $(dba token --aud cronly.org)). Actions cronly:<scope> map to the scopes above; cronly:session adds session routes except API keys and the link; spend_usd_per_month is a monthly cap. DBA requests carry a small verification surcharge and online-only grants a per-decision price (see /pricing.html). Details: /docs/agents.html.
 Quote mutations with ?dry_run=1 first. This validates and charges nothing. Applying is a separate request, with Idempotency-Key. Every response exposes cost_microdollars and balance_microdollars. Money is integer micro-dollars; 1 USD = 1,000,000. A 402 refusal means balance or budget; do not retry without changing funding/budget.
 GET /api/config exports definitions and secret metadata. PUT /api/config imports an atomic quoted diff. Set secret values separately; they are write-only.
 Prose/change returns a proposal; it never changes an account. POST /api/changes/{id}/apply applies it after a separate quote/review. Stale proposals are rejected.

@@ -4,6 +4,7 @@ import { review, reviewed, runInput } from './review.js';
 import { definitionsPage, cronPreview, updateJsPrice, updateJobPrice, translateJob } from './definitions.js';
 import { upcomingPage, runsPage, costsPage, filterUpcoming, filterCosts, exportRuns } from './history.js';
 import { dashboard, askPage, accountPage, ask, pageTransactions } from './pages.js';
+import { dbaClick, finishDbaLink } from './dba.js';
 
 $('#sign-out').addEventListener('click', signOut);
 async function render() {
@@ -44,6 +45,7 @@ content.addEventListener('click', async event => {
     if (button.id === 'create-trigger') await reviewed(`/api/jobs/${state.editing}/triggers`, 'POST', {}, async result => { await render(); notify('Trigger created. Copy its URL now.'); review('Trigger URL — keep it private', 0, result.url, async () => {}, 'Close'); });
     if (button.dataset.revokeTrigger) await reviewed(`/api/jobs/${state.editing}/triggers/${button.dataset.revokeTrigger}`, 'DELETE');
     if (button.dataset.revokeKey) await reviewed(`/api/keys/${button.dataset.revokeKey}`, 'DELETE');
+    if (await dbaClick(button)) return;
     if (button.id === 'test-action') {
       runInput(`/api/actions/${state.editing}/test`, `Test ${state.editing}`, 'Test');
     }
@@ -85,7 +87,10 @@ content.addEventListener('submit', async event => {
 });
 $('#workspace-nav').addEventListener('click', event => { const link = event.target.closest('a'); if (link && link.hash !== location.hash) { content.innerHTML = '<p class="muted">Loading workspace…</p>'; content.setAttribute('aria-busy', 'true'); } });
 window.addEventListener('hashchange', () => { state.editing = null; render(); });
-async function signedIn() { $('#workspace-nav').hidden = false; $('#sign-out').hidden = false; await render(); }
+async function signedIn() {
+  $('#workspace-nav').hidden = false; $('#sign-out').hidden = false; await render();
+  try { await finishDbaLink(); } catch (error) { notify(error.message, true); }
+}
 async function boot() {
   state.deployment = await settings();
   if (state.deployment.local) {

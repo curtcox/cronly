@@ -5,6 +5,7 @@ import { digest } from '../auth/crypto.js';
 import { charge, funds } from './ledger.js';
 import { price } from '../utils/pricing.js';
 import { configDiff } from '../services/config.js';
+import { isDbaKeyId, dbaKeyBudget } from './dba-account.js';
 /** Assemble the bounded account graph from individually stored definitions. */
 export async function loadConfig(tx, publicView = false) {
   const config = {};
@@ -19,6 +20,8 @@ export async function loadConfig(tx, publicView = false) {
 /** Apply the same budget restrictions to every operation delegated through a key. */
 export async function keyBudget(tx, id) {
   if (!id) return {};
+  // A devicebasedauth.org credential id (crd_…) carries its grant's monthly cap instead.
+  if (isDbaKeyId(id)) return dbaKeyBudget(tx, id);
   const key = await tx.get(`key:${id}`);
   assert(key && !key.revoked && key.expires_at > Date.now(), 'invalid_auth', 'API key revoked or expired', 401);
   return { key_id: id, key_budget: key.daily_spend_microdollars === null ? {} : { day: key.daily_spend_microdollars } };
