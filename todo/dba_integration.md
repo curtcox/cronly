@@ -104,7 +104,8 @@ that keeps DBA reads and runs above the floor. Details: `docs/business/pricing.m
 - Upstream (devicebasedauth.org `frontend/_headers`): `/sdk/:version/*` repeats the
   `Access-Control-Allow-Origin: *` that `/sdk/*` already sets, so versioned SDK files are served
   with `*, *` and browsers refuse them as cross-origin module scripts. cronly vendors the SDK, so
-  it is unaffected; other sites pinning `/sdk/v1.4.0/dba.js` are not.
+  it is unaffected. Fixed upstream in device-based-auth `677422c` (L4, pushed 2026-11-23);
+  confirm `curl -sI https://devicebasedauth.org/sdk/v1.4.0/dba.js` shows a single `*`.
 - Named address lists (DBA B10 N3) and relay routes: refresh the vendored verifier once DBA ships
   them, and pass `address_lists` / `route` into `decide`.
 - Done since 2026-11-18: Stage B device sign-in in the workspace (2026-11-23); verifier refreshed to `829d033` with `net.client` address rules (CIDR and

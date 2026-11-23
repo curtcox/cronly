@@ -109,9 +109,9 @@ sign-in).
 - **The SDK** is DBA's released v1.4.0 bundle, vendored unmodified at
   `frontend/vendor/devicebasedauth.js` and pinned by its SRI hash
   (`src/vendor/devicebasedauth.test.js`). It is served from cronly's own origin and loaded only
-  when a device session is in use or offered. (Loading it from devicebasedauth.org would also
-  fail today: its versioned SDK paths answer `Access-Control-Allow-Origin: *, *`, which browsers
-  refuse for module scripts.)
+  when a device session is in use or offered, so the workspace never depends on
+  devicebasedauth.org serving it (versioned SDK paths there answered
+  `Access-Control-Allow-Origin: *, *` until device-based-auth `677422c`).
 
 ## Browser apps on any site
 
