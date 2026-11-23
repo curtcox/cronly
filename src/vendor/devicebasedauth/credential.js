@@ -3,7 +3,7 @@
  * and DPoP proofs (RFC 9449, typ "dpop+jwt"). See spec/credential.md.
  */
 import { decodeJws, verifyJws, jwkThumbprint, sha256b64u, signJws, publicJwk, b64u } from './jose.js';
-import { validateGrants, VOCABULARY_VERSION } from './grants.js';
+import { validateGrants, VOCABULARY_VERSIONS, grantsNeedVersion2 } from './grants.js';
 
 export const CREDENTIAL_TYP = 'dba-device+jwt';
 export const ACCESS_TYP = 'dba-access+jwt';
@@ -37,7 +37,8 @@ export function validateCredentialPayload(payload, { typ = CREDENTIAL_TYP } = {}
   for (const k of ['iat', 'nbf', 'exp']) if (!Number.isSafeInteger(payload[k])) errors.push(`${k} must be a NumericDate`);
   if (!Array.isArray(payload.aud) || payload.aud.length === 0 || payload.aud.some(a => typeof a !== 'string')) errors.push('aud must be a list of audiences');
   if (payload.exp <= payload.nbf) errors.push('exp must be after nbf');
-  if (payload.ver !== VOCABULARY_VERSION) errors.push(`ver must be ${VOCABULARY_VERSION}`);
+  if (!VOCABULARY_VERSIONS.includes(payload.ver)) errors.push('ver must be 1 or 2');
+  else if (payload.ver === 1 && grantsNeedVersion2(payload.grants)) errors.push('ver must be 2 when a grant uses net');
   const status = payload.status?.status_list;
   if (!status || !Number.isSafeInteger(status.idx) || status.idx < 0 || status.idx > MAX_STATUS_INDEX || typeof status.uri !== 'string') errors.push('status.status_list must have idx (0 to 2^31-1) and uri');
   if (typ === CREDENTIAL_TYP && typeof payload.cnf?.jkt !== 'string') errors.push('cnf.jkt is required');
@@ -127,8 +128,9 @@ export class ReplayCache {
 /**
  * Verify a DPoP proof for a request.
  * options: { method, url, credential (compact string; checks ath), jkt (expected thumbprint),
- *            now, nonce (required value, if any), replay (ReplayCache or { check(key, now) → boolean | Promise<boolean> }) }
- * Returns the proof payload (including any device-reported loc).
+ *            now, nonce (the required value, or a check `value => ({ ok, rtt_ms? })` such as a
+ *            stateless timed nonce, todo/network_constraints.md §7.1.1), replay (ReplayCache or { check(key, now) → boolean | Promise<boolean> }) }
+ * Returns the proof payload (including any device-reported loc, and rtt_ms from a nonce check).
  */
 export async function verifyProof(proof, { method, url, credential, jkt, now = Math.floor(Date.now() / 1000), nonce, replay }) {
   let decoded;
@@ -148,8 +150,14 @@ export async function verifyProof(proof, { method, url, credential, jkt, now = M
   if (!Number.isSafeInteger(payload.iat) || payload.iat > now + CLOCK_SKEW || payload.iat < now - PROOF_MAX_AGE - CLOCK_SKEW) fail('stale_proof', 'DPoP proof iat is outside the allowed window');
   if (typeof payload.jti !== 'string' || payload.jti.length < 8 || payload.jti.length > 128) fail('invalid_proof', 'DPoP proof jti is missing');
   if (credential !== undefined && payload.ath !== await sha256b64u(credential)) fail('invalid_proof', 'DPoP proof ath does not match the credential');
-  if (nonce !== undefined && payload.nonce !== nonce) fail('use_dpop_nonce', 'DPoP nonce required');
+  let measured;
+  if (typeof nonce === 'function') {
+    const answer = await nonce(payload.nonce);
+    if (!answer?.ok) fail('use_dpop_nonce', 'DPoP nonce required');
+    if (Number.isFinite(answer.rtt_ms)) measured = answer.rtt_ms;
+  } else if (nonce !== undefined && payload.nonce !== nonce) fail('use_dpop_nonce', 'DPoP nonce required');
   // check may be async (a shared cache such as durableReplayCache).
   if (replay && !(await replay.check(`${thumbprint}:${payload.jti}`, now))) fail('replayed_proof', 'DPoP proof was already used');
-  return { ...payload, jkt: thumbprint };
+  // rtt_ms is only ever the verifier's own measurement, never a claim the device put in its proof.
+  return { ...payload, jkt: thumbprint, rtt_ms: measured };
 }

@@ -35,6 +35,13 @@ device binding. Any other bearer token is still a Clerk session.
   unfiltered runs, actions, action tests, run details, MCP) it grants nothing. Its other
   constraints still apply; one that needs DBA online is asked with the resource, and only after
   a free offline grant and an unrestricted online one have had their turn.
+- **Network rules** (`net.client`, credential vocabulary 2). Address rules match the peer
+  address Cloudflare reports (`CF-Connecting-IP`): `cidrs` directly, and `dns` names after
+  cronly resolves them over DNS-over-HTTPS (1.1.1.1, cached 30–300 s per isolate; `dnssec: true`
+  needs a validated answer). A name that does not resolve matches nothing. Named address lists
+  are not published by DBA yet, so they match nothing either. Latency rules are not measured
+  (no timed DPoP challenges yet) and route rules need relays, so grants with either are refused
+  offline. `net.server` is the device's own check of cronly and is ignored here.
 - **Device session.** `cronly:session` makes the credential a session: every scope, and the
   `SESSION` routes (key list, Checkout, link status). It never reaches `ACCOUNT_SESSION` routes,
   which mint credentials outliving the device or move the link: create or revoke API keys,

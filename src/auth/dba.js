@@ -12,6 +12,7 @@
 import { createOidcClient } from '../vendor/devicebasedauth/site.js';
 import { createVerifier, credentialFromRequest } from '../vendor/devicebasedauth/verifier.js';
 import { durableReplayCache } from '../vendor/devicebasedauth/replay-do.js';
+import { createDohResolver, grantDnsNames } from '../vendor/devicebasedauth/dns.js';
 import { USER_SCOPES } from './scopes.js';
 import { assert } from '../utils/errors.js';
 import { rpc } from '../utils/rpc.js';
@@ -48,6 +49,7 @@ const fetcher = (...args) => globalThis.fetch(...args);
 // survive across requests. The vendored client caches only successful responses.
 const verifiers = new Map();
 const oidcClients = new Map();
+const resolvers = new Map();
 
 /**
  * The shared verifier for this deployment's issuer. The catalog is DBA's cronly.org record, so
@@ -67,6 +69,20 @@ export function dbaVerifier(env) {
   return verifiers.get(key);
 }
 
+/**
+ * Host names in cronly's grants' `net.client.addresses.dns`, resolved over DNS-over-HTTPS
+ * (1.1.1.1) and cached per isolate for the answer's TTL (30–300 s). A name that cannot be
+ * resolved matches nothing, so DNS trouble only ever refuses. Names in other sites' grants are
+ * theirs to resolve. Keyed by issuer only so each test's fake issuer gets a fresh cache.
+ */
+async function resolvedNames(env, payload) {
+  const names = grantDnsNames(ourGrants(payload));
+  if (!names.length) return {};
+  const issuer = issuerOf(env);
+  if (!resolvers.has(issuer)) resolvers.set(issuer, createDohResolver({ fetch: fetcher }));
+  return { dns: await resolvers.get(issuer).resolveAll(names) };
+}
+
 /** OIDC client for linking a cronly account to a DBA account (authorization code + PKCE). */
 export function dbaOidc(env) {
   const issuer = issuerOf(env); const redirectUri = `${env.APP_ORIGIN}/auth/dba/callback`;
@@ -79,10 +95,13 @@ export function dbaOidc(env) {
 export function monthlyMicrodollars(usd) {
   return typeof usd === 'number' && Number.isFinite(usd) && usd >= 0 ? Math.floor(usd * 1000000 + 1e-6) : null;
 }
-/** The tightest monthly cap on cronly's grants; caps on other sites' grants are theirs. */
+/** The grants naming a `cronly:` action; other sites' grants (and their limits) are theirs. */
+function ourGrants(payload) {
+  return (payload.grants || []).filter(g => Array.isArray(g.actions) && g.actions.some(a => typeof a === 'string' && a.startsWith(`${DBA_NAMESPACE}:`)));
+}
+/** The tightest monthly cap on cronly's grants. */
 function monthlyCap(payload) {
-  const ours = (payload.grants || []).filter(g => Array.isArray(g.actions) && g.actions.some(a => a.startsWith(`${DBA_NAMESPACE}:`)));
-  const caps = ours.map(g => g.limits?.spend_usd_per_month).filter(v => typeof v === 'number');
+  const caps = ourGrants(payload).map(g => g.limits?.spend_usd_per_month).filter(v => typeof v === 'number');
   return caps.length ? monthlyMicrodollars(Math.min(...caps)) : null;
 }
 
@@ -141,9 +160,12 @@ export async function authenticateDba(request, env) {
   // The index names the account; the account's dba-authenticate must confirm it.
   const account = env.DBA_LINKS ? (await rpc(env.DBA_LINKS, payload.acct, 'get')).account : null;
   assert(account, 'account_not_linked', ...notLinked);
+  // `net.client` address rules: CIDRs match CF-Connecting-IP inside decide; DNS names are
+  // looked up first. Latency rules are not measured here, so such grants deny (rtt_required).
+  const context = { request, proof, confirmation, resolved: await resolvedNames(env, payload) };
   const offline = []; const online = [];
   for (const scope of DBA_SCOPES) {
-    const decision = verifier.decide(payload, { action: `${DBA_NAMESPACE}:${scope}` }, { request, proof, confirmation });
+    const decision = verifier.decide(payload, { action: `${DBA_NAMESPACE}:${scope}` }, context);
     if (decision.allow) offline.push(scope); else if (decision.online_required) online.push(scope);
   }
   const session = offline.includes('session');
@@ -156,7 +178,7 @@ export async function authenticateDba(request, env) {
   // Grants restricted to `resources` were decided above without one, so they granted nothing.
   // A route acting on one job decides them again with its resource (src/auth/dba-online.js).
   // Non-enumerable, so forwarded MCP identities and serialized copies drop it and fail closed.
-  if (!session) Object.defineProperty(dba, 'decide', { value: (scope, resource) => verifier.decide(payload, { action: `${DBA_NAMESPACE}:${scope}`, resource }, { request, proof, confirmation }) });
+  if (!session) Object.defineProperty(dba, 'decide', { value: (scope, resource) => verifier.decide(payload, { action: `${DBA_NAMESPACE}:${scope}`, resource }, context) });
   return {
     account, key_id: payload.cid, scopes: session ? [...USER_SCOPES] : offline.filter(scope => scope !== 'session'),
     session, ...(session ? { device_session: true } : {}), dba

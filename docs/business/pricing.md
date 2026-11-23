@@ -48,6 +48,10 @@ one delete in the shared DPoP replay cache, and the account's credential row: `d
 floor, so D5/D6's standing approval of upward floor corrections adds `dbaRequest` (7 µ$) to reads
 and to manual runs and action tests a DBA caller starts. Retries and scheduled runs are not
 re-verified, so they do not pay it. Changes (100 µ$ vs. 23.64 µ$) absorb it.
+Grants with `net.client.addresses.dns` names add DNS-over-HTTPS lookups (one A and one AAAA
+query per name, at most 16 names, cached per isolate for 30–300 s). Workers subrequests carry
+no per-request charge and parsing the answers is well under a millisecond of CPU, so they stay
+inside the CPU allowance of `dbaVerification`; DBA prices DNS checks as free (its D17).
 
 DBA bills cronly.org 14 µ$ for each online decision (including denials) and each OIDC
 sign-in. The owner chose to pass both on (2026-11-22): `dba_decision` (56 µ$) is held under the

@@ -6,6 +6,8 @@ import { DbaRevocationsDO } from '../src/durable-objects/dba-revocations-do.js';
 import { forgetPushedDbaRevocations } from '../src/auth/dba.js';
 import { namespace } from './storage.js';
 import { setBit } from '../src/vendor/devicebasedauth/status-list.js';
+import { grantsNeedVersion2 } from '../src/vendor/devicebasedauth/grants.js';
+import { DNS_DEFAULTS } from '../src/vendor/devicebasedauth/dns.js';
 
 let issuers = 0;
 const id = prefix => `${prefix}${b64u(crypto.getRandomValues(new Uint8Array(12))).replace(/[^A-Za-z0-9]/g, '').slice(0, 12).padEnd(12, 'x')}`;
@@ -15,7 +17,8 @@ const id = prefix => `${prefix}${b64u(crypto.getRandomValues(new Uint8Array(12))
  * tokens, status lists, OIDC ID tokens and webhook events with the vendored issuer code, and
  * `fetch` serves JWKS, the status list, the cronly.org catalog (`catalog`), OIDC discovery, the
  * token endpoint and online `/api/v1/authorize` (answer with `online.answer`/`online.status`;
- * requests land in `online.calls`). Each instance has its own issuer URL so module-level
+ * requests land in `online.calls`), and DNS-over-HTTPS answers from `dns` (host name → addresses;
+ * names it lacks are NXDOMAIN, and `dns.fail` answers 503). Each instance has its own issuer URL so module-level
  * verifier caches never mix keys between tests.
  */
 export async function fakeDbaIssuer() {
@@ -26,15 +29,16 @@ export async function fakeDbaIssuer() {
   const statusUri = `${issuer}/v1/lists/1`;
   let statusBytes = new Uint8Array(64); let nextIndex = 0;
   const codes = new Map(); const calls = []; const catalog = []; const online = { answer: { allow: true }, status: 200, calls: [] };
+  const dns = {};
   forgetPushedDbaRevocations();
 
   const base = ({ acct, grants, aud = ['cronly.org'], lifetime = 3600 }) => {
     const now = Math.floor(Date.now() / 1000); const cid = id('crd_');
-    return { iss: issuer, sub: id('dev_'), acct, aud, cid, jti: `${cid}.1`, iat: now, nbf: now, exp: now + lifetime, grants, status: { status_list: { idx: nextIndex++, uri: statusUri } }, ver: 1 };
+    return { iss: issuer, sub: id('dev_'), acct, aud, cid, jti: `${cid}.1`, iat: now, nbf: now, exp: now + lifetime, grants, status: { status_list: { idx: nextIndex++, uri: statusUri } }, ver: grantsNeedVersion2(grants) ? 2 : 1 };
   };
 
   return {
-    issuer, calls, catalog, online,
+    issuer, calls, catalog, online, dns,
     /** Sign a webhook event (spec/events.md at DBA) as the issuer. */
     signEvent(payload) {
       return signJws({ typ: 'dba-event+jwt', kid: signer.kid }, { iss: issuer, aud: 'cronly.org', iat: Math.floor(Date.now() / 1000), jti: `evt_${crypto.randomUUID()}`, ...payload }, signer.key);
@@ -66,6 +70,12 @@ export async function fakeDbaIssuer() {
     },
     async fetch(input, init = {}) {
       const url = String(input instanceof Request ? input.url : input); calls.push(url);
+      if (url.startsWith(`${DNS_DEFAULTS.endpoint}?`)) {
+        if (dns.fail) return new Response('unavailable', { status: 503 });
+        const query = new URL(url).searchParams; const v6 = query.get('type') === 'AAAA';
+        const addrs = (dns[query.get('name')] || []).filter(a => a.includes(':') === v6);
+        return Response.json({ Status: query.get('name') in dns ? 0 : 3, AD: false, Answer: addrs.map(data => ({ name: query.get('name'), type: v6 ? 28 : 1, TTL: 60, data })) });
+      }
       if (url === `${issuer}/.well-known/jwks.json`) return Response.json(jwksFor([issuerKey]));
       if (url === statusUri) return new Response(await signStatusList({ uri: statusUri, bytes: statusBytes, issuer }, signer), { headers: { 'Content-Type': 'application/statuslist+jwt' } });
       if (url === `${issuer}/api/v1/audiences/cronly.org`) return Response.json({ name: 'cronly.org', namespace: 'cronly', catalog });
