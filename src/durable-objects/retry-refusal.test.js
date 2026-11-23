@@ -44,7 +44,7 @@ for (const holdMode of ['compact', 'standalone']) for (const refusal of ['revoke
     if (fault) {
       await expect(consume(message, env, {})).rejects.toMatchObject({ status: 500 });
       expect(ack).not.toHaveBeenCalled();
-      expect((await job.storage.get('history:parent')).retry).toMatchObject({ dispatch: true, input: { event: 'private-retry-input' } });
+      expect(await job.storage.get('history:parent')).toMatchObject({ pending: expect.any(Object), retry: { input: { event: 'private-retry-input' } } });
       fault.mockRestore();
     } else await consume(message, env, {});
     const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
@@ -90,4 +90,24 @@ it('pauses a budget-refused retry with one rearm, leaving the resumption wakeup'
   expect(await job.storage.get('settings')).toMatchObject({ paused: 'budget_day', resume_at: tomorrow });
   expect((await job.storage.get('history:parent')).retry).toBeUndefined();
   expect(messages).toHaveLength(1);
+});
+
+it('still dispatches a retry outbox written before retries were reserved ahead of finalization', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
+  const messages = [];
+  const env = { ENVIRONMENT: 'local', RUN_QUEUE: { send: async body => messages.push(body) } };
+  env.ACCOUNTS = namespace(AccountDO, env); env.JOBS = namespace(JobDO, env);
+  const account = (op, args) => rpc(env.ACCOUNTS, 'a', op, args);
+  await account('init', { account: 'a' }); await account('deposit', { id: 'fund', amount: 10000 });
+  await account('mutate', { account: 'a', id: 'defs', operations: [
+    { kind: 'actions', name: 'ping', value: { url: 'https://example.com' } },
+    { kind: 'jobs', name: 'j', value: { action: 'ping', cron: null, retries: 1 } }
+  ] });
+  await account('sync-jobs');
+  const job = env.JOBS.get('a:j');
+  await job.history({ id: 'legacy', job: 'j', status: 'failure', created_at: Date.now() - 5000, finished_at: Date.now() - 4000, cost_microdollars: PRICES.run }, true, null, { dispatch: true, input: { event: 'old' }, attempt: 1, trigger: 'manual' });
+  await job.alarm(); await job.alarm();
+  expect(messages.map(m => m.id)).toEqual(['legacy:retry']);
+  expect((await job.storage.get('history:legacy')).retry).toBeUndefined();
+  expect(await job.readRun('legacy:retry')).toMatchObject({ status: 'queued', attempt: 1 });
 });

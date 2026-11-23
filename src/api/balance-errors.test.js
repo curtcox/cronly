@@ -12,7 +12,7 @@ for (const hook of [false, true]) {
     const env = { ENVIRONMENT: 'local', TOKEN_SIGNING_KEY: 'test', RUN_QUEUE: { send: vi.fn() } };
     env.ACCOUNTS = namespace(AccountDO, env); env.JOBS = namespace(JobDO, env);
     const account = (op, args) => rpc(env.ACCOUNTS, 'a', op, args);
-    await account('init', { account: 'a' }); await account('deposit', { id: 'fund', amount: 280 });
+    await account('init', { account: 'a' }); await account('deposit', { id: 'fund', amount: 270 });
     await account('mutate', { account: 'a', id: 'defs', operations: [
       { kind: 'actions', name: 'ping', value: { url: 'https://example.com' } },
       { kind: 'jobs', name: 'j', value: { action: 'ping', cron: null } }
@@ -27,10 +27,10 @@ for (const hook of [false, true]) {
     expect(response.status).toBe(402);
     expect(await response.json()).toMatchObject({
       error: 'Insufficient balance', code: 'insufficient_balance', cost_microdollars: 0,
-      needed_microdollars: price(hook ? 'hook' : 'run') - 80,
-      ...(!hook ? { balance_microdollars: 80 } : {})
+      needed_microdollars: price(hook ? 'hook' : 'run') - 70,
+      ...(!hook ? { balance_microdollars: 70 } : {})
     });
-    expect(await account('account')).toMatchObject({ balance_microdollars: 80, held_microdollars: 0 });
+    expect(await account('account')).toMatchObject({ balance_microdollars: 70, held_microdollars: 0 });
     expect(env.RUN_QUEUE.send).not.toHaveBeenCalled();
   });
 }

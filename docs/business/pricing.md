@@ -11,15 +11,15 @@ constants as the API; historical numbers in the master plan are superseded here.
 
 | Operation | Price | Estimated worst-case marginal cost |
 |---|---|---|
-| HTTP run | 82 µ$ | ceil(policy run bound), currently 50 µ$ |
+| HTTP run | 79 µ$ | ceil(policy run bound), currently 48 µ$ |
 | Webhook run | HTTP/JS price + 5 µ$ | run bound + 2 µ$ |
 | Change: action, variable, secret (including key rotation), job, key, trigger | 100 µ$ | 20 µ$ |
 | API-key read | 21 µ$ base + 2 µ$ per job scanned for aggregate history | ceil(12 µ$ base + 1.2 µ$/job) |
-| devicebasedauth.org credential: read or first-attempt run | API-key price + 7 µ$ (reads 28 µ$ base, HTTP runs 89 µ$) | API-key bound + 3.64 µ$ verification |
+| devicebasedauth.org credential: read or first-attempt run | API-key price + 7 µ$ (reads 28 µ$ base, HTTP runs 86 µ$) | API-key bound + 3.64 µ$ verification |
 | devicebasedauth.org online decision | 56 µ$ per decision, allowed or not | 34 µ$ (14 µ$ DBA charge + change-sized hold) |
 | devicebasedauth.org link start | 100 µ$ (a change); finish and unlink free | 34 µ$ (14 µ$ DBA sign-in charge + change) |
 | Web session reads, cron explain, quotes, mutation dry runs | Free, rate-limited | Bounded fixed operating cost |
-| JavaScript run | 82 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
+| JavaScript run | 79 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
 | JS daily activation | 3,300 µ$ on first invocation of each action version per UTC day | 2,000 µ$ provider activation |
 | Prose | ceil(1.64 × actual model-token cost) + 500 µ$ | actual tokens + bookkeeping |
 
@@ -78,7 +78,7 @@ reviewed Terms and applicable law.
 
 Rates live only in `src/utils/cost-policy.js`; prices only in `src/utils/pricing.js`;
 model rates only in `src/utils/llm-policy.js`. Included allowances are ignored.
-The HTTP bound includes 35 row writes, 27 DO requests, five Worker invocations and
+The HTTP bound includes 33 row writes, 27 DO requests, five Worker invocations and
 3,000 compact-index row reads, six Queue operations, CPU,
 awake time and 16 KB retained logs; orchestration caches compact summaries instead of loading log bodies. Read and change bounds include actual ledger,
 key-budget, audit and rate-counter bookkeeping rather than just one request.
@@ -345,5 +345,17 @@ dispatch already did. That removes a +1 s alarm write the still-present retry ou
 and the same extra rearm from successful retries started at completion. The worst run is now
 35 writes, and the audit no longer grants activity eviction an extra write: the policy bound
 itself covers it. The rounded HTTP cost falls from 52 to 50 µ$ and the base HTTP/JS run price
-from 85 to 82 µ$ (89 µ$ for a DBA caller's first attempt, exactly at its floor). Existing
-reservations keep their original maximum; persisted job quotes use the current price.
+from 85 to 82 µ$ (89 µ$ for a DBA caller's first attempt, exactly at its floor).
+
+Retries are now reserved before their failed parent finalizes, instead of finalizing the
+parent with a retry outbox and clearing it after dispatch. The parent's pending row already
+holds the retry input; redelivery and the pending alarm settle idempotently and find the
+retry's deterministic id, so no outbox row is written or cleared. A budget or balance
+refusal commits the parent's final row and outcome in the pause's own transaction, so
+settings are written once. A retry that already finished keeps its outcome. Outbox rows
+written before this change are still dispatched and cleared. If the parent's final row
+fails after its retry was queued, that retry runs on delivery rather than after recovery.
+The worst run is now 33 writes (the refused-retry path loses two, successful retries one);
+the rounded HTTP cost falls from 50 to 48 µ$ and the run price from 82 to 79 µ$ (86 µ$ for
+a DBA caller's first attempt). Existing reservations keep their original maximum;
+persisted job quotes use the current price.

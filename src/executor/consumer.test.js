@@ -295,8 +295,11 @@ for (const failureAt of ['dispatch', 'cleanup']) {
     const before = (await api('/api/account')).balance_microdollars;
     await expect(consume(message, env, {})).rejects.toMatchObject({ status: 500 });
     expect(ack).not.toHaveBeenCalled();
+    // The parent stays pending with its private retry input until it finalizes (after a failed
+    // cleanup the retry itself was already queued; after a failed dispatch it was not).
     const pendingRetry = await job.storage.get(`history:${message.body.id}`);
-    expect(pendingRetry.retry).toMatchObject({ dispatch: true, input: { event: 'original-event' } });
+    expect(pendingRetry).toMatchObject({ pending: expect.any(Object), retry: { input: { event: 'original-event' } } });
+    expect(messages).toHaveLength(failureAt === 'cleanup' ? 2 : 1);
     for (const options of [{}, { summary: true }]) {
       const runs = await rpc(env.JOBS, 'a:pinger', 'runs', options);
       expect(runs.items.every(run => !Object.hasOwn(run, 'retry') && !Object.hasOwn(run, 'completion'))).toBe(true);
@@ -328,12 +331,17 @@ it('uses the pending alarm to recover a staged failure and its retry without Que
   });
   await expect(consume({ body: messages[0], ack() {} }, env, {})).rejects.toMatchObject({ status: 500 });
   fault.mockRestore();
+  // The retry was reserved before the parent's final row failed, so the Queue delivers it now.
+  expect(messages).toHaveLength(2);
   const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
   env.JOBS.objects.set('a:pinger', cold);
+  env.OUTBOUND_FETCH.mockImplementation(async () => new Response('ok'));
+  await consume({ body: messages[1], ack() {} }, env, {});
+  expect(env.OUTBOUND_FETCH).toHaveBeenCalledTimes(2);
   await vi.advanceTimersByTimeAsync(121000); await cold.alarm();
   expect(messages).toHaveLength(2);
   expect(await rpc(env.JOBS, 'a:pinger', 'run', { id: messages[0].id })).toMatchObject({ status: 'failure' });
-  await consume({ body: messages[1], ack() {} }, env, {});
-  expect(env.OUTBOUND_FETCH).toHaveBeenCalledTimes(2);
+  // The finished retry's outcome is not overwritten by its parent's later finalization.
+  expect((await cold.storage.get('settings')).last_outcome).toBe('success');
   expect((await api('/api/account')).held_microdollars).toBe(0);
 });

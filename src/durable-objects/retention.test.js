@@ -53,7 +53,7 @@ it('rolls back retention deletes together and retries without losing the cached 
   expect(await storage.get('run:old')).toBeUndefined();
 });
 
-it('recovers a staged outcome and private retry after a prolonged outage and pruning', async () => {
+for (const failure of ['dispatch', 'finalization']) it(`recovers a staged outcome and private retry after a prolonged outage and pruning (failed ${failure})`, async () => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
   const messages = [];
   const env = { ENVIRONMENT: 'local', RUN_QUEUE: { send: async body => messages.push(body) }, OUTBOUND_FETCH: vi.fn(async () => new Response('failed', { status: 500 })) };
@@ -66,24 +66,34 @@ it('recovers a staged outcome and private retry after a prolonged outage and pru
   ] });
   await account('sync-jobs');
   await rpc(env.JOBS, 'a:j', 'start', { id: 'r', input: { event: 'original' }, trigger: 'manual' });
-  const job = env.JOBS.get('a:j'); const put = job.storage.put.bind(job.storage);
-  const fault = vi.spyOn(job.storage, 'put').mockImplementation(async (key, value) => {
+  const job = env.JOBS.get('a:j'); const put = job.storage.put.bind(job.storage); const start = job.start.bind(job);
+  // A failed dispatch leaves the retry unreserved; a failed final row comes after it was queued.
+  const fault = failure === 'dispatch' ? vi.spyOn(job, 'start').mockImplementation(async (args, ...rest) => {
+    if (args.retry) throw new Error('dispatch unavailable');
+    return start(args, ...rest);
+  }) : vi.spyOn(job.storage, 'put').mockImplementation(async (key, value) => {
     if (key === 'history:r' && value.status === 'failure') throw new Error('completion unavailable');
     return put(key, value);
   });
   await expect(consume({ body: messages[0], ack() {} }, env, {})).rejects.toMatchObject({ status: 500 });
   fault.mockRestore();
   const before = (await account('account')).balance_microdollars;
+  expect(messages).toHaveLength(failure === 'dispatch' ? 1 : 2);
+  // The Queue delivers an already reserved retry while the parent awaits recovery.
+  if (failure === 'finalization') await consume({ body: messages[1], ack() {} }, env, {});
   await vi.advanceTimersByTimeAsync(31 * 86400000);
   const cold = new JobDO({ storage: job.storage, blockConcurrencyWhile: fn => fn() }, env);
   env.JOBS.objects.set('a:j', cold);
   await cold.prune(); await cold.alarm();
   expect(messages).toHaveLength(2);
-  await consume({ body: messages[1], ack() {} }, env, {});
+  if (failure === 'dispatch') await consume({ body: messages[1], ack() {} }, env, {});
   expect(env.OUTBOUND_FETCH).toHaveBeenCalledTimes(2);
   expect(env.OUTBOUND_FETCH.mock.calls[1][0].headers.get('X-Event')).toBe('original');
   expect(await account('account')).toMatchObject({ balance_microdollars: before - PRICES.run, held_microdollars: 0 });
   expect((await account('list', { prefix: 'ledger:' })).items.filter(row => row.id === 'r')).toHaveLength(1);
   expect(await cold.storage.get('history:r')).toBeUndefined();
-  expect(await cold.readRun('r:retry')).toMatchObject({ status: 'failure', cost_microdollars: PRICES.run });
+  expect((await account('list', { prefix: 'ledger:' })).items.filter(row => row.id === 'r:retry')).toHaveLength(1);
+  // A retry delivered before the outage is itself past retention by now.
+  if (failure === 'dispatch') expect(await cold.readRun('r:retry')).toMatchObject({ status: 'failure', cost_microdollars: PRICES.run });
+  else expect(await cold.readRun('r:retry')).toBeUndefined();
 });

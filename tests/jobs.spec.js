@@ -1,5 +1,7 @@
 import { test, expect, login } from './helpers.js';
 import { price } from '../src/utils/pricing.js';
+// The workspace's own formatting (frontend/js/api.js dollars), so prices are not hardcoded.
+const usd = value => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(value / 1000000);
 
 test('shows job pause reasons and settled UTC budget usage on mobile', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -92,11 +94,11 @@ test('derives read-only job run maxima from the selected action before saving bu
   await page.locator('#review-cancel').click();
   await page.getByRole('link', { name: 'Actions', exact: true }).click();
   await page.locator('[data-edit="small"]').click();
-  await expect(page.locator('#js-price')).toContainText('$0.003386');
+  await expect(page.locator('#js-price')).toContainText(usd(price('run', actions.small)));
   await page.getByLabel('CPU limit / milliseconds').fill('12');
   await page.getByLabel('Allowed subrequests').fill('1');
   const updated = price('run', { type: 'javascript', cpu_ms: 12, subrequests: 1 });
-  await expect(page.locator('#js-price')).toContainText(`$${(updated / 1000000).toFixed(6)}`);
+  await expect(page.locator('#js-price')).toContainText(usd(updated));
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 

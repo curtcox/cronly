@@ -117,7 +117,13 @@ export class JobDO {
     // after a failed alarm write, even when settings already show the resumption.
     await this.publish(settings); await this.storage.put('settings', settings); await this.arm();
   }
-  async start(args, rearm = true) {
+  /**
+   * Reserve and enqueue a run. `rearm` is false when the caller arms once at the end of its turn.
+   * `finalize` ({ summary, last_outcome }) is a completed parent whose retry this is: a budget or
+   * balance refusal commits the parent's final row and outcome with the pause, and marks the
+   * thrown error `finalized`.
+   */
+  async start(args, rearm = true, finalize = null) {
     assert(this.env.COST_SAFETY_HARD_STOP !== 'true', 'cost_brake', 'Runs are paused by the operator', 503);
     if (this.env.SAFETY && (await rpc(this.env.SAFETY, 'global', 'status')).brake) {
       const prior = await this.storage.get('settings');
@@ -140,6 +146,7 @@ export class JobDO {
       const moneyRefusal = error.status === 402 && ['insufficient_balance', 'budget_day', 'budget_month'].includes(error.code);
       const scheduledInputRefusal = error.code === 'missing_input' && args.trigger === 'schedule';
       if (moneyRefusal || scheduledInputRefusal) {
+        if (finalize) settings.last_outcome = finalize.last_outcome;
         const prior = JSON.stringify(settings);
         settings.paused = error.code;
         delete settings.resume_at;
@@ -152,7 +159,8 @@ export class JobDO {
         // cannot supply its own input, so it must not keep retrying unpaid.
         if (JSON.stringify(settings) !== prior) {
           const pausedRun = { id: args.id, status: 'paused', reason: error.code, created_at: Date.now(), cost_microdollars: 0, job: settings.name };
-          await this.history(pausedRun, false, settings);
+          await this.history(pausedRun, false, settings, undefined, finalize?.summary);
+          if (finalize) error.finalized = true;
         }
         // The pause's transaction already committed its resumption wakeup. Callers passing
         // rearm=false (alarm, completion) arm once at the end of the same turn.
@@ -205,9 +213,20 @@ export class JobDO {
     delete result.input; delete result.key_id;
     const changed = settings.last_outcome !== result.status;
     settings.last_outcome = result.status;
-    const retry = shouldRetry ? { dispatch: true, input: retryData.input || {}, key_id: run.key_id, attempt: run.attempt + 1, trigger: run.trigger, scheduled_at: run.scheduled_at } : undefined;
-    await this.history(result, true, changed ? settings : null, retry);
-    await this.dispatchRetry(args.id, null, false);
+    // S4: the retry is reserved before the parent finalizes, so no outbox row is written and
+    // cleared. Until the final row commits the parent stays pending with its staged outcome
+    // and retry input; redelivery settles idempotently and finds the deterministic retry id.
+    const retry = shouldRetry ? { input: retryData.input || {}, key_id: run.key_id, attempt: run.attempt + 1, trigger: run.trigger, scheduled_at: run.scheduled_at } : null;
+    if (!retry) await this.history(result, true, changed ? settings : null);
+    else if (!await this.startRetry(args.id, retry, { summary: result, last_outcome: result.status })) {
+      // Starting the retry awaited other objects, so finalize against current settings. A retry
+      // that already finished (its reservation had expired) recorded the newer outcome.
+      const latest = await this.storage.get('settings');
+      const child = await this.storage.get(`history:${args.id}:retry`);
+      const update = !['success', 'failure', 'expired'].includes(child?.status) && latest.last_outcome !== result.status;
+      if (update) latest.last_outcome = result.status;
+      await this.history(result, true, update ? latest : null);
+    }
     await this.prune(); await this.arm(); return result;
   }
   async completed(id, summary) {
@@ -221,18 +240,26 @@ export class JobDO {
   async dispatchRetry(id, summary, rearm = true) {
     summary ||= await this.storage.get(`history:${id}`);
     if (!summary?.retry?.dispatch) return;
-    const { retry, ...completed } = summary;
-    try {
-      if (isDbaKeyId(retry.key_id)) await this.checkDbaCredential(retry.key_id);
-      await this.start({ ...retry, id: `${id}:retry`, retry: true }, rearm);
-    } catch (error) {
-      // Revoked/expired keys and newly required input cannot authorize this
-      // retry either. Keeping those refusals would wake an unpaid loop forever.
-      // Infrastructure failures retain the outbox for funded recovery.
-      if (![400, 401, 402, 403, 404, 409, 429].includes(error.status) && !['cost_brake', 'sandbox_acceptance_required'].includes(error.code)) throw error;
-    }
+    const { retry: { dispatch: _dispatch, ...retry }, ...completed } = summary;
+    await this.startRetry(id, retry, null, rearm);
     await this.storage.put(`history:${id}`, completed);
     if (this.historyCache) this.historyCache = this.historyCache.map(r => r.id === id ? completed : r);
+  }
+  /**
+   * Start a failed run's retry; returns true when a refusal pause also committed `finalize`.
+   * Revoked/expired keys, newly required input and budget/balance refusals cannot authorize
+   * this retry later either, so they end it rather than wake an unpaid loop. Infrastructure
+   * failures throw, keeping the parent recoverable for funded redelivery.
+   */
+  async startRetry(id, retry, finalize = null, rearm = false) {
+    try {
+      if (isDbaKeyId(retry.key_id)) await this.checkDbaCredential(retry.key_id);
+      await this.start({ ...retry, id: `${id}:retry`, retry: true }, rearm, finalize);
+    } catch (error) {
+      if (![400, 401, 402, 403, 404, 409, 429].includes(error.status) && !['cost_brake', 'sandbox_acceptance_required'].includes(error.code)) throw error;
+      return error.finalized === true;
+    }
+    return false;
   }
   /**
    * A retry started by a devicebasedauth.org credential re-checks it at DBA (pushed revocations,
@@ -268,19 +295,14 @@ export class JobDO {
     }
     return body;
   }
-  async history(run, finalized = false, settings = null, retry) {
-    const { id, job, status, created_at, trigger, scheduled_at, finished_at, cost_microdollars, http_status, reason } = run;
-    const summary = { id, job, status, created_at, trigger, scheduled_at, finished_at, cost_microdollars, http_status, reason };
-    if (retry) summary.retry = retry;
-    if (finalized) summary.settlement = { subrequests: run.subrequests, runtime_published: true };
-    // Pending metadata fits in the compact index; only completed logs need a body row.
-    if (status === 'queued' || status === 'running') {
-      const { expires_at, reserved_microdollars, attempt, key_id, enqueued } = run;
-      summary.pending = { expires_at, reserved_microdollars, attempt, key_id, enqueued };
-    }
+  /** Index a run; `parent` is a completed run finalized in the same transaction (a refused retry's). */
+  async history(run, finalized = false, settings = null, retry, parent) {
+    const summary = this.summarize(run, finalized, retry);
     const wake = summary.pending && !summary.pending.enqueued;
-    if (finalized || wake || settings) await this.storage.transaction(async tx => {
-      await tx.put(`history:${id}`, summary);
+    const final = parent ? this.summarize(parent, true) : null;
+    if (finalized || wake || settings || final) await this.storage.transaction(async tx => {
+      await tx.put(`history:${summary.id}`, summary);
+      if (final) await tx.put(`history:${final.id}`, final);
       if (settings) await tx.put('settings', settings);
       // Pending outboxes and budget pauses commit with their wakeups, so a failed
       // enqueue or restart cannot strand dispatch or the next budget window.
@@ -290,8 +312,20 @@ export class JobDO {
         if (alarm === null || alarm > next) await tx.setAlarm(next);
       }
     });
-    else await this.storage.put(`history:${id}`, summary);
-    if (this.historyCache) this.historyCache = [summary, ...this.historyCache.filter(r => r.id !== id)];
+    else await this.storage.put(`history:${summary.id}`, summary);
+    if (this.historyCache) this.historyCache = [summary, ...(final ? [final] : []), ...this.historyCache.filter(r => r.id !== summary.id && r.id !== final?.id)];
+  }
+  summarize(run, finalized = false, retry) {
+    const { id, job, status, created_at, trigger, scheduled_at, finished_at, cost_microdollars, http_status, reason } = run;
+    const summary = { id, job, status, created_at, trigger, scheduled_at, finished_at, cost_microdollars, http_status, reason };
+    if (retry) summary.retry = retry;
+    if (finalized) summary.settlement = { subrequests: run.subrequests, runtime_published: true };
+    // Pending metadata fits in the compact index; only completed logs need a body row.
+    if (status === 'queued' || status === 'running') {
+      const { expires_at, reserved_microdollars, attempt, key_id, enqueued } = run;
+      summary.pending = { expires_at, reserved_microdollars, attempt, key_id, enqueued };
+    }
+    return summary;
   }
   async publish(settings) {
     await rpc(this.env.ACCOUNTS, settings.account, 'job-runtime', { name: settings.name, runtime: this.runtime(settings) });

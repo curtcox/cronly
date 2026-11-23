@@ -7,7 +7,7 @@ export const COST_POLICY = Object.freeze({
   maxJobs: 100, newAccountMaxJobs: 10, concurrency: 10,
   destinationRequestsPerMinute: 60, projectionBrakeCents: 5000,
   // Includes redirects, test-job setup, alarms, pruning, refused retries and redelivery.
-  runRowWrites: 35, runDoRequests: 27, runWorkerRequests: 5,
+  runRowWrites: 33, runDoRequests: 27, runWorkerRequests: 5,
   // devicebasedauth.org (its docs/business/pricing.md): online decisions and OIDC sign-ins are
   // billed to cronly as the cronly.org audience owner, including denials.
   dbaDecision: 14, dbaLogin: 14,
