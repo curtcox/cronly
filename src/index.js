@@ -15,7 +15,7 @@ import { clerkWebhook } from './auth/clerk-webhook.js';
 import { checkout, stripeWebhook } from './api/payments.js';
 import { dbaLink } from './api/dba.js';
 import { dbaEvent } from './api/dba-events.js';
-import { authorizeDbaOnline } from './auth/dba-online.js';
+import { authorizeDba } from './auth/dba-online.js';
 import { dbaPreflight, withDbaCors } from './auth/dba-cors.js';
 import { explainCron } from './services/cron.js';
 import { PUBLIC, SESSION, ACCOUNT_SESSION, USER_SCOPES, canAccess } from './auth/scopes.js';
@@ -155,8 +155,8 @@ const worker = {
       assert(route, 'not_found', 'Not found', 404);
       if (route.handler === 'dba-events') { await dbaEvent(request, env); return new Response(null, { status: 204 }); }
       auth = route.access === PUBLIC ? null : await authenticate(request, env);
-      // A grant that only devicebasedauth.org can decide is asked about (and billed) first.
-      if (auth?.dba && !canAccess(auth, route.access)) cost += await authorizeDbaOnline(request, env, auth, route.access);
+      // Resource-scoped grants (job:<name>) and grants only devicebasedauth.org can decide (billed) come next.
+      if (auth?.dba && !canAccess(auth, route.access)) cost += await authorizeDba(request, env, auth, route);
       assert(canAccess(auth, route.access), 'insufficient_scope', 'Credential does not allow this operation', 403);
       if (route.handler === 'mcp') return mcp(request, env, auth, (path, method, body) => {
         const inner = new Request(new URL(path, request.url), { method, headers: { Authorization: request.headers.get('Authorization'), 'Content-Type': 'application/json', 'Idempotency-Key': request.headers.get('Idempotency-Key') || crypto.randomUUID() }, body: method === 'GET' ? undefined : JSON.stringify(body) });
@@ -170,7 +170,7 @@ const worker = {
       const data = await handle(route, request, env, auth);
       const balance = auth ? await rpc(env.ACCOUNTS, auth.account, 'account') : {};
       if (route.handler === 'runs' && new URL(request.url).searchParams.get('format') === 'ndjson') return new Response(data.items.map(item => JSON.stringify(item)).join('\n') + '\n', { headers: { 'content-type': 'application/x-ndjson', 'X-Next-Before': String(data.next_before || ''), 'X-Next-Cursor': data.next_cursor || '', 'X-Cost-Microdollars': String(cost), 'X-Balance-Microdollars': String(balance.balance_microdollars) } });
-      return Response.json({ cost_microdollars: cost, balance_microdollars: balance.balance_microdollars, ...data }, { headers: path.startsWith('/hook/') ? { 'Access-Control-Allow-Origin': '*' } : {} });
+      return Response.json({ balance_microdollars: balance.balance_microdollars, ...data, cost_microdollars: cost + (Number.isSafeInteger(data?.cost_microdollars) ? data.cost_microdollars : 0) }, { headers: path.startsWith('/hook/') ? { 'Access-Control-Allow-Origin': '*' } : {} });
     } catch (error) {
       let balance; if (auth) { try { balance = (await rpc(env.ACCOUNTS, auth.account, 'account')).balance_microdollars; } catch { /* Preserve the original failure. */ } }
       error.details = { cost_microdollars: cost, balance_microdollars: balance, ...error.details };

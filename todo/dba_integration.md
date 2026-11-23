@@ -40,8 +40,9 @@ or move the link (`POST`/`DELETE /api/keys`, DBA link start/finish/delete). `can
 
 Actions DBA must decide (step-up, gates, `limits.uses`, `require.online`, or a catalog entry
 that requires gates) are `dba.online_scopes`; a route that needs one asks DBA online
-(`src/auth/dba-online.js`). Grants restricted by `resources` are evaluated without a resource
-and so do not grant their scope (fail closed).
+(`src/auth/dba-online.js`). Grants restricted by `resources` grant nothing at authentication;
+routes acting on one job decide them again with resource `job:<name>` (`dbaResource`), offline
+first and online (with the resource) only when nothing cheaper allowed the route.
 
 ## Design
 
@@ -49,7 +50,7 @@ and so do not grant their scope (fail closed).
 |-------|-------|-------|
 | Verifier | `src/vendor/devicebasedauth/` | Unmodified copy of DBA `packages/verify/src` at `60aa3c3` (same as hashbin), pinned by SHA-256 (`src/vendor/devicebasedauth.test.js`). Never edit locally. |
 | Request auth | `src/auth/dba.js`, `src/auth/middleware.js` | One `createVerifier({ audience: 'cronly.org', catalog: true, replay, online })` per issuer/configuration at module scope, so JWKS, status lists and the catalog persist per isolate. `decide` sorts each `cronly:<scope>` into offline or online. DBA is tried before Clerk for `DBA …` and for `Bearer …` whose JWS header says `dba-access+jwt`. |
-| Online decisions | `src/auth/dba-online.js` | Holds `dba_decision` (key id = credential, 60 s TTL) before `verifyOnline`; settles in full when DBA decided (status < 500), else releases. Needs `DBA_API_KEY`. |
+| Online decisions, job resources | `src/auth/dba-online.js` | `authorizeDba` tries a grant restricted to the route's `job:<name>` offline (free) before any online decision. Holds `dba_decision` (key id = credential, 60 s TTL) before `verifyOnline`; settles in full when DBA decided (status < 500), else releases. Needs `DBA_API_KEY`. |
 | Replay | `DbaReplayCacheDO` (vendored `ReplayCacheDO`), binding `DBA_REPLAY` | 16 shards; each DPoP proof claimed once across isolates. |
 | Revocations | `DbaRevocationsDO`, binding `DBA_REVOCATIONS`; `src/api/dba-events.js` | `POST /api/dba/events` verifies the signed event, applies it to this isolate's verifier and records each status entry until the credential expires (recorded again on redelivery: an earlier write may have failed). Isolates re-read the set every 30 s. |
 | Link index | `DbaLinkDO`, binding `DBA_LINKS` | One object per DBA account: `{ account }`. Hot path of every DBA request, so per-DBA-account rather than a singleton; makes "one DBA account → at most one cronly account" an atomic claim. |
@@ -94,8 +95,8 @@ that keeps DBA reads and runs above the floor. Details: `docs/business/pricing.m
 
 ## Follow-ups
 
-- Honor resource-scoped grants (`job:<name>`) per route.
 - Stage B: let the web UI itself call the API with `dba.js` device sessions instead of Clerk.
-- Done since 2026-11-18: retries stop for revoked credentials; online authorization; device
-  sessions; webhook and shared replay cache; upstream fixes (OIDC caches only successful
-  responses, per-namespace caps now computed here, `inflate` bounds while streaming).
+- Done since 2026-11-18: resource-scoped grants (`job:<name>`, 2026-11-23); retries stop for
+  revoked credentials; online authorization; device sessions; webhook and shared replay cache;
+  upstream fixes (OIDC caches only successful responses, per-namespace caps now computed here,
+  `inflate` bounds while streaming).

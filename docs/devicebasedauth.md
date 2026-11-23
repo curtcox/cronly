@@ -27,8 +27,14 @@ device binding. Any other bearer token is still a Clerk session.
 
 - **Scopes.** Each `cronly:<scope>` action (`read`, `run`, `change`, `prose`, `secrets:write`)
   its grants allow right now (time windows, places, expiry, confirmation) is a scope it holds,
-  checked against `API_ROUTES` exactly like an API key's. Grants limited by `resources` grant
-  nothing yet (fail closed).
+  checked against `API_ROUTES` exactly like an API key's.
+- **Job resources.** A grant limited by `resources` (`["job:nightly-*"]`, `["job:backup"]`)
+  applies only to routes acting on one job, decided with that job as the resource:
+  `GET`/`PUT`/`DELETE /api/jobs/<name>`, `POST /api/jobs/<name>/run`, `pause`, `resume`,
+  `/api/jobs/<name>/triggers…`, and `GET /api/runs?job=<name>`. Everywhere else (the account,
+  unfiltered runs, actions, action tests, run details, MCP) it grants nothing. Its other
+  constraints still apply; one that needs DBA online is asked with the resource, and only after
+  a free offline grant and an unrestricted online one have had their turn.
 - **Device session.** `cronly:session` makes the credential a session: every scope, and the
   `SESSION` routes (key list, Checkout, link status). It never reaches `ACCOUNT_SESSION` routes,
   which mint credentials outliving the device or move the link: create or revoke API keys,

@@ -152,9 +152,13 @@ export async function authenticateDba(request, env) {
     device_name: typeof payload.device?.name === 'string' ? payload.device.name.slice(0, 64) : null,
     expires_at: payload.exp * 1000, monthly_spend_microdollars: monthlyCap(payload), status: { uri: status.uri, idx: status.idx }
   });
+  const dba = { account: payload.acct, device_id: payload.sub, credential_id: payload.cid, kind: auth.kind, online_scopes: session ? [] : online };
+  // Grants restricted to `resources` were decided above without one, so they granted nothing.
+  // A route acting on one job decides them again with its resource (src/auth/dba-online.js).
+  // Non-enumerable, so forwarded MCP identities and serialized copies drop it and fail closed.
+  if (!session) Object.defineProperty(dba, 'decide', { value: (scope, resource) => verifier.decide(payload, { action: `${DBA_NAMESPACE}:${scope}`, resource }, { request, proof, confirmation }) });
   return {
     account, key_id: payload.cid, scopes: session ? [...USER_SCOPES] : offline.filter(scope => scope !== 'session'),
-    session, ...(session ? { device_session: true } : {}),
-    dba: { account: payload.acct, device_id: payload.sub, credential_id: payload.cid, kind: auth.kind, online_scopes: session ? [] : online }
+    session, ...(session ? { device_session: true } : {}), dba
   };
 }
