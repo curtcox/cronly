@@ -165,7 +165,7 @@ const worker = {
       });
       if (auth) await rpc(env.ACCOUNTS, auth.account, 'rate-limit', { id: 'api', limit: 120 });
       if (auth?.key_id && request.method === 'GET') {
-        const metered = await rpc(env.ACCOUNTS, auth.account, 'meter-read', { id: `read:${crypto.randomUUID()}`, key_id: auth.key_id, resource: route.handler === 'runs' ? 'runs' : null, job: new URL(request.url).searchParams.get('job'), ...(auth.dba ? { dba: true } : {}) }); cost += metered.cost_microdollars; auth.read_names = metered.names;
+        const metered = await rpc(env.ACCOUNTS, auth.account, 'meter-read', { id: `read:${crypto.randomUUID()}`, key_id: auth.key_id, resource: route.handler === 'runs' ? 'runs' : null, job: new URL(request.url).searchParams.get('job'), ...(auth.dba ? { dba: auth.dba.verifications || true } : {}) }); cost += metered.cost_microdollars; auth.read_names = metered.names;
       }
       const data = await handle(route, request, env, auth);
       const balance = auth ? await rpc(env.ACCOUNTS, auth.account, 'account') : {};

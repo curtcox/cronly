@@ -20,7 +20,8 @@ export function dbaPreflight(request, path) {
 export function withDbaCors(request, path, response) {
   if (isDbaPath(path) && /^dba /i.test((request.headers.get('Authorization') || '').trim())) {
     response.headers.set('Access-Control-Allow-Origin', '*');
-    response.headers.set('Access-Control-Expose-Headers', 'X-Next-Before');
+    // DPoP-Nonce and WWW-Authenticate carry timed challenges (net.client.latency).
+    response.headers.set('Access-Control-Expose-Headers', 'X-Next-Before, DPoP-Nonce, WWW-Authenticate');
   }
   return response;
 }

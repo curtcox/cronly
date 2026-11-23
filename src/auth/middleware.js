@@ -8,9 +8,10 @@ import { authenticateDba } from './dba.js';
 const forwarded = new WeakMap();
 /**
  * Let an internal sub-request reuse its parent's verified identity (DPoP proofs are single use).
- * It gets no online devicebasedauth.org decisions: the parent's proof names the parent's URL.
+ * It gets no online devicebasedauth.org decisions (the parent's proof names the parent's URL) and
+ * pays one verification per call: the parent answered any timed challenges.
  */
-export function forwardAuth(request, auth) { forwarded.set(request, { ...auth, ...(auth.dba ? { dba: { ...auth.dba, online_scopes: [] } } : {}) }); return request; }
+export function forwardAuth(request, auth) { forwarded.set(request, { ...auth, ...(auth.dba ? { dba: { ...auth.dba, online_scopes: [], verifications: 1 } } : {}) }); return request; }
 /** Authenticate local, Clerk, devicebasedauth.org and signed self-routing API credentials (hashbin pattern). */
 export async function authenticate(request, env) {
   if (forwarded.has(request)) return forwarded.get(request);

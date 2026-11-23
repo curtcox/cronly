@@ -15,7 +15,14 @@ import { price } from '../utils/pricing.js';
 
 /** The scope a route needs that this credential could get only online, or null. */
 export function onlineScopeFor(auth, access) {
-  const online = auth?.dba?.online_scopes || [];
+  return neededScope(auth, access, auth?.dba?.online_scopes || []);
+}
+/** The scope a route needs that a timed DPoP challenge (`net.client.latency`) could open, or null. */
+export function timedScopeFor(auth, access) {
+  return neededScope(auth, access, auth?.dba?.timed_scopes || []);
+}
+/** The scope in `online` (scopes the credential could still get) that would open this route. */
+function neededScope(auth, access, online) {
   if (!online.length || access === PUBLIC) return null;
   // ACCOUNT_SESSION never accepts a device session, so asking DBA for one would be wasted.
   if (access === ACCOUNT_SESSION) return null;
@@ -50,6 +57,8 @@ export async function authorizeDba(request, env, auth, route) {
   const decisions = scopes.map(scope => ({ scope, ...auth.dba.decide(scope, resource) }));
   const offline = decisions.find(decision => decision.allow);
   if (offline) { auth.scopes = [...auth.scopes, offline.scope]; return 0; }
+  // A timed challenge is free to answer, so it goes before any billed online decision.
+  if (timedScopeFor(auth, route.access)) await challengeRtt(auth);
   if (onlineScopeFor(auth, route.access)) return authorizeDbaOnline(request, env, auth, route.access);
   const online = decisions.find(decision => decision.online_required);
   if (!online) return 0;
@@ -72,6 +81,18 @@ export async function authorizeDbaOnline(request, env, auth, access) {
   else auth.scopes = [...auth.scopes, scope];
   auth.dba.online_scopes = [];
   return charged;
+}
+
+/**
+ * Answer with a timed DPoP nonce (RFC 9449 §8, DBA B10 N2): the device retries at once with a
+ * proof carrying it, and cronly takes the round trip as its latency. DBA's CLI and browser SDK
+ * do this by themselves. Each answered challenge adds one `dbaRequest` to the request that passes.
+ */
+async function challengeRtt(auth) {
+  const nonce = await auth.dba.challenge();
+  const error = new ApiError(401, 'use_dpop_nonce', 'This devicebasedauth.org grant limits round-trip time; retry at once with a DPoP proof carrying the DPoP-Nonce', { dpop_nonce: nonce });
+  error.headers = { 'WWW-Authenticate': 'DPoP error="use_dpop_nonce", algs="ES256"', 'DPoP-Nonce': nonce };
+  throw error;
 }
 
 /** One billed online decision of `scope` (on `resource`, if any); returns the µ$ charged on an allow, else throws. */

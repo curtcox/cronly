@@ -177,7 +177,7 @@ it('adds any-origin CORS for device credentials only', async () => {
 
   const device = await dba.device({ acct: 'dba_alice', grants: grants('read') });
   const ok = await send(device, 'GET', '/api/account');
-  expect([ok.headers.get('Access-Control-Allow-Origin'), ok.headers.get('Access-Control-Expose-Headers')]).toEqual(['*', 'X-Next-Before']);
+  expect([ok.headers.get('Access-Control-Allow-Origin'), ok.headers.get('Access-Control-Expose-Headers')]).toEqual(['*', 'X-Next-Before, DPoP-Nonce, WWW-Authenticate']);
   expect((await send(device, 'PUT', '/api/variables/region', { body: { value: 'us' } })).headers.get('Access-Control-Allow-Origin')).toBe('*');
   // Bearer access tokens are exportable, so they get no CORS.
   const { token } = await dba.accessToken({ acct: 'dba_alice', grants: grants('read') });

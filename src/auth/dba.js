@@ -10,9 +10,11 @@
  * DBA pushes to the webhook (DBA_REVOCATIONS) apply within 30 seconds.
  */
 import { createOidcClient } from '../vendor/devicebasedauth/site.js';
-import { createVerifier, credentialFromRequest } from '../vendor/devicebasedauth/verifier.js';
+import { createVerifier, credentialFromRequest, networkLocation } from '../vendor/devicebasedauth/verifier.js';
 import { durableReplayCache } from '../vendor/devicebasedauth/replay-do.js';
 import { createDohResolver, grantDnsNames } from '../vendor/devicebasedauth/dns.js';
+import { createRttChallenger, rttChallengeNeeded } from '../vendor/devicebasedauth/rtt.js';
+import { DBA_MAX_VERIFICATIONS } from '../utils/cost-policy.js';
 import { USER_SCOPES } from './scopes.js';
 import { assert } from '../utils/errors.js';
 import { rpc } from '../utils/rpc.js';
@@ -50,6 +52,9 @@ const fetcher = (...args) => globalThis.fetch(...args);
 const verifiers = new Map();
 const oidcClients = new Map();
 const resolvers = new Map();
+const challengers = new Map();
+// Passing round trips a grant's latency.reuse_s lets us remember: "jkt peer" -> { rtt_ms, until (ms) }.
+const rttReuse = new Map(); const RTT_REUSE_MAX = 10000;
 
 /**
  * The shared verifier for this deployment's issuer. The catalog is DBA's cronly.org record, so
@@ -81,6 +86,47 @@ async function resolvedNames(env, payload) {
   const issuer = issuerOf(env);
   if (!resolvers.has(issuer)) resolvers.set(issuer, createDohResolver({ fetch: fetcher }));
   return { dns: await resolvers.get(issuer).resolveAll(names) };
+}
+
+/**
+ * The timed-nonce challenger for `net.client.latency`, or null when DBA_RTT_SECRET (at least 32
+ * characters, the same in every isolate, since a device's retry may land anywhere) is not set.
+ * Without it latency rules are never measured, so grants with them refuse.
+ */
+function rttChallenger(env) {
+  const secret = env.DBA_RTT_SECRET;
+  if (typeof secret !== 'string' || secret.length < 32) return null;
+  if (!challengers.has(secret)) challengers.set(secret, createRttChallenger({ secret }));
+  return challengers.get(secret);
+}
+
+/**
+ * Time the device's round trip from the timed DPoP nonce its proof answers (DBA B10 N2): the
+ * nonce is HMAC-sealed to its key and peer address, so only our own recent challenge counts. A
+ * passing measurement a grant allows reusing (`latency.reuse_s`) stands in for later requests
+ * from the same key and address. Returns { rtt, network (with rtt_ms when measured), fresh,
+ * rounds (challenges answered), bind, reuseKey }, or null without a challenger or device key.
+ */
+async function timing(env, auth, request) {
+  const rtt = auth.kind === 'device' ? rttChallenger(env) : null;
+  if (!rtt) return null;
+  const network = networkLocation(request) ?? {};
+  const bind = { jkt: auth.payload.cnf.jkt, peer: network.ip };
+  const reuseKey = `${bind.jkt} ${bind.peer ?? ''}`; const remembered = rttReuse.get(reuseKey);
+  if (remembered && remembered.until <= Date.now()) rttReuse.delete(reuseKey);
+  const fresh = await rtt.check(auth.proof?.nonce, bind);
+  const measured = fresh ?? (remembered && remembered.until > Date.now() ? { rtt_ms: remembered.rtt_ms } : null);
+  // Each challenge this request answered was a refused request verified like this one.
+  const rounds = fresh ? Math.min(fresh.samples, DBA_MAX_VERIFICATIONS - 1) : 0;
+  return { rtt, network: measured ? { ...network, rtt_ms: measured.rtt_ms } : network, fresh, rounds, bind, reuseKey };
+}
+
+/** Remember a passing fresh measurement for as long as the grant that used it allows. */
+function rememberRtt(timed, decision) {
+  const reuse = decision.grant?.net?.client?.latency?.reuse_s ?? 0;
+  if (!timed?.fresh || reuse <= 0) return;
+  if (rttReuse.size >= RTT_REUSE_MAX) rttReuse.delete(rttReuse.keys().next().value);
+  rttReuse.set(timed.reuseKey, { rtt_ms: timed.fresh.rtt_ms, until: Date.now() + reuse * 1000 });
 }
 
 /** OIDC client for linking a cronly account to a DBA account (authorization code + PKCE). */
@@ -161,12 +207,15 @@ export async function authenticateDba(request, env) {
   const account = env.DBA_LINKS ? (await rpc(env.DBA_LINKS, payload.acct, 'get')).account : null;
   assert(account, 'account_not_linked', ...notLinked);
   // `net.client` address rules: CIDRs match CF-Connecting-IP inside decide; DNS names are
-  // looked up first. Latency rules are not measured here, so such grants deny (rtt_required).
+  // looked up first. Latency rules use the round trip a timed DPoP nonce measured (if any).
   const context = { request, proof, confirmation, resolved: await resolvedNames(env, payload) };
-  const offline = []; const online = [];
+  const timed = await timing(env, auth, request);
+  const location = timed ? { network: timed.network } : undefined;
+  const offline = []; const online = []; const challenges = {};
   for (const scope of DBA_SCOPES) {
-    const decision = verifier.decide(payload, { action: `${DBA_NAMESPACE}:${scope}` }, context);
-    if (decision.allow) offline.push(scope); else if (decision.online_required) online.push(scope);
+    const decision = verifier.decide(payload, { action: `${DBA_NAMESPACE}:${scope}`, location }, context);
+    if (decision.allow) { offline.push(scope); rememberRtt(timed, decision); } else if (decision.online_required) online.push(scope);
+    else if (timed) { const needed = rttChallengeNeeded(payload.grants, decision.reasons, timed.fresh); if (needed) challenges[scope] = needed; }
   }
   const session = offline.includes('session');
   await rpc(env.ACCOUNTS, account, 'dba-authenticate', {
@@ -174,11 +223,17 @@ export async function authenticateDba(request, env) {
     device_name: typeof payload.device?.name === 'string' ? payload.device.name.slice(0, 64) : null,
     expires_at: payload.exp * 1000, monthly_spend_microdollars: monthlyCap(payload), status: { uri: status.uri, idx: status.idx }
   });
-  const dba = { account: payload.acct, device_id: payload.sub, credential_id: payload.cid, kind: auth.kind, online_scopes: session ? [] : online };
+  const dba = { account: payload.acct, device_id: payload.sub, credential_id: payload.cid, kind: auth.kind, online_scopes: session ? [] : online, ...(timed?.rounds ? { verifications: 1 + timed.rounds } : {}) };
+  // Scopes a timed challenge could still open; the route that needs one answers with it.
+  const timedScopes = session ? [] : Object.keys(challenges);
+  if (timedScopes.length) {
+    Object.defineProperty(dba, 'timed_scopes', { value: timedScopes });
+    Object.defineProperty(dba, 'challenge', { value: () => timed.rtt.issue({ ...timed.bind, samples: timed.fresh?.samples ?? 0, best_ms: timed.fresh?.rtt_ms }) });
+  }
   // Grants restricted to `resources` were decided above without one, so they granted nothing.
   // A route acting on one job decides them again with its resource (src/auth/dba-online.js).
   // Non-enumerable, so forwarded MCP identities and serialized copies drop it and fail closed.
-  if (!session) Object.defineProperty(dba, 'decide', { value: (scope, resource) => verifier.decide(payload, { action: `${DBA_NAMESPACE}:${scope}`, resource }, context) });
+  if (!session) Object.defineProperty(dba, 'decide', { value: (scope, resource) => verifier.decide(payload, { action: `${DBA_NAMESPACE}:${scope}`, resource, location }, context) });
   return {
     account, key_id: payload.cid, scopes: session ? [...USER_SCOPES] : offline.filter(scope => scope !== 'session'),
     session, ...(session ? { device_session: true } : {}), dba

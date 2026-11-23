@@ -53,6 +53,13 @@ query per name, at most 16 names, cached per isolate for 30–300 s). Workers su
 no per-request charge and parsing the answers is well under a millisecond of CPU, so they stay
 inside the CPU allowance of `dbaVerification`; DBA prices DNS checks as free (its D17).
 
+Grants with `net.client.latency` are timed by challenging the device: each challenge is a refused
+request verified like any other, so the request that finally passes carries one `dbaRequest` per
+challenge it answered (counted by the sealed nonce, at most 5: `DBA_MAX_VERIFICATIONS` is 6). A
+read after one challenge is 35 µ$ (bound 1.5 × 20 / 0.92 = 32.6) and passes the floor at every
+count; changes (100 µ$ vs. 41.84 µ$ at six verifications) and prose absorb it. Challenges a device
+abandons are unpaid, like any refused request.
+
 DBA bills cronly.org 14 µ$ for each online decision (including denials) and each OIDC
 sign-in. The owner chose to pass both on (2026-11-22): `dba_decision` (56 µ$) is held under the
 credential's monthly cap before DBA is asked, charged once DBA answers and released when it

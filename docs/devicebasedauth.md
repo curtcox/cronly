@@ -39,9 +39,17 @@ device binding. Any other bearer token is still a Clerk session.
   address Cloudflare reports (`CF-Connecting-IP`): `cidrs` directly, and `dns` names after
   cronly resolves them over DNS-over-HTTPS (1.1.1.1, cached 30–300 s per isolate; `dnssec: true`
   needs a validated answer). A name that does not resolve matches nothing. Named address lists
-  are not published by DBA yet, so they match nothing either. Latency rules are not measured
-  (no timed DPoP challenges yet) and route rules need relays, so grants with either are refused
-  offline. `net.server` is the device's own check of cronly and is ignored here.
+  are not published by DBA yet, so they match nothing either. **Latency** rules (`max_rtt_ms`,
+  `samples`, `reuse_s`) are timed with a challenge: when a route needs a scope only such a grant
+  could allow, cronly answers `401 use_dpop_nonce` with a `DPoP-Nonce` header (also in the body
+  as `dpop_nonce`), and the device retries at once with a proof carrying it; the round trip is
+  the measured latency. DBA's CLI and browser SDK answer by themselves. A nonce is good for 10
+  seconds, only for the key and address it was sent to; `samples` allows that many tries, the
+  best counting; a pass is reused for `reuse_s` seconds from the same key and address. Each
+  challenge answered adds one `dbaRequest` to the read or run that finally passes; abandoned
+  challenges cost nothing. Grants scoped to `resources`, and grants that also need DBA online,
+  are not challenged. Route rules need relays, so they are refused. `net.server` is the
+  device's own check of cronly and is ignored here.
 - **Device session.** `cronly:session` makes the credential a session: every scope, and the
   `SESSION` routes (key list, Checkout, link status). It never reaches `ACCOUNT_SESSION` routes,
   which mint credentials outliving the device or move the link: create or revoke API keys,
@@ -113,11 +121,13 @@ account's own sign-in only.
 | `account_not_linked` | 403 | The credential's DBA account (`dba_account`) is not linked |
 | `jwks_unavailable`, `status_unavailable`, `catalog_unavailable`, `dba_unavailable` | 503 | DBA could not be reached; nothing was charged for verification |
 | `gate_pending`, `dba_denied`, `online_required` | 403 | See "Grants that need DBA online" |
+| `use_dpop_nonce` | 401 | A latency rule needs a timed retry: resend at once with a proof carrying `DPoP-Nonce` |
 
 ## Prices
 
 See [`docs/business/pricing.md`](business/pricing.md): reads and first-attempt runs by a DBA
-caller add `dbaRequest` (7 µ$) for verifying the credential; an online decision is `dbaDecision`
+caller add `dbaRequest` (7 µ$) for verifying the credential, once more per timed challenge
+answered (at most 5); an online decision is `dbaDecision`
 (56 µ$); starting a link is a change (100 µ$).
 
 ## Operating it
@@ -126,6 +136,8 @@ caller add `dbaRequest` (7 µ$) for verifying the credential; an online decision
   mode also accepts `http://localhost…`.
 - `DBA_API_KEY` (secret, optional, pushed by CI): a DBA API key of the cronly.org audience owner,
   for online decisions. Without it, online-only grants answer `online_required`.
+- `DBA_RTT_SECRET` (secret, optional, pushed by CI): at least 32 random characters, sealing timed
+  DPoP nonces for latency rules. Without it, grants with `net.client.latency` are refused.
 - At DBA, as the cronly.org audience owner: register `https://cronly.org/auth/dba/callback` for
   client `cronly.org`, and set the revocation webhook to `https://cronly.org/api/dba/events`
   (`PATCH /api/v1/audiences/cronly.org` with `{"revocation_webhook": …}`; test it with

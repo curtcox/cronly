@@ -33,6 +33,7 @@ jobs:
       JS_LIVE_ACCEPTED: ${{ vars.CRONLY_JS_LIVE_ACCEPTED }}
       ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
       DBA_API_KEY: ${{ secrets.DBA_API_KEY }}
+      DBA_RTT_SECRET: ${{ secrets.DBA_RTT_SECRET }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

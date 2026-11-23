@@ -52,7 +52,7 @@ export async function fakeDbaIssuer() {
         credential, payload, publicJwk, privateKey: keys.privateKey,
         /** Authorization headers for one request (a fresh single-use proof each call). */
         async headers(method, url, overrides = {}) {
-          return { Authorization: `DBA ${credential}`, DPoP: await createProof({ privateKey: overrides.privateKey || keys.privateKey, publicJwk: overrides.publicJwk || publicJwk, method: overrides.method || method, url: overrides.url || url, credential }) };
+          return { Authorization: `DBA ${credential}`, DPoP: await createProof({ privateKey: overrides.privateKey || keys.privateKey, publicJwk: overrides.publicJwk || publicJwk, method: overrides.method || method, url: overrides.url || url, credential, nonce: overrides.nonce }) };
         }
       };
     },

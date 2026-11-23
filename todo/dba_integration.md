@@ -49,7 +49,7 @@ first and online (with the resource) only when nothing cheaper allowed the route
 | Piece | Where | Notes |
 |-------|-------|-------|
 | Verifier | `src/vendor/devicebasedauth/` | Unmodified copy of DBA `packages/verify/src` at `829d033` (hashbin: `60aa3c3`), pinned by SHA-256 (`src/vendor/devicebasedauth.test.js`). Never edit locally. |
-| Network rules | `src/auth/dba.js` | `net.client` addresses: CIDRs against `CF-Connecting-IP` inside `decide`; `dns` names of `cronly:` grants resolved first (`createDohResolver`, per issuer, per isolate) and passed as `resolved`. Latency and route rules are not measured, so they refuse. |
+| Network rules | `src/auth/dba.js` | `net.client` addresses: CIDRs against `CF-Connecting-IP` inside `decide`; `dns` names of `cronly:` grants resolved first (`createDohResolver`, per issuer, per isolate) and passed as `resolved`. Latency: `DBA_RTT_SECRET` seals timed DPoP nonces (vendored `rtt.js`); `authorizeDba` answers `401 use_dpop_nonce` only when the route needs a scope a timed grant could allow, and the passing request pays one `dbaRequest` per challenge (`dba` holds a verification count). Route rules refuse. |
 | Request auth | `src/auth/dba.js`, `src/auth/middleware.js` | One `createVerifier({ audience: 'cronly.org', catalog: true, replay, online })` per issuer/configuration at module scope, so JWKS, status lists and the catalog persist per isolate. `decide` sorts each `cronly:<scope>` into offline or online. DBA is tried before Clerk for `DBA …` and for `Bearer …` whose JWS header says `dba-access+jwt`. |
 | Online decisions, job resources | `src/auth/dba-online.js` | `authorizeDba` tries a grant restricted to the route's `job:<name>` offline (free) before any online decision. Holds `dba_decision` (key id = credential, 60 s TTL) before `verifyOnline`; settles in full when DBA decided (status < 500), else releases. Needs `DBA_API_KEY`. |
 | Replay | `DbaReplayCacheDO` (vendored `ReplayCacheDO`), binding `DBA_REPLAY` | 16 shards; each DPoP proof claimed once across isolates. |
@@ -83,27 +83,28 @@ that keeps DBA reads and runs above the floor. Details: `docs/business/pricing.m
 3. At devicebasedauth.org, as the cronly.org audience owner: confirm audience `cronly.org`,
    namespace `cronly`, redirect URI `https://cronly.org/auth/dba/callback`; set the revocation
    webhook to `https://cronly.org/api/dba/events` and send a test event.
-4. Fund the cronly operator account at DBA (link sign-ins and online decisions are billed).
-5. Optional: create a DBA API key for the cronly.org audience and set the `DBA_API_KEY` GitHub
+4. Optional: set the `DBA_RTT_SECRET` GitHub secret (`openssl rand -hex 32`; CI pushes it) so
+   grants with latency rules can be timed; without it they are refused.
+5. Fund the cronly operator account at DBA (link sign-ins and online decisions are billed).
+6. Optional: create a DBA API key for the cronly.org audience and set the `DBA_API_KEY` GitHub
    secret (CI pushes it) to enable online-only grants; without it they answer `online_required`.
-6. Optional "Stage A" sign-in: register devicebasedauth.org as a custom OIDC provider in the
+7. Optional "Stage A" sign-in: register devicebasedauth.org as a custom OIDC provider in the
    cronly Clerk application (discovery `https://devicebasedauth.org/.well-known/openid-configuration`,
    client `cronly.org`, PKCE, scopes `openid profile`). The result is an ordinary Clerk session;
    it needs a Clerk plan with custom providers (DBA decision D7).
-7. Live acceptance: link a real DBA account (100 µ$), `dba enroll --aud cronly.org --action
+8. Live acceptance: link a real DBA account (100 µ$), `dba enroll --aud cronly.org --action
    cronly:read`, `dba curl https://cronly.org/api/account` and check the 28 µ$ read; revoke the
    device at DBA and confirm 401 within 30 seconds (webhook) or a minute (status list).
 
 ## Follow-ups
 
 - Stage B: let the web UI itself call the API with `dba.js` device sessions instead of Clerk.
-- Timed DPoP challenges for `net.client.latency` (DBA B10 N2): needs an RTT secret shared by
-  every isolate, and a `401 use_dpop_nonce` + `DPoP-Nonce` answer from the route that needs a
-  latency-ruled scope (not from authentication, or every request would pay a round trip).
+- Timed challenges for grants scoped to `resources` and for latency grants DBA decides online
+  (verifyOnline sends no `rtt_ms`); both are refused today.
 - Named address lists (DBA B10 N3) and relay routes: refresh the vendored verifier once DBA ships
   them, and pass `address_lists` / `route` into `decide`.
 - Done since 2026-11-18: verifier refreshed to `829d033` with `net.client` address rules (CIDR and
-  DNS, 2026-11-23); resource-scoped grants (`job:<name>`, 2026-11-23); retries stop for
+  DNS, and latency by timed DPoP challenges, 2026-11-23); resource-scoped grants (`job:<name>`, 2026-11-23); retries stop for
   revoked credentials; online authorization; device sessions; webhook and shared replay cache;
   upstream fixes (OIDC caches only successful responses, per-namespace caps now computed here,
   `inflate` bounds while streaming).

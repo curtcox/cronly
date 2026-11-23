@@ -85,7 +85,7 @@ async function settleReservation(tx, hold, actual, now, immediate = false) {
       if (value) budget_spent[kind] = { ...budget_spent[kind], [value]: await budgetSpent(tx, metric, kind, value, period) + amount };
     }
     const operation = hold.kind === 'run' && hold.execution?.trigger === 'webhook' ? 'hook' : hold.kind;
-    const estimate = hold.kind === 'prose' ? Math.max(0, (amount - PRICES.proseBase) / PRICES.proseMarkup) : worstCaseCost(operation, hold.execution?.action || { job_count: hold.read_job_count || 0 }, { dba: hold.dba === true }) - (hold.execution?.action?.type === 'javascript' && maximum < hold.amount ? COST_POLICY.dynamicWorkerDay : 0);
+    const estimate = hold.kind === 'prose' ? Math.max(0, (amount - PRICES.proseBase) / PRICES.proseMarkup) : worstCaseCost(operation, hold.execution?.action || { job_count: hold.read_job_count || 0 }, { dba: hold.dba }) - (hold.execution?.action?.type === 'javascript' && maximum < hold.amount ? COST_POLICY.dynamicWorkerDay : 0);
     const jobGroup = hold.job || hold.kind || 'other'; const actionGroup = hold.action || hold.kind || 'other';
     const by_job = { ...metric.by_job, [jobGroup]: (ownValue(metric.by_job, jobGroup) ?? 0) + amount };
     const by_action = { ...metric.by_action, [actionGroup]: (ownValue(metric.by_action, actionGroup) ?? 0) + amount };

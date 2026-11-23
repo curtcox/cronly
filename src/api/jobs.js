@@ -2,7 +2,8 @@ import { rpc } from '../utils/rpc.js';
 import { assert, readJson } from '../utils/errors.js';
 import { validateRunInput } from '../services/run-input.js';
 // A devicebasedauth.org caller's first attempt also pays for verifying its credential (pricing.js).
-const dbaRun = auth => auth.dba ? { dba: true } : {};
+// The verifications a DBA request paid for: 1, or more after answering timed challenges.
+const dbaRun = auth => auth.dba ? { dba: auth.dba.verifications || true } : {};
 /** On-demand runs use the same JobDO reservation path as scheduled runs. */
 export async function runJob(route, request, env, auth) {
   const name = route.params.name; const config = await rpc(env.ACCOUNTS, auth.account, 'config');

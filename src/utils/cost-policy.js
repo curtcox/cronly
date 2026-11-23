@@ -22,11 +22,25 @@ export function grossUp(creditCents) {
   return Math.ceil((creditCents + COST_POLICY.stripeFixedCents) / (1 - COST_POLICY.stripeRate));
 }
 /**
+ * A request answering timed DPoP challenges (`net.client.latency`) was verified once per
+ * challenge it answered and once more: at most 1 + DBA's 5 samples (its NET_LIMITS.samples).
+ */
+export const DBA_MAX_VERIFICATIONS = 6;
+/**
+ * How many devicebasedauth.org verifications a request carries: `true` is one (a plain DBA
+ * request), a positive integer is that many (capped), anything else none.
+ */
+export function dbaVerifications(dba) {
+  if (dba === true) return 1;
+  return Number.isSafeInteger(dba) && dba > 0 ? Math.min(dba, DBA_MAX_VERIFICATIONS) : 0;
+}
+/**
  * Conservative bounds; queue retries and bookkeeping have explicit allowances. `dba` adds the
- * cost of verifying a devicebasedauth.org credential on the request that started the work.
+ * cost of verifying a devicebasedauth.org credential (once per `dbaVerifications`) on the
+ * request that started the work.
  */
 export function worstCaseCost(op, action = {}, { dba = false } = {}) {
-  return operationCost(op, action) + (dba ? COST_POLICY.dbaVerification : 0);
+  return operationCost(op, action) + dbaVerifications(dba) * COST_POLICY.dbaVerification;
 }
 function operationCost(op, action) {
   const c = COST_POLICY;

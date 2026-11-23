@@ -27,6 +27,8 @@ DBA_ISSUER = "https://devicebasedauth.org"
 # Optional: CLOUDFLARE_ANALYTICS_TOKEN, CLOUDFLARE_ACCOUNT_ID, ALERT_WEBHOOK_URL
 # Optional: DBA_API_KEY (a cronly.org audience-owner key at devicebasedauth.org) enables online
 # decisions for gated, step-up, use-limited and require.online grants; without it they answer 403.
+# Optional: DBA_RTT_SECRET (32+ random characters) times DPoP challenges for DBA latency rules;
+# without it grants with net.client.latency are refused.
 # LAUNCH_APPROVED=true only after Terms/Privacy and invite-only setup are approved.
 # Required for live runs: COST_SAFETY_DO_NAMESPACES (comma-separated cronly namespace IDs).
 # JS_ACCEPTANCE_ACCOUNT allows the owner to perform live acceptance; JS_LIVE_ACCEPTED=true unlocks JS after acceptance.

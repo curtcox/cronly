@@ -4,6 +4,7 @@ import { prepareRun, claimRun } from './runs.js';
 import { loadConfig, mutate, keyBudget, putConfig, toggleJob } from './definitions.js';
 import { rpc } from '../utils/rpc.js';
 import { price } from '../utils/pricing.js';
+import { dbaVerifications } from '../utils/cost-policy.js';
 import { parseScopes } from '../auth/scopes.js';
 import { funds, reserve, settle, deposit, charge } from './ledger.js';
 import { beginSecretRotation, finishSecretRotation } from './secret-rotation.js';
@@ -144,7 +145,7 @@ export class AccountDO {
       case 'run-route': { const hold = await getHold(tx, args.id) || await tx.get(`receipt:${args.id}`); if (hold?.job) return { job: hold.job }; const profile = await tx.get('profile'); const prefix = `${profile.id}:`; assert(args.id.startsWith(prefix), 'not_found', 'Run not found', 404); const parts = args.id.slice(prefix.length).split(':'); const name = parts[0] === '_test' ? parts.slice(0, 2).join(':') : parts[0]; assert(await tx.get(`job-index:${name}`), 'not_found', 'Run not found', 404); return { job: name }; }
       case 'meter-read': {
         const names = args.resource === 'runs' ? (args.job ? [args.job] : (await runActivity(tx)).map(([name]) => name)) : [];
-        const receipt = await charge(tx, { id: args.id, amount: price('read', { job_count: names.length }, { dba: args.dba === true }), read_job_count: names.length, kind: 'read', ...(args.dba === true ? { dba: true } : {}), ...await keyBudget(tx, args.key_id) });
+        const receipt = await charge(tx, { id: args.id, amount: price('read', { job_count: names.length }, { dba: args.dba }), read_job_count: names.length, kind: 'read', ...(dbaVerifications(args.dba) ? { dba: args.dba } : {}), ...await keyBudget(tx, args.key_id) });
         return { cost_microdollars: receipt.charged, names };
       }
       case 'rate-limit': {

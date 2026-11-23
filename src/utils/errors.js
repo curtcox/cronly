@@ -8,9 +8,10 @@ export class ApiError extends Error {
 export function assert(condition, code, message, status = 400, details) {
   if (!condition) throw new ApiError(status, code, message, details);
 }
-/** Serialize only explicitly public error messages. */
+/** Serialize only explicitly public error messages (and an ApiError's own response headers). */
 export function errorResponse(error) {
-  return Response.json({ error: error instanceof ApiError ? error.message : 'Internal error', code: error.code || 'internal_error', ...(error.details || {}) }, { status: error.status || 500 });
+  const headers = error instanceof ApiError && error.headers ? error.headers : {};
+  return Response.json({ error: error instanceof ApiError ? error.message : 'Internal error', code: error.code || 'internal_error', ...(error.details || {}) }, { status: error.status || 500, headers });
 }
 /** Read bounded UTF-8, including chunked webhook requests. */
 export async function readText(request, maxBytes = 300000) {

@@ -5,7 +5,7 @@ import { reserve } from './ledger.js';
 import { keyBudget } from './definitions.js';
 import { references } from '../executor/templates.js';
 import { price } from '../utils/pricing.js';
-import { COST_POLICY } from '../utils/cost-policy.js';
+import { COST_POLICY, dbaVerifications } from '../utils/cost-policy.js';
 import { getHold, listHolds, putHold } from './hold-storage.js';
 import { runActivity, lastRun } from './run-activity.js';
 import { validateRunInput } from '../services/run-input.js';
@@ -45,8 +45,9 @@ export async function prepareRun(tx, args, env = {}) {
       if (type === 'input') assert(Object.hasOwn(args.input, name), 'missing_input', `Missing webhook input: ${name}`);
     }
   }
-  // A run started by a devicebasedauth.org credential also pays for verifying it; retries do not.
-  const dba = args.dba === true && !args.retry && args.trigger === 'manual';
+  // A run started by a devicebasedauth.org credential also pays for verifying it (and for the
+  // timed challenges it answered first); retries do not.
+  const dba = dbaVerifications(args.dba) && !args.retry && args.trigger === 'manual' ? args.dba : false;
   const amount = price(args.trigger === 'webhook' ? 'hook' : 'run', action, { dba });
   if (args.dry_run) return { quote_microdollars: amount, cost_microdollars: 0 };
   // This permanent index routes retained test logs, including after action
