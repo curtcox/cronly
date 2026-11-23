@@ -16,6 +16,7 @@ import { checkout, stripeWebhook } from './api/payments.js';
 import { dbaLink } from './api/dba.js';
 import { dbaEvent } from './api/dba-events.js';
 import { authorizeDba } from './auth/dba-online.js';
+import { dbaIssuer } from './auth/dba.js';
 import { dbaPreflight, withDbaCors } from './auth/dba-cors.js';
 import { explainCron } from './services/cron.js';
 import { PUBLIC, SESSION, ACCOUNT_SESSION, USER_SCOPES, canAccess } from './auth/scopes.js';
@@ -104,7 +105,7 @@ async function handle(route, request, env, auth) {
     case 'audit': return rpc(env.ACCOUNTS, auth.account, 'list', { prefix: 'audit:', reverse: true, cursor: url.searchParams.get('cursor') });
     case 'cron-explain': { const body = await readJson(request); return { ...explainCron(body.cron, body.timezone), cost_microdollars: 0 }; }
     case 'openapi': return openapi(API_ROUTES);
-    case 'public-config': return { local: env.ENVIRONMENT === 'local', clerk_publishable_key: env.CLERK_PUBLISHABLE_KEY || null, prices: PRICES, costs: { ...Object.fromEntries(['run', 'hook', 'change', 'read', 'dba_link', 'dba_decision'].map(op => [op, Math.ceil(worstCaseCost(op))])), dba_request: Math.ceil(worstCaseCost('read', {}, { dba: true }) - worstCaseCost('read')) } };
+    case 'public-config': return { local: env.ENVIRONMENT === 'local', clerk_publishable_key: env.CLERK_PUBLISHABLE_KEY || null, dba_issuer: dbaIssuer(env), prices: PRICES, costs: { ...Object.fromEntries(['run', 'hook', 'change', 'read', 'dba_link', 'dba_decision'].map(op => [op, Math.ceil(worstCaseCost(op))])), dba_request: Math.ceil(worstCaseCost('read', {}, { dba: true }) - worstCaseCost('read')) } };
     case 'health': return { status: 'ok', environment: env.ENVIRONMENT, git_sha: env.GIT_SHA || 'local' };
     case 'quote': {
       const op = url.searchParams.get('op'); assert(['run', 'hook', 'change', 'read', 'prose'].includes(op), 'invalid_operation', 'Unknown operation');

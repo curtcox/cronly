@@ -53,6 +53,10 @@ query per name, at most 16 names, cached per isolate for 30–300 s). Workers su
 no per-request charge and parsing the answers is well under a millisecond of CPU, so they stay
 inside the CPU allowance of `dbaVerification`; DBA prices DNS checks as free (its D17).
 
+Device sessions in the workspace (S5 Stage B) are priced like any DBA credential: each page
+read is a metered read plus `dbaRequest`, because every request is verified. Regular browser
+sessions stay free, since a Clerk session costs no verification.
+
 Grants with `net.client.latency` are timed by challenging the device: each challenge is a refused
 request verified like any other, so the request that finally passes carries one `dbaRequest` per
 challenge it answered (counted by the sealed nonce, at most 5: `DBA_MAX_VERIFICATIONS` is 6). A

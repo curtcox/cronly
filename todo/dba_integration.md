@@ -64,6 +64,7 @@ first and online (with the resource) only when nothing cheaper allowed the route
 | MCP | `src/index.js` | A DPoP proof is single-use and bound to `/mcp`, so the verified identity is forwarded on the in-process `Request` (`forwardAuth`, with no online scopes). |
 | Routes | `API_ROUTES` | `GET /api/dba/link` (`SESSION`); link start/finish/delete (`ACCOUNT_SESSION`), rate-limited to 10 a minute; `POST /api/dba/events` (`PUBLIC`, DBA-signed). |
 | UI | `frontend/js/dba.js` | Account page section; Link goes through the review dialog; `/auth/dba/callback` moves `code`/`state` out of the URL at once and posts them after sign-in. |
+| Device sign-in (Stage B) | `frontend/js/device.js`, `frontend/vendor/devicebasedauth.js` | The workspace enrolls this browser for `cronly:session` with DBA's SDK v1.4.0 (vendored, SRI-pinned by test, own 64 KiB size rule) and sends every page request through `fetchWithGates`; a localStorage flag means visits without a device session never load it. The Account page hides ACCOUNT_SESSION controls. `tests/device.spec.js` stubs the SDK to check the page wiring and loads the real bundle under the CSP. |
 
 ### Prices
 
@@ -98,12 +99,15 @@ that keeps DBA reads and runs above the floor. Details: `docs/business/pricing.m
 
 ## Follow-ups
 
-- Stage B: let the web UI itself call the API with `dba.js` device sessions instead of Clerk.
 - Timed challenges for grants scoped to `resources` and for latency grants DBA decides online
   (verifyOnline sends no `rtt_ms`); both are refused today.
+- Upstream (devicebasedauth.org `frontend/_headers`): `/sdk/:version/*` repeats the
+  `Access-Control-Allow-Origin: *` that `/sdk/*` already sets, so versioned SDK files are served
+  with `*, *` and browsers refuse them as cross-origin module scripts. cronly vendors the SDK, so
+  it is unaffected; other sites pinning `/sdk/v1.4.0/dba.js` are not.
 - Named address lists (DBA B10 N3) and relay routes: refresh the vendored verifier once DBA ships
   them, and pass `address_lists` / `route` into `decide`.
-- Done since 2026-11-18: verifier refreshed to `829d033` with `net.client` address rules (CIDR and
+- Done since 2026-11-18: Stage B device sign-in in the workspace (2026-11-23); verifier refreshed to `829d033` with `net.client` address rules (CIDR and
   DNS, and latency by timed DPoP challenges, 2026-11-23); resource-scoped grants (`job:<name>`, 2026-11-23); retries stop for
   revoked credentials; online authorization; device sessions; webhook and shared replay cache;
   upstream fixes (OIDC caches only successful responses, per-namespace caps now computed here,

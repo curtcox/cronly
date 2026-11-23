@@ -25,10 +25,11 @@ button.onclick = async () => {
 export const dbaLink = () => api('/api/dba/link');
 
 /** Renders the devicebasedauth.org section; every dynamic value is escaped. */
-export function dbaSection(link) {
+export function dbaSection(link, { device = false } = {}) {
+  // A device session cannot move the link it signed in through (ACCOUNT_SESSION routes).
   const status = link.linked
-    ? `<p>Linked to devicebasedauth.org account <strong>${e(link.dba_account)}</strong> since ${e(date(link.linked_at))}. Device credentials it issues for <code>cronly.org</code> can use this account with the scopes their grants allow.</p><button class="secondary" id="dba-unlink">Unlink devicebasedauth.org</button>`
-    : `<p>${link.superseded ? 'This devicebasedauth.org account is now linked to another cronly account. ' : ''}Not linked. Link once to let device-bound keys from your devicebasedauth.org account call this account. One devicebasedauth.org account links to one cronly account. Starting a link is charged like one change (shown before you continue); finishing and unlinking are free.</p><button id="dba-link">Link devicebasedauth.org</button>`;
+    ? `<p>Linked to devicebasedauth.org account <strong>${e(link.dba_account)}</strong> since ${e(date(link.linked_at))}. Device credentials it issues for <code>cronly.org</code> can use this account with the scopes their grants allow.</p>${device ? '' : '<button class="secondary" id="dba-unlink">Unlink devicebasedauth.org</button>'}`
+    : `<p>${link.superseded ? 'This devicebasedauth.org account is now linked to another cronly account. ' : ''}Not linked. Link once to let device-bound keys from your devicebasedauth.org account call this account. One devicebasedauth.org account links to one cronly account. Starting a link is charged like one change (shown before you continue); finishing and unlinking are free.</p>${device ? '' : '<button id="dba-link">Link devicebasedauth.org</button>'}`;
   const credentials = link.credentials.length
     ? `<ul class="list">${link.credentials.map(c => `<li><div><strong>${e(c.device_name || c.device_id)}</strong><br><span class="small">${e(c.id)} · ${c.monthly_spend_microdollars === null ? 'no monthly cap' : `${e(usd(c.monthly_spend_microdollars))} per UTC month`} · expires ${e(date(c.expires_at))}</span></div></li>`).join('')}</ul><p class="note">Revoke a device at devicebasedauth.org; cronly refuses it within a minute, along with any retries it queued.</p>`
     : '<p class="note">No device credentials have been used with this account yet.</p>';

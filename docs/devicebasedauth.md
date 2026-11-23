@@ -91,6 +91,28 @@ every isolate picks them up within 30 seconds. If DBA's keys, status lists or ca
 fetched, verification fails closed with `503`. Each DPoP proof is accepted once across all
 isolates (`DbaReplayCacheDO`).
 
+## Signing in to the workspace with a device
+
+The workspace (`/app.html`) offers **Sign in with devicebasedauth.org** beside the regular
+sign-in. It enrolls this browser for audience `cronly.org` with a `cronly:session` grant; DBA's
+approval page (a popup) lets the account owner approve, narrow or extend it. The key is a
+non-extractable WebCrypto key in cronly.org's IndexedDB; every page request carries a fresh
+DPoP proof, answers DPoP nonce challenges and waits while gates decide (DBA's SDK
+`fetchWithGates`). Later visits reuse the saved credential and renew it at two thirds of its life;
+**Sign out** deletes the key. The DBA account must already be linked (Account, from a regular
+sign-in).
+
+- **It is a device session**, so the Account page leaves out what those never reach: creating or
+  revoking API keys and linking or unlinking DBA. It shows the signed-in device instead.
+- **It is metered like an API key**: each read the workspace makes is a read plus `dbaRequest`
+  (28 µ$ today), and a page view makes several. Regular sign-ins read for free.
+- **The SDK** is DBA's released v1.4.0 bundle, vendored unmodified at
+  `frontend/vendor/devicebasedauth.js` and pinned by its SRI hash
+  (`src/vendor/devicebasedauth.test.js`). It is served from cronly's own origin and loaded only
+  when a device session is in use or offered. (Loading it from devicebasedauth.org would also
+  fail today: its versioned SDK paths answer `Access-Control-Allow-Origin: *, *`, which browsers
+  refuse for module scripts.)
+
 ## Browser apps on any site
 
 API and `/mcp` calls carrying `Authorization: DBA` get `Access-Control-Allow-Origin: *` (no

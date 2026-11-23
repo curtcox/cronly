@@ -35,6 +35,9 @@ export const RULES = [
   // Generated from API_ROUTES by `npm run docs:generate`; it grows with every route, so it gets
   // room of its own instead of a ratchet that would block new routes. Still catches runaway output.
   { label: 'generated API spec', limit: 256 * KIB, paths: ['frontend/openapi.json'] },
+  // devicebasedauth.org's browser SDK, vendored byte-for-byte and pinned by hash
+  // (src/vendor/devicebasedauth.test.js). It is one built bundle, so splitting it would fork it.
+  { label: 'vendored devicebasedauth.org browser SDK', limit: 64 * KIB, paths: ['frontend/vendor/devicebasedauth.js'] },
   { label: 'lockfile', limit: 1 * MIB, names: ['package-lock.json', 'pubspec.lock', 'yarn.lock', 'pnpm-lock.yaml'] },
   { label: 'source code', limit: 32 * KIB, extensions: ['.js', '.mjs', '.cjs', '.ts', '.py', '.sh', '.dart', '.swift', '.kt', '.kts', '.h'] },
   { label: 'markup and styles', limit: 64 * KIB, extensions: ['.html', '.css'] },

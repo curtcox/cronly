@@ -92,6 +92,7 @@ describe('timed DPoP challenges (net.client.latency)', () => {
       if (response.status !== 401 || body.code !== 'use_dpop_nonce' || i >= delays.length) return { status: response.status, body, seen, response };
       expect(response.headers.get('DPoP-Nonce')).toBe(body.dpop_nonce);
       expect(response.headers.get('WWW-Authenticate')).toMatch(/use_dpop_nonce/);
+      expect(body.rtt.samples_left).toBeGreaterThan(0);
       nonce = body.dpop_nonce; vi.setSystemTime(Date.now() + delays[i]);
     }
   }

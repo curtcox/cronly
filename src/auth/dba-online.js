@@ -58,7 +58,8 @@ export async function authorizeDba(request, env, auth, route) {
   const offline = decisions.find(decision => decision.allow);
   if (offline) { auth.scopes = [...auth.scopes, offline.scope]; return 0; }
   // A timed challenge is free to answer, so it goes before any billed online decision.
-  if (timedScopeFor(auth, route.access)) await challengeRtt(auth);
+  const timed = timedScopeFor(auth, route.access);
+  if (timed) await challengeRtt(auth, timed);
   if (onlineScopeFor(auth, route.access)) return authorizeDbaOnline(request, env, auth, route.access);
   const online = decisions.find(decision => decision.online_required);
   if (!online) return 0;
@@ -88,9 +89,10 @@ export async function authorizeDbaOnline(request, env, auth, access) {
  * proof carrying it, and cronly takes the round trip as its latency. DBA's CLI and browser SDK
  * do this by themselves. Each answered challenge adds one `dbaRequest` to the request that passes.
  */
-async function challengeRtt(auth) {
-  const nonce = await auth.dba.challenge();
-  const error = new ApiError(401, 'use_dpop_nonce', 'This devicebasedauth.org grant limits round-trip time; retry at once with a DPoP proof carrying the DPoP-Nonce', { dpop_nonce: nonce });
+async function challengeRtt(auth, scope) {
+  const { nonce, rtt } = await auth.dba.challenge(scope);
+  // `rtt.samples_left` is how DBA's SDK tells a timed nonce (answer at once, use once) from a plain one.
+  const error = new ApiError(401, 'use_dpop_nonce', 'This devicebasedauth.org grant limits round-trip time; retry at once with a DPoP proof carrying the DPoP-Nonce', { dpop_nonce: nonce, rtt });
   error.headers = { 'WWW-Authenticate': 'DPoP error="use_dpop_nonce", algs="ES256"', 'DPoP-Nonce': nonce };
   throw error;
 }

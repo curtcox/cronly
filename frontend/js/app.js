@@ -1,10 +1,11 @@
-import { api, settings, setAuth, getLocalUser, signOut, escapeHtml as e } from './api.js';
+import { api, settings, setAuth, getLocalUser, getDevice, onGatePending, signOut, escapeHtml as e } from './api.js';
 import { $, content, state, currentPage, setRenderer, notify, clearNotice, download, refreshHeader } from './workspace.js';
 import { review, reviewed, runInput } from './review.js';
 import { definitionsPage, cronPreview, updateJsPrice, updateJobPrice, translateJob } from './definitions.js';
 import { upcomingPage, runsPage, costsPage, filterUpcoming, filterCosts, exportRuns } from './history.js';
 import { dashboard, askPage, accountPage, ask, pageTransactions } from './pages.js';
 import { dbaClick, finishDbaLink } from './dba.js';
+import { savedDevice, enrollDevice, loadSdk, grantsSession } from './device.js';
 
 $('#sign-out').addEventListener('click', signOut);
 async function render() {
@@ -45,6 +46,7 @@ content.addEventListener('click', async event => {
     if (button.id === 'create-trigger') await reviewed(`/api/jobs/${state.editing}/triggers`, 'POST', {}, async result => { await render(); notify('Trigger created. Copy its URL now.'); review('Trigger URL — keep it private', 0, result.url, async () => {}, 'Close'); });
     if (button.dataset.revokeTrigger) await reviewed(`/api/jobs/${state.editing}/triggers/${button.dataset.revokeTrigger}`, 'DELETE');
     if (button.dataset.revokeKey) await reviewed(`/api/keys/${button.dataset.revokeKey}`, 'DELETE');
+    if (button.id === 'device-login') return deviceSignIn(button);
     if (await dbaClick(button)) return;
     if (button.id === 'test-action') {
       runInput(`/api/actions/${state.editing}/test`, `Test ${state.editing}`, 'Test');
@@ -89,23 +91,51 @@ $('#workspace-nav').addEventListener('click', event => { const link = event.targ
 window.addEventListener('hashchange', () => { state.editing = null; render(); });
 async function signedIn() {
   $('#workspace-nav').hidden = false; $('#sign-out').hidden = false; await render();
-  try { await finishDbaLink(); } catch (error) { notify(error.message, true); }
+  // Finishing a link needs a full sign-in; a device session leaves the code for one.
+  if (!getDevice()) try { await finishDbaLink(); } catch (error) { notify(error.message, true); }
+}
+/** The devicebasedauth.org sign-in choice shown under every other sign-in (S5 Stage B). */
+function deviceOption() {
+  if (!state.deployment.dba_issuer) return '';
+  loadSdk().catch(() => {}); // Ready before the click, so the approval popup is not blocked.
+  const { read, dbaRequest } = state.deployment.prices;
+  return `<section class="signed-out panel"><h2>Use a device key</h2><p>Sign in with a devicebasedauth.org device key kept in this browser. Link your devicebasedauth.org account to your cronly account first (Account, signed in the usual way); devicebasedauth.org then asks you to approve this browser.</p><button id="device-login" class="secondary">Sign in with devicebasedauth.org</button><p id="device-approval" hidden></p><p class="note">The key cannot be copied out of this browser, and signing out deletes it. A device session is metered like an API key: each read the workspace makes costs ${e(read + dbaRequest)} µ$ (${e(dbaRequest)} µ$ of it verifies the device), so every page view costs a few reads. It cannot create API keys or change the devicebasedauth.org link.</p></section>`;
+}
+async function startDevice(device) {
+  setAuth(device); state.device = device;
+  onGatePending(gate => notify(`Waiting for devicebasedauth.org to approve this request${gate?.approve_url ? ' (see your approval request)' : ''}…`));
+  if (!grantsSession(device)) notify('This device key does not grant cronly:session, so most workspace pages will refuse it. Sign out and enroll it again.', true);
+  await signedIn();
+}
+async function deviceSignIn(button) {
+  button.disabled = true; const approval = $('#device-approval');
+  try {
+    notify('Approve this browser in the devicebasedauth.org window…');
+    const device = await enrollDevice(state.deployment, { onApprovalUrl: url => {
+      const target = new URL(url); if (target.origin !== new URL(state.deployment.dba_issuer).origin) throw new Error('Unexpected devicebasedauth.org address');
+      approval.hidden = false; approval.innerHTML = `The approval window was blocked. <a href="${e(target.href)}" target="_blank" rel="noopener">Open devicebasedauth.org to approve this browser</a>; this page continues once you do.`;
+    } });
+    clearNotice(); await startDevice(device);
+  } catch (error) { notify(`devicebasedauth.org did not sign this browser in: ${error.message}`, true); }
+  finally { button.disabled = false; }
 }
 async function boot() {
   state.deployment = await settings();
+  const device = await savedDevice(state.deployment).catch(() => null);
+  if (device) return startDevice(device);
   if (state.deployment.local) {
     if (getLocalUser()) return signedIn();
-    content.innerHTML = '<section class="signed-out panel"><h1 class="app-title">Your local workspace</h1><p class="muted">Development accounts use local storage and development credit.</p><form id="local-login"><label>Local account name<input name="user" value="developer" pattern="[a-zA-Z0-9_\\-]{1,128}" required></label><button>Use local account</button></form></section>';
+    content.innerHTML = '<section class="signed-out panel"><h1 class="app-title">Your local workspace</h1><p class="muted">Development accounts use local storage and development credit.</p><form id="local-login"><label>Local account name<input name="user" value="developer" pattern="[a-zA-Z0-9_\\-]{1,128}" required></label><button>Use local account</button></form></section>' + deviceOption();
     $('#local-login').addEventListener('submit', event => { event.preventDefault(); setAuth(new FormData(event.target).get('user')); signedIn(); });
     return;
   }
-  if (!state.deployment.clerk_publishable_key) { content.innerHTML = '<section class="signed-out"><h1 class="app-title">Sign-in is being configured</h1><p>cronly is preparing for its invite-only launch.</p></section>'; return; }
+  if (!state.deployment.clerk_publishable_key) { content.innerHTML = '<section class="signed-out"><h1 class="app-title">Sign-in is being configured</h1><p>cronly is preparing for its invite-only launch.</p></section>' + deviceOption(); return; }
   const encoded = state.deployment.clerk_publishable_key.split('_').at(-1); const domain = atob(encoded).replace(/\$$/, '');
   if (!/^[a-z0-9.-]+$/.test(domain)) throw new Error('Invalid Clerk frontend domain');
   const script = document.createElement('script'); script.crossOrigin = 'anonymous'; script.dataset.clerkPublishableKey = state.deployment.clerk_publishable_key; script.src = `https://${domain}/npm/@clerk/clerk-js@5/dist/clerk.browser.js`;
   await new Promise((resolve, reject) => { script.onload = resolve; script.onerror = reject; document.head.append(script); });
   await window.Clerk.load(); setAuth(window.Clerk);
   if (window.Clerk.user) await signedIn();
-  else { content.innerHTML = '<section class="signed-out panel"><h1 class="app-title">Welcome to cronly</h1><p>Sign in to manage your actions and schedules.</p><button id="clerk-login">Sign in</button><p class="note">Launch is invite-only.</p></section>'; $('#clerk-login').addEventListener('click', () => window.Clerk.openSignIn({ fallbackRedirectUrl: '/app.html' })); window.Clerk.addListener(({ user }) => { if (user) signedIn(); }); }
+  else { content.innerHTML = '<section class="signed-out panel"><h1 class="app-title">Welcome to cronly</h1><p>Sign in to manage your actions and schedules.</p><button id="clerk-login">Sign in</button><p class="note">Launch is invite-only.</p></section>' + deviceOption(); $('#clerk-login').addEventListener('click', () => window.Clerk.openSignIn({ fallbackRedirectUrl: '/app.html' })); window.Clerk.addListener(({ user }) => { if (user) signedIn(); }); }
 }
 boot().catch(error => notify(error.message, true));

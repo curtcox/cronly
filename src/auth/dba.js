@@ -228,7 +228,7 @@ export async function authenticateDba(request, env) {
   const timedScopes = session ? [] : Object.keys(challenges);
   if (timedScopes.length) {
     Object.defineProperty(dba, 'timed_scopes', { value: timedScopes });
-    Object.defineProperty(dba, 'challenge', { value: () => timed.rtt.issue({ ...timed.bind, samples: timed.fresh?.samples ?? 0, best_ms: timed.fresh?.rtt_ms }) });
+    Object.defineProperty(dba, 'challenge', { value: async scope => ({ nonce: await timed.rtt.issue({ ...timed.bind, samples: timed.fresh?.samples ?? 0, best_ms: timed.fresh?.rtt_ms }), rtt: challenges[scope] }) });
   }
   // Grants restricted to `resources` were decided above without one, so they granted nothing.
   // A route acting on one job decides them again with its resource (src/auth/dba-online.js).
