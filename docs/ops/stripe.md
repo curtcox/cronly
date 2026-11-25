@@ -7,7 +7,7 @@ hashbin's key or webhook secret for cronly. Public payments remain gated by
 
 ## Catalog
 
-Created and verified in live mode on 2026-11-17:
+Live mode:
 
 | Product | ID | One-off default price |
 |---------|----|-----------------------|
@@ -26,69 +26,50 @@ and production Checkout reject missing, malformed or identical IDs. Free quotes
 remain available before payment setup or launch approval. Local Stripe tests can
 retain inline products if neither catalog ID is configured.
 
-The catalog retained the account's preset General — Electronically Supplied
-Services category. This is not tax/legal acceptance; review tax obligations and
-the itemized card-cost wording before opening payments. No automatic tax setting
-or shared Stripe business/branding settings were changed.
+The products use the account's preset General — Electronically Supplied Services
+tax category. That is not tax or legal acceptance: review tax obligations and the
+itemized card-cost wording before opening payments. Automatic tax and the shared
+account's business and branding settings are untouched.
 
-## Restricted runtime key (created and verified)
+## Restricted runtime key
 
-Created on 2026-11-17 after explicit owner approval and owner-completed Stripe
-identity verification. The key is named **cronly production checkout** and has only:
+**cronly production checkout** (`rk_live_…`, stored as `STRIPE_SECRET_KEY` in GitHub's
+`production` environment) has only:
 
 - Checkout Sessions: Write (includes Read).
 - Products: Read.
 - Prices: Read.
 
-All other resources remain None, including Charges and Refunds, Payment Intents,
-Customers, Payouts and Webhook Endpoints. Stripe's restricted keys apply to the
-selected resource types across the shared account; they are not restricted to
-cronly's product IDs. See [restricted key configuration](https://docs.stripe.com/keys/restricted-api-keys).
+Everything else is None, including Charges, Refunds, Payment Intents, Customers, Payouts and
+Webhook Endpoints. Restricted keys apply to resource types across the shared account, not to
+cronly's product IDs ([restricted keys](https://docs.stripe.com/keys/restricted-api-keys)).
+Refunds stay owner-operated in the Stripe dashboard.
 
-Stored the resulting `rk_live_…` value as `STRIPE_SECRET_KEY` in GitHub's
-**production** environment through stdin. Verified its entry name/update time
-without reading the value back. The private temporary credential file was
-removed; no credential value was displayed or committed. Keep refunds
-owner-operated in Stripe; broader runtime access is not needed for Checkout.
+## Webhook
 
-## Webhook (created and verified)
-
-Created the owner-approved **cronly production payments** destination on
-2026-11-17, ID `we_0Ucox4TWAgyTrTqTgzY8njcH`, and verified its Active status:
+**cronly production payments**, `we_0Ucox4TWAgyTrTqTgzY8njcH`, active:
 
 - URL: `https://cronly.org/webhooks/stripe`.
 - Scope: Your account, snapshot payloads.
 - API version: `2026-10-28.endive` (endpoint-specific; account default unchanged).
-- Events: `checkout.session.completed` and
-  `checkout.session.async_payment_succeeded`, and no others.
+- Events: `checkout.session.completed` and `checkout.session.async_payment_succeeded` only.
 
-Enabling this destination transmits matching Checkout event payloads from the
-entire shared Stripe account, including sibling-app sessions, to cronly. The
-handler ignores non-cronly metadata and unpaid sessions before creating an
-account or granting credit. Stored its signing secret as `STRIPE_WEBHOOK_SECRET`
-in GitHub's production environment through stdin and verified the entry name and
-update time. The private temporary file was removed. The existing hashbin
-destination and key were not modified.
+Its signing secret is `STRIPE_WEBHOOK_SECRET` in GitHub's `production` environment. The
+destination receives Checkout events from the whole shared account, including hashbin's; the
+handler ignores sessions without cronly metadata and unpaid sessions before creating an
+account or granting credit. hashbin's key and destination are separate and must not be reused.
 
-The app Worker is not deployed, so signed delivery and balance fulfillment cannot
-be accepted yet. Events could fail delivery until that endpoint exists.
+## Verified so far
 
-## Unpaid live Checkout acceptance — 2026-11-17
-
-The restricted key successfully created a card-only, one-time live session with
-the same catalog/amount fields used by the app: $5.00 credit plus $0.46 card cost,
-$5.46 total. Reading its line items with expanded products confirmed both exact
-product IDs, names, USD amounts and quantity one. The key then expired the
-session, which remained unpaid. No card details, charge or refund were submitted.
-
-This was a direct Stripe SDK check, not a deployed Worker or ledger test. It
-confirms the current permissions support session creation, item reads and expiry
-without broader write grants. [Sanitized acceptance evidence](evidence/stripe-catalog-2026-11-17.json).
+The restricted key created a card-only live Checkout session with the app's catalog and
+amounts ($5.00 credit + $0.46 card cost = $5.46), read back both line items with the exact
+product IDs, then expired it unpaid. That was a direct SDK check, not a Worker or ledger test;
+no charge or refund has happened. [Evidence](evidence/stripe-catalog-2026-11-17.json).
 
 ## Acceptance still required
 
-1. Complete the remaining app credentials, production deployment and legal
-   approval; keep invite-only and do not open payments early.
+1. Complete legal approval and set `CRONLY_LAUNCH_APPROVED=true` (see
+   [launch](launch.md)); keep sign-up invite-only.
 2. Have the owner complete a real $5 credit purchase in the deployed UI. Verify
    the full $5 credit, one ledger deposit, signed delivery, repeated event
    deduplication and balance-paused job recovery. Confirm both completed and

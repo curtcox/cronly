@@ -1,9 +1,7 @@
 # Cloudflare production credentials
 
-The owner approved two independent user API tokens on 2026-11-17 and their
-storage in `curtcox/cronly`'s GitHub `production` environment. Neither token
-reuses hashbin credentials. Both tokens verified as active through Cloudflare's
-API and are listed as active in the dashboard.
+Two independent user API tokens, stored in `curtcox/cronly`'s GitHub `production`
+environment. Neither is shared with hashbin.
 
 | Token name | GitHub secret | Permissions / scope |
 |------------|---------------|---------------------|
@@ -21,30 +19,23 @@ shared account, including hashbin. Zone permissions are limited to cronly.org.
 The default template's KV/R2 and user-level permissions were removed. Do not use
 these tokens to modify sibling applications.
 
-Values were transferred privately through stdin to `gh secret set`; GitHub entry
-names/update timestamps were verified and private temporary files were removed.
-Only credential metadata belongs in the repository. The deployment token passed
-read checks for the exact cronly zone and existing `cronly-runs` queue; write
-permissions still need the real deployment acceptance.
+Only credential metadata belongs in the repository; set values with `gh secret set`
+through stdin. The deploy token has deployed the Worker, its custom domain and its
+Durable Object migrations.
 
-## Analytics acceptance
+## Cost-monitor query
 
-A live request using the production cost-monitor query and only the `cronly`
-script plus a synthetic namespace filter reached Cloudflare's GraphQL API, but
-it was rejected: `durableObjectsStorageGroups` does not accept `namespaceId_in`.
-No other application's usage was requested. Live introspection identified
-`durableObjectsSqlStorageGroups` for cronly's SQLite-backed namespaces, with the
-required `namespaceId_in` filter. The production query now uses that dataset and
-groups by `namespaceId` before adding each namespace's peak bytes. The corrected
-query returned HTTP 200 with no GraphQL errors and empty datasets on 2026-11-17.
-Invocation/periodic namespace filters, prices and the fail-closed brake are unchanged.
-See [sanitized schema and query evidence](evidence/cloudflare-analytics-schema-2026-11-17.json).
+The monitor reads SQLite Durable Object storage from `durableObjectsSqlStorageGroups`
+(`durableObjectsStorageGroups` rejects `namespaceId_in`), grouped by `namespaceId` before
+adding each namespace's peak bytes, plus invocation and periodic datasets filtered to the
+`cronly` script and its namespaces. The query was validated against the live schema
+(HTTP 200, no GraphQL errors): [evidence](evidence/cloudflare-analytics-schema-2026-11-17.json).
 
-The app Worker and its three SQLite Durable Object namespaces were deployed on
-2026-11-17. Their verified IDs are recorded in GitHub's `CRONLY_DO_NAMESPACES` variable
-and deployed as `COST_SAFETY_DO_NAMESPACES`. Schema validation alone cannot verify actual
-usage measurements or cost reconciliation; the first live monitor remains pending.
-See [launch procedure](launch.md) and STATUS L12/L14.
+The namespaces come from GitHub variable `CRONLY_DO_NAMESPACES`, deployed as
+`COST_SAFETY_DO_NAMESPACES`. It must list all six cronly namespaces; today it holds the three
+original ones (`AccountDO`, `JobDO`, `SafetyDO`) and the three DBA namespaces still need adding
+(STATUS S5). A first monitor run on real usage is still pending (STATUS L12); see
+[launch](launch.md#live-acceptance-before-opening-to-others).
 
 References: [Workers permissions](https://developers.cloudflare.com/workers/authorization/workers/),
 [Analytics token permissions](https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/).
