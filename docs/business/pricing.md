@@ -1,11 +1,10 @@
 # cronly pricing and cost model
 
-Audited 2026-11-16. D4–D6 approved the proposed launch defaults and upward corrections
-required by cost floors. The implementation audit found two material planning errors:
-per-read transactional ledger writes cost more than a 1 µ$ read, and prose's original
-1.5× markup fails the 1.5× margin after the 8% haircut. Dynamic Workers also now charge
-for distinct worker versions used each day. Indexing/retention and bounded history scans are included in the final rates. The public pricing page reads the same
-constants as the API; historical numbers in the master plan are superseded here.
+Prices are set by D4–D6: each is the approved launch default, corrected upward wherever the
+price-floor test required it. Constants live only in `src/utils/pricing.js` (prices),
+`src/utils/cost-policy.js` (provider rates and allowances) and `src/utils/llm-policy.js` (model
+rates); the public pricing page and `/api/quote` read the same constants. Numbers in the master
+plan defer to this file.
 
 ## Current prices
 
@@ -35,18 +34,18 @@ An activation is recorded as paid in the same transaction as its settlement,
 ledger and receipt. Concurrent first claims keep their full holds; settlement
 charges one activation and discounts the others. A safety-braked, fully refunded
 claim does not grant a free activation to a later run. Legacy claimed holds retain
-their promised maximum. UTC month rollover, refunds, settlement order, storage
-rollback and cold restarts are covered for compact and standalone reservations.
-Real local Worker/Queue acceptance also verifies one activation charge across
-three jobs sharing a version, with matching run logs, ledger, costs and balance.
+their promised maximum. Tests cover UTC month rollover, refunds, settlement order, storage rollback and cold
+restarts; a real local Worker/Queue run verifies one activation across three jobs sharing
+a version.
 
 ### devicebasedauth.org (S5)
 
 Verifying a DBA credential on each request costs cronly the link-index lookup, one write and
 one delete in the shared DPoP replay cache, and the account's credential row: `dbaVerification`,
-3.64 µ$. That pushed reads (21 µ$ vs. a 15.64 µ$ bound) and runs (85 µ$ vs. 55.5 µ$) below the
-floor, so D5/D6's standing approval of upward floor corrections adds `dbaRequest` (7 µ$) to reads
-and to manual runs and action tests a DBA caller starts. Retries and scheduled runs are not
+3.64 µ$. That pushes reads (bound 15.64 µ$, so a 21 µ$ read keeps 19.32 µ$ against a 24 µ$ floor) and runs
+(bound 51.64 µ$: 72.68 µ$ kept against 78 µ$) below the floor, so D5/D6's standing approval of
+upward floor corrections adds `dbaRequest` (7 µ$) to reads and to manual runs and action tests a
+DBA caller starts. Retries and scheduled runs are not
 re-verified, so they do not pay it. Changes (100 µ$ vs. 23.64 µ$) absorb it.
 Grants with `net.client.addresses.dns` names add DNS-over-HTTPS lookups (one A and one AAAA
 query per name, at most 16 names, cached per isolate for 30–300 s). Workers subrequests carry
@@ -69,7 +68,7 @@ sign-in. The owner chose to pass both on (2026-11-22): `dba_decision` (56 µ$) i
 credential's monthly cap before DBA is asked, charged once DBA answers and released when it
 cannot (5xx, unfunded, unreachable). Starting a link charges a change before cronly asks DBA.
 
-A regular hourly HTTP job is about $0.06120 per 30 days; a minutely job is $3.6720. These
+A regular hourly HTTP job is about $0.05688 per 30 days; a minutely job is $3.4128. These
 are run charges only. Changes, API polling, prose and JS activation are additional.
 
 ## Units and deposits
@@ -91,227 +90,55 @@ reviewed Terms and applicable law.
 
 ## Cost assumptions
 
-Rates live only in `src/utils/cost-policy.js`; prices only in `src/utils/pricing.js`;
-model rates only in `src/utils/llm-policy.js`. Included allowances are ignored.
-The HTTP bound includes 33 row writes, 27 DO requests, five Worker invocations and
-3,000 compact-index row reads, six Queue operations, CPU,
-awake time and 16 KB retained logs; orchestration caches compact summaries instead of loading log bodies. Read and change bounds include actual ledger,
-key-budget, audit and rate-counter bookkeeping rather than just one request.
-Permanent cost summaries and job/key budget counters share the account's
-daily/monthly summaries. Active summaries now share the balance row, saving two
-writes on ordinary settlements. At UTC rollover the previous periods are archived;
-late settlements update their reserved periods. Summaries above 50,000 UTF-8 bytes
-stay standalone, bounding the compact state below the storage value limit. Each
-period still needs at most one separate write, so the worst-case allowance and
-prices remain unchanged. Legacy scalar balances and separate summaries migrate
-lazily; compact summaries take precedence over stale legacy rows in reporting. Old standalone budget counters remain readable until
-each job/key first settles in a period, preserving existing caps without bulk migration.
+Included provider allowances are ignored, so every operation pays its own way.
 
-The S4 audit counts the entire schedule/manual/action-test/webhook path, including
-six HTTP requests when following redirects, cold retained-history scans, retention
-deletes, alarm writes, ingress counters and production safety lookups. Integration
-tests fail if these paths exceed the policy's row/request allowances. Merely batching
-separate keys into one storage call would not reduce billed SQLite rows.
-All four paths also include three Queue redeliveries, using the configured production
-retry count. Consumers repair committed outcome publication after settlement without
-repeating outbound work or charging twice. Redelivery does not rescan retained history;
-the existing pending-run alarm still guarantees cleanup. The invocation allowance
-includes one ingress request and four separately billed consumer batches, without
-assuming messages share a batch. Cloudflare documents [consumer request/CPU billing](https://developers.cloudflare.com/queues/configuration/consumer-concurrency/)
-separately from [Queue operation charges](https://developers.cloudflare.com/queues/platform/pricing/).
+**HTTP run bound: 48 µ$.** `worstCaseCost('run')` allows 33 SQLite row writes, 27 DO requests,
+five Worker invocations, 3,000 row reads, six Queue operations, 20 ms of Worker CPU, 0.2 s of
+DO wall time and 16 KB of retained log storage, which sums to 47.86 µ$ and rounds up to 48.
+At 79 µ$, `79 × 0.92 = 72.68 ≥ 1.5 × 48`. The allowance covers the whole schedule, manual,
+action-test and webhook paths: up to six HTTP requests when following redirects, alarms,
+retention deletes, ingress counters, production safety lookups, three Queue redeliveries
+(the production retry count) with separately billed consumer batches, and the bookkeeping
+of a retry refused by its budget, which has no charge of its own. Each paid retry carries
+its own allowance.
 
-The audit also injects failed settlement, completion writes, retry dispatch and retry
-outbox cleanup, plus the pause when a retry exceeds its budget. Results are staged
-durably before settlement; recovery completes the same outcome and charges once.
-A failed run's retry context stays private until its
-deterministic child is reserved/enqueued or refused by its job/key budget. The 144 checks repeat these paths with compact and standalone reservations, compact summaries, UTC day/month rollovers
-and oversized standalone summaries. The current
-37-write/27-DO-request/five-invocation allowance covers these tested paths; separately
-billed retries each contribute their own allowance. Refused retries have no separate
-charge, so the paid parent includes their pause/log/cleanup overhead. The recovery audit initially raised
-the 80 µ$ base to 89 µ$ to retain the approved floor after rounding costs up.
+**The audit.** `src/durable-objects/run-cost.test.js` counts real storage operations over 456
+paths: every trigger with compact and standalone reservations, compact and oversized money
+summaries, UTC day/month rollovers, full ledger buffers, recent-activity eviction, refused and
+successful retries, and injected failures of settlement, completion, runtime publication and
+lost responses. It fails if any path exceeds the policy's row, request or invocation
+allowance. Batching separate keys into one storage call would not reduce billed rows, so the
+savings come from sharing rows:
 
-This corrects the earlier 24-write/12-request allowance, which omitted some of that
-bookkeeping. The prior 60 µ$ run price fails the audited floor. Compact pending-run records
-removed one write per run and initially reduced the corrected 80 µ$ default to 78 µ$.
-The subsequent redelivery audit includes recovery RPCs and all consumer invocations,
-which required 80 µ$. Staged-result recovery and the previously uncounted retry-refusal
-path required 89 µ$ before the staged-log finalization saving below. Persisted job quotes follow the current price;
-already-held runs settle within their original maximum.
+- Small reservations, active daily/monthly summaries (which double as job and key budget
+  counters), the recent ledger buffer, recent-job activity and run cooldowns all share the
+  account's balance row, bounded so it stays below the 128 KiB value limit. Larger or legacy
+  records stay standalone and are still counted.
+- Pending-run metadata shares the job's compact history row; finalization commits only the
+  history index and billing metadata beside the durably staged result.
+- Completion publishes the job's runtime row inside the settlement transaction; scheduled
+  dispatch leaves publishing its advancement to that settlement and rearms once per turn.
+- Retries are reserved before their failed parent finalizes, so no retry outbox is written.
+- Unchanged alarms, settings and repeated refusal pauses are not rewritten.
 
-Tests assert `price × 0.92 >= 1.5 × ceil(worstCaseCost)` for every operation and JS extremes.
-The floor rounds cost up to integer micro-dollars just as settlement estimates do.
-Read coverage checks every job count from zero to 100: the old 20 µ$ base missed the
-rounded floor at small counts, so it is now 21 µ$ plus the unchanged 2 µ$/job.
-Prose markup is 1.64 because `1.64 × 0.92 >= 1.5`; 1.5 itself fails. The additive
-500 µ$ covers non-model orchestration. The pre-call hold uses bounded input bytes,
-maximum output tokens, maximum cache-write rates and bounded read-only tool turns.
-Actual billing includes provider-reported input, output, cache-read and cache-write
-usage. Provider failures with unknown usage retain the reserved maximum; known usage
-is used when deterministic output validation fails.
+**Reads and changes.** A read is bounded at 12 µ$ plus 1.2 µ$ per job scanned for aggregate
+history (priced 21 µ$ + 2 µ$/job, checked for every job count from 0 to 100); a change at
+20 µ$, including ledger, key budget, audit and rate-counter writes. Transactional reads and
+changes enforce balance and budgets without durable holds; action, variable and secret
+edits do not rewrite or resynchronize jobs. Deposits and cost-brake recovery wake jobs through
+one bounded batch per cause (five account writes for a deposit with 100 jobs).
 
-These are conservative engineering estimates, not measured production costs. L12's
-monitor distinguishes measured Worker/DO totals from a conservative ledger allowance
-for Queue/sandbox usage. Missing, truncated or stale analytics activates the brake.
-S3 recalibrates from actual bills. S4 has removed 2–4 separate budget-counter writes
-per run and avoids unchanged alarm/runtime/recent-job writes. Transactional reads
-and changes also skip transient holds and their expiry alarms while enforcing the
-same balance and budget checks. External work still requires durable holds.
-Repeated run outcomes skip the unchanged job-settings write. Changed outcomes are
-saved atomically with completed logs; the worst-case bound still includes that write.
+**Prose.** Markup is 1.64 because `1.64 × 0.92 ≥ 1.5` and 1.5 itself fails; the additive
+500 µ$ covers orchestration. The hold uses bounded input bytes, maximum output tokens,
+maximum cache-write rates and bounded read-only tool turns. Billing uses provider-reported
+input, output, cache-read and cache-write usage; a failure with unknown usage keeps the
+reserved maximum.
 
-Pending-run metadata now shares the compact history row, saving another write per
-run. Completed logs and summaries commit atomically. Legacy queued records remain
-readable, and cold outbox recovery is tested. Permanent receipt tombstones remain
-separate so outstanding-hold scans stay bounded. Recent ledger entries now share
-the balance row, saving one more ordinary settlement write. A full buffer archives
-to one immutable page, bounded to 100 entries or 16,000 UTF-8 bytes; this leaves
-room beside the two 50,000-byte money summaries. Transaction history merges buffered
-entries, archived pages and legacy standalone rows using bounded reads in either
-direction; old cursors remain valid. New cursors use a persisted sequence to order
-simultaneous entries and withstand a backwards wall clock, while entries retain
-their actual creation times. Receipt lookup and all accounting still commit atomically.
-The 144 cost checks force a full ledger buffer alongside their money-summary and
-recovery scenarios; archival needs the saved write, so the worst-case bound and
-prices are unchanged.
-
-Small durable reservations now also share the balance row. Their final settlement
-removes the prepaid execution snapshot in the same balance write, saving one row
-delete per run. The compact hold array is limited to 8,000 UTF-8 bytes, with 128
-bytes per hold reserved for claim/activation/gateway updates; together with both
-summaries and ledger it fits below the storage value limit. Large snapshots and
-legacy holds remain standalone, without migration writes. Funds, budgets, account
-concurrency, job overlap and expiry include both formats. Permanent receipts remain
-separate and never expose execution snapshots. The full-path audit checks both
-formats and requires compact runs to use one fewer write; standalone runs retained
-the then-current 38-write bound and 89 µ$ price.
-
-Completed runs now retain their original durable staged body. Finalization commits
-only the compact history index, authoritative billing/subrequest metadata and any
-changed outcome settings. Full reads combine the saved outcome with that committed
-metadata; legacy completed bodies remain readable. Recovery and public privacy
-checks apply to both formats. This removes a body rewrite even for large standalone
-reservations, full ledger buffers, UTC rollovers and refused retries. The 144 checks
-now enforce 37 writes per standalone run and 36 per compact run, with the existing
-request/read allowances. The rounded HTTP cost falls from 54 to 53 µ$, reducing the
-base HTTP/JS run price from 89 to 87 µ$ while preserving the approved margin. Already
-reserved runs retain their original maximum. Further worst-case write reductions
-remain S4 work.
-
-Run cooldown timestamps now share the recent-job index row. Switching between jobs
-updates one row instead of separate cooldown and index rows; repeatedly running the
-same job still needs one write. The index retains at most 100 names, including
-deleted jobs and action tests. Evicted timestamps fall back to standalone cooldown
-rows so churn cannot bypass the one-run-per-minute limit. Original name arrays and
-standalone timestamps remain readable; reservations and activity commit atomically.
-Eviction can still need two writes, so the conservative 37-write bound and the
-87 µ$ base price are unchanged.
-
-Repeated refusals for an unchanged balance/day/month pause now write no additional
-job settings, runtime, log or alarm rows. Each pause transition commits its one log,
-settings and budget-reset wakeup atomically. Budget-reset alarms publish the resumed
-runtime and retain the reset deadline until publication and settings succeed, so
-redelivery can finish a failed reset. Configuration replay also skips unchanged
-settings while retaining the last completed outcome. These reduce repeated or
-administrative work; the conservative paid-run bound and 87 µ$ price are unchanged.
-
-Recent-job activity and cooldowns now share a compact reservation's balance write,
-removing one more ordinary per-run write. Activity is bounded to 100 names and
-10,000 UTF-8 bytes. With activity present, compact holds use at most 4,000 bytes,
-leaving room for both 50,000-byte summaries, the 16,000-byte ledger and metadata
-inside one 128 KiB value. Larger snapshots stay standalone; existing compact hold
-arrays retain the old layout until there is room for activity and claim-update
-headroom. Legacy activity/cooldown rows remain readable, and evicted cooldowns
-remain authoritative across restarts and backwards clocks. The expanded 288-path
-audit also forces index eviction, alongside the existing archival and recovery
-scenarios. Standalone holds and eviction can still use the saved write, so the
-conservative 37-write bound and 87 µ$ base price are unchanged.
-
-Scheduled runs rearm once after advancing their next-fire time. The pending outbox
-still commits with a recovery alarm before queue dispatch; failed dispatch,
-advancement or final rearming recovers after restart without a second hold or
-execution. This skips a redundant history scan and avoids moving the intermediate
-alarm forward during dispatch. Manual runs and retries retain immediate rearming.
-Next-fire publication happens before durable advancement, so a failed publication
-retries even when a missed run was skipped without creating an outbox. A scheduled
-budget/balance refusal also reuses its existing committed pause instead of writing
-settings and publishing runtime a second time. The conservative bound and prices
-are unchanged.
-
-Completion runtime publication now shares the account settlement transaction.
-The runtime row is written before ledger changes, so a failed runtime write avoids
-repeating ledger pages and period archives. A later billing failure rolls runtime
-back with the charge. New completed runs retain a private publication marker in
-their existing history index and skip runtime RPCs on Queue redelivery; legacy
-completions retain publication repair. Lost settlement responses and failed job
-finalization recover the staged outcome without another execution or charge.
-
-The expanded 456-path audit includes runtime-write and settlement-response failures,
-including when the recovered run's retry is refused by its budget. Those cases
-need a conservative 27 DO requests rather than 30, with the existing 37-write,
-five-invocation and 3,000-read allowances. The rounded HTTP cost falls from 53 to
-52 µ$, reducing the base HTTP/JS run price from 87 to 85 µ$. Existing reservations
-keep their original maximum; persisted job quotes use the current price. Further
-S4 reductions and live/owner launch acceptance remain open.
-
-Action tests create their permanent history-routing index only on the first
-reservation. Later tests reuse it, saving one account row write per run; the
-reservation's activity record still tracks recency. Creation remains atomic with
-the prepaid hold, and retained logs remain accessible after action deletion.
-The first-test worst case still needs that write, so prices and allowances hold.
-Test setup and start now share one JobDO request, saving one DO request per
-action test. Durable configuration, reservation and dispatch recovery are retained;
-the shared run allowance and prices remain set by the other audited paths.
-
-Action changes no longer fan out into writes and scheduling synchronization for
-every job in the account. Quotes and reservations resolve the current action
-without persisting derived price changes on each job. A single action create,
-edit or deletion stays within the existing change allowance even with 100 jobs;
-only explicitly edited/deleted jobs need durable scheduling outboxes. Existing
-execution holds and job pauses retain their original state.
-Action, variable and secret mutations also skip the account alarm write: they
-create no scheduling outbox. Explicit job edits schedule a recovery wakeup only
-when an existing alarm will not already run soon enough, retaining earlier hold
-expiry deadlines. Deposits and cost-brake recovery follow the same earliest-wakeup rule, skipping
-redundant alarms or accounts with no synchronization work. A failed synchronization
-retries within a minute without postponing an earlier hold expiry, including holds
-reserved while the cross-object call was in flight. The retry's alarm comparison is
-transactional with any concurrent reservations. These administrative savings leave
-paid-run prices unchanged.
-
-Deposit and cost-brake recovery now persist one bounded wake batch per cause
-instead of writing and acknowledging a synchronization row for every job. An
-ordinary deposit with 100 healthy jobs needs five account row/alarm writes,
-including its ledger/balance, receipt, batch, wakeup and acknowledgement; recovery
-without a deposit needs three. Healthy jobs preserve settings and schedules.
-Balance recovery leaves budget/cost pauses intact; cost recovery leaves
-budget/balance pauses intact. Explicit definition edits and deletions retain their
-separate synchronization outboxes. Version checks prevent an older batch from
-acknowledging a newer deposit; partial delivery and acknowledgement failures replay
-after restart. Signed Stripe fulfillment acknowledges durable credit even when
-immediate wake delivery fails. Configuration replay also ignores property order
-rather than rewriting identical settings after completion. These are administrative
-savings; the conservative run bound and 85 µ$ price are unchanged.
-
-
-Retries refused by expired/revoked API keys or invalid input now discard their
-private outbox instead of waking an unreserved retry every second. HTTP cron
-schedules that require webhook input similarly pause once with one free history
-entry. Manual input refusals do not pause a schedule; deposits and cost recovery
-preserve input pauses. Correcting the action and saving its job resumes scheduling.
-Pause publication precedes the durable pause so an outage can retry from the due
-schedule without requiring a held run. These changes bound unpaid recovery work;
-the paid-run cost allowances and 85 µ$ base price are unchanged.
-
-Credential changes also retain their original billed responses. Key creation
-shares its existing key-record write; key revocation commits an intent receipt
-with the charge and revocation. Trigger intent and response share the permanent
-billing receipt before replying to JobDO, allowing recovery of a failed trigger
-write without changing its rate or charging again. Unchanged trigger replays
-skip job writes, including after revocation. Recovery at an exhausted delegated
-key cap remains possible for the already-paid identity; new changes still enforce
-the cap. Dry runs validate and quote current input without consuming a receipt.
-The existing change allowance and prices remain unchanged.
+These are conservative engineering estimates, not measured costs. L12's daily monitor
+compares measured Worker/DO totals plus a ledger allowance for Queue and sandbox usage, and
+brakes on missing or stale analytics. S3 recalibrates from real bills; S4 continues to lower
+the run bound. A price change applies to new reservations and quotes; existing holds keep
+their original maximum.
 
 ## Verified provider sources
 
@@ -332,45 +159,3 @@ beside these. Model choice remains Opus pending the owner-run 100-case compariso
 Fixed costs are the shared Workers Paid plan, domain, invite-only account overhead
 and bounded public/free traffic. No Workers for Platforms monthly plan is required.
 Verify actual domain/account bills and analytics schema during L14.
-
-
-Completed Queue redelivery now reads only its compact completion index. The
-private publication marker and retry outbox determine any remaining recovery
-without loading full retained logs or unchanged settings. Explicit result replays
-use the same path. Staged outcomes and legacy publication remain recoverable;
-claimed runs with no saved outcome stay pending. This removes repeated reads and
-log deserialization on each duplicate delivery without changing the conservative
-row-write/request allowances or the 85 µ$ run price.
-
-Scheduled dispatch no longer publishes its schedule advancement separately when it has
-just queued a fresh run: that run's settlement already writes the job's runtime row from
-the advanced settings, in the same account transaction. Duplicate, expired, refused and
-skipped dispatches still publish before advancing, so an alarm retried after a failed
-advancement publishes it itself. Until the run settles, the account's `next_fire` shows
-the due time of the run in progress. This removes one runtime row write and one DO request
-from the scheduled worst case. Remeasured on 2026-11-23 without the eviction allowance,
-the 456-path audit's worst run needs 36 writes (scheduled, refused budget retry, standalone
-hold, rollover, activity eviction), so the policy bound falls from 37 to 36 writes; the 27
-DO-request bound is set by manual runs and is unchanged.
-
-A retry refused by its budget no longer rearms the job twice: the pause's transaction already
-commits its resumption wakeup, and `start()` skips its own `arm()` when its caller (the alarm,
-or completion via `dispatchRetry`) arms once at the end of the same turn, as scheduled
-dispatch already did. That removes a +1 s alarm write the still-present retry outbox caused,
-and the same extra rearm from successful retries started at completion. The worst run is now
-35 writes, and the audit no longer grants activity eviction an extra write: the policy bound
-itself covers it. The rounded HTTP cost falls from 52 to 50 µ$ and the base HTTP/JS run price
-from 85 to 82 µ$ (89 µ$ for a DBA caller's first attempt, exactly at its floor).
-
-Retries are now reserved before their failed parent finalizes, instead of finalizing the
-parent with a retry outbox and clearing it after dispatch. The parent's pending row already
-holds the retry input; redelivery and the pending alarm settle idempotently and find the
-retry's deterministic id, so no outbox row is written or cleared. A budget or balance
-refusal commits the parent's final row and outcome in the pause's own transaction, so
-settings are written once. A retry that already finished keeps its outcome. Outbox rows
-written before this change are still dispatched and cleared. If the parent's final row
-fails after its retry was queued, that retry runs on delivery rather than after recovery.
-The worst run is now 33 writes (the refused-retry path loses two, successful retries one);
-the rounded HTTP cost falls from 50 to 48 µ$ and the run price from 82 to 79 µ$ (86 µ$ for
-a DBA caller's first attempt). Existing reservations keep their original maximum;
-persisted job quotes use the current price.

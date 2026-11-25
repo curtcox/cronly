@@ -384,7 +384,7 @@ Detailed derivation in [`docs/business/pricing.md`](../docs/business/pricing.md)
 | API reads with an API key | 21 µ$ + 2 µ$ per job scanned for aggregate history | ceil(12 µ$ + 1.2 µ$/job) |
 | Web UI reads, cron explain, quotes, dry runs | free, rate-limited | bounded fixed operating cost |
 
-  HTTP run charges for 30 days are $0.06120 for an hourly job and $3.6720 for a
+  HTTP run charges for 30 days are $0.05688 for an hourly job and $3.4128 for a
   minutely job. Changes, API polling, prose and JS activation are additional.
 - **Reservation rule:** an operation runs only after its maximum price is held. Max price is
   computable up front for every operation (runs: from the action's limits; prose: from
