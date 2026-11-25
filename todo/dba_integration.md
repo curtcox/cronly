@@ -5,10 +5,9 @@ user-facing reference is [`docs/devicebasedauth.md`](../docs/devicebasedauth.md)
 
 ## Progress
 
-All code steps are done and tested (acceptance records
-[2026-11-18](../docs/acceptance/2026-11-18.md) and [2026-11-22](../docs/acceptance/2026-11-22.md)),
-at parity with hashbin S24/S25. The owner steps below and the remaining follow-ups are left.
-When both are done, `git mv` this file to `done/`.
+All code is done, tested against a fake issuer (`test-utils/dba-issuer.js`) and deployed, at
+parity with hashbin S24/S25. What is left is the owner steps below and the follow-ups. When both
+are done, `git mv` this file to `done/`.
 
 ## Intent
 
@@ -75,42 +74,35 @@ that keeps DBA reads and runs above the floor. Details: `docs/business/pricing.m
 
 ## Owner steps (ops)
 
-1. ~~Deploy~~ (done 2026-11-23, `bbebdde`): migrations `v3` (`DbaLinkDO`) and `v4` (`DbaRevocationsDO`, `DbaReplayCacheDO`) are in
-   both wrangler configs. Add all three namespaces' IDs to `CRONLY_DO_NAMESPACES` (CI variable,
-   deployed as `COST_SAFETY_DO_NAMESPACES`) so the cost monitor counts them.
-2. `DBA_ISSUER` is a plain `[vars]` entry (`https://devicebasedauth.org`, also the default). For
-   local work, run DBA's `dev:local` on another port and set it in `wrangler.local.toml`; DBA's
-   local issuer must register `http://localhost:8787/auth/dba/callback` for client `cronly.org`.
-3. At devicebasedauth.org, as the cronly.org audience owner: confirm audience `cronly.org`,
-   namespace `cronly`, redirect URI `https://cronly.org/auth/dba/callback` (confirmed from the
-   public audience record 2026-11-23); set the revocation
-   webhook to `https://cronly.org/api/dba/events` and send a test event.
-4. ~~Optional: set the `DBA_RTT_SECRET` GitHub secret~~ (done 2026-11-23, production environment;
-   CI pushes it) so grants with latency rules can be timed.
-5. Fund the cronly operator account at DBA (link sign-ins and online decisions are billed).
-6. Optional: create a DBA API key for the cronly.org audience and set the `DBA_API_KEY` GitHub
+Already done: migrations `v3` (`DbaLinkDO`) and `v4` (`DbaRevocationsDO`, `DbaReplayCacheDO`)
+are deployed; `DBA_RTT_SECRET` is set in GitHub's production environment; DBA's public audience
+record names audience `cronly.org`, namespace `cronly` and redirect URI
+`https://cronly.org/auth/dba/callback`. `DBA_ISSUER` is a plain `[vars]` entry
+(`https://devicebasedauth.org`, also the default).
+
+1. Add the three DBA namespaces' IDs to `CRONLY_DO_NAMESPACES` (CI variable, deployed as
+   `COST_SAFETY_DO_NAMESPACES`) and redeploy, so the cost monitor counts them.
+2. At devicebasedauth.org, as the cronly.org audience owner, set the revocation webhook to
+   `https://cronly.org/api/dba/events` and send a test event.
+3. Fund the cronly operator account at DBA (link sign-ins and online decisions are billed).
+4. Optional: create a DBA API key for the cronly.org audience and set the `DBA_API_KEY` GitHub
    secret (CI pushes it) to enable online-only grants; without it they answer `online_required`.
-7. Optional "Stage A" sign-in: register devicebasedauth.org as a custom OIDC provider in the
+5. Optional "Stage A" sign-in: register devicebasedauth.org as a custom OIDC provider in the
    cronly Clerk application (discovery `https://devicebasedauth.org/.well-known/openid-configuration`,
    client `cronly.org`, PKCE, scopes `openid profile`). The result is an ordinary Clerk session;
    it needs a Clerk plan with custom providers (DBA decision D7).
-8. Live acceptance: link a real DBA account (100 µ$), `dba enroll --aud cronly.org --action
-   cronly:read`, `dba curl https://cronly.org/api/account` and check the 28 µ$ read; revoke the
-   device at DBA and confirm 401 within 30 seconds (webhook) or a minute (status list).
+6. Live acceptance: link a real DBA account (100 µ$), `dba enroll --aud cronly.org --action
+   cronly:read`, `dba curl https://cronly.org/api/account` and check the 28 µ$ read; sign in to
+   the workspace with the device; revoke the device at DBA and confirm 401 within 30 seconds
+   (webhook) or a minute (status list). Record it in `docs/acceptance/`.
+
+For local work, run DBA's `dev:local` on another port and set `DBA_ISSUER` in
+`wrangler.local.toml`; DBA's local issuer must register `http://localhost:8787/auth/dba/callback`
+for client `cronly.org`.
 
 ## Follow-ups
 
 - Timed challenges for grants scoped to `resources` and for latency grants DBA decides online
   (verifyOnline sends no `rtt_ms`); both are refused today.
-- Upstream (devicebasedauth.org `frontend/_headers`): `/sdk/:version/*` repeats the
-  `Access-Control-Allow-Origin: *` that `/sdk/*` already sets, so versioned SDK files are served
-  with `*, *` and browsers refuse them as cross-origin module scripts. cronly vendors the SDK, so
-  it is unaffected. Fixed upstream in device-based-auth `677422c` (L4, pushed 2026-11-23);
-  confirm `curl -sI https://devicebasedauth.org/sdk/v1.4.0/dba.js` shows a single `*`.
 - Named address lists (DBA B10 N3) and relay routes: refresh the vendored verifier once DBA ships
   them, and pass `address_lists` / `route` into `decide`.
-- Done since 2026-11-18: Stage B device sign-in in the workspace (2026-11-23); verifier refreshed to `829d033` with `net.client` address rules (CIDR and
-  DNS, and latency by timed DPoP challenges, 2026-11-23); resource-scoped grants (`job:<name>`, 2026-11-23); retries stop for
-  revoked credentials; online authorization; device sessions; webhook and shared replay cache;
-  upstream fixes (OIDC caches only successful responses, per-namespace caps now computed here,
-  `inflate` bounds while streaming).

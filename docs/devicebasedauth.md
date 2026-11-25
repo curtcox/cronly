@@ -110,8 +110,7 @@ sign-in).
   `frontend/vendor/devicebasedauth.js` and pinned by its SRI hash
   (`src/vendor/devicebasedauth.test.js`). It is served from cronly's own origin and loaded only
   when a device session is in use or offered, so the workspace never depends on
-  devicebasedauth.org serving it (versioned SDK paths there answered
-  `Access-Control-Allow-Origin: *, *` until device-based-auth `677422c`).
+  devicebasedauth.org serving it.
 
 ## Browser apps on any site
 
