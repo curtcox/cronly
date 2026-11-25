@@ -21,6 +21,7 @@ npm run lint
 npm test
 npm run test:e2e
 npm run test:local       # with the local server running
+npm run check:file-sizes
 npm run docs:generate   # after changing routes or releasing the SDK
 ```
 
