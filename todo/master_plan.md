@@ -11,7 +11,7 @@ subscription), integer money, and an API built for scripts and agents. Where has
 something already (deposits, card fee wording, local mode, route access table), cronly reuses
 the decision and the code rather than reopening it.
 
-Written 2026-11-15. Status of every item lives in [`STATUS.md`](../STATUS.md); this file holds
+Status of every item lives in [`STATUS.md`](../STATUS.md); this file holds
 the design. Pricing numbers and their derivation live in
 [`docs/business/pricing.md`](../docs/business/pricing.md).
 
@@ -112,7 +112,7 @@ Runs start within a few seconds of the scheduled minute; the docs say so plainly
            │ secrets/jobs   │     │ Queue: runs    │
            │ API keys       │     └───────┬────────┘
            │ audit log      │     ┌───────▼────────────────┐
-           └────────────────┘     │ executor Worker        │
+           └────────────────┘     │ executor (queue)       │
                                   │ HTTP: fetch directly   │
                                   │ JS: sandboxed isolate ─┼──▶ outbound gateway ──▶ internet
                                   └────────────────────────┘
@@ -128,7 +128,7 @@ Runs start within a few seconds of the scheduled minute; the docs say so plainly
 - **Runs go through a Queue** so no Durable Object stays awake while an outbound request
   waits. Durable Objects bill wall-clock duration; Workers bill CPU. A 30 s fetch held in a DO
   would cost ~47 µ$ — more than the price of a run.
-- **Executor Worker** consumes the queue, renders the template (secrets decrypted only here,
+- **The executor** (the same Worker's queue handler) consumes the queue, renders the template (secrets decrypted only here,
   only for this run), performs the action, redacts secrets from what it logs, and reports the
   result to the JobDO, which asks the AccountDO to settle.
 - **Cron Triggers are not used for customer schedules** (Cloudflare allows only a few per
@@ -198,7 +198,7 @@ On-demand runs (UI, API, webhook) enter at step 2 with a fresh run id.
 
 User code must run in an isolate that has **no bindings** except the values cronly passes,
 with **enforced CPU and subrequest limits**, and whose outbound traffic goes through a
-cronly-controlled gateway Worker that counts subrequests, enforces the destination rules in §8,
+cronly-controlled gateway (the `OutboundGateway` entrypoint) that counts subrequests, enforces the destination rules in §8,
 and strips cronly's own hosts.
 
 **Selected in D2/L10: Dynamic Worker Loader.** Each account/action version has a
@@ -356,7 +356,8 @@ conventions, including `escapeHtml`).
   application quote and an Apply button. Show the prose charge separately; a delayed reply
   must not replace a later Ask visit, and no-op proposals need no Apply button.
 - **Account:** deposits (Stripe Checkout), transaction history, API keys (scopes, spend caps),
-  trigger tokens, data export.
+  trigger tokens, data export, and the devicebasedauth.org link (S5). A workspace signed in
+  with a DBA device session hides key and link management.
 - Public pages: home, pricing (with our cost beside each price), docs, API, agents, terms,
   privacy.
 
@@ -435,24 +436,25 @@ cronly makes outbound requests on a schedule, so it can be pointed at someone el
 - Terms: acceptable use (no unsolicited load, no attacks, no scraping against robots/ToS),
   suspension policy, refunds.
 
-## 9. Repository layout (planned)
+## 9. Repository layout
 
 ```
 src/
   index.js              fetch/queue/scheduled handlers, API_ROUTES, DO exports
-  api/                  account, actions, variables, secrets, jobs, runs, costs, prose, payments, hooks, mcp
-  auth/                 clerk, api keys, scopes, trigger tokens, local auth (ported from hashbin)
-  durable-objects/      account-do.js, job-do.js
-  executor/             queue consumer, http action, js action, template render, redaction
-  services/             cron (croner/cronstrue wrappers), projection, llm client
-  utils/                cost-policy.js, pricing.js, llm-policy.js, money.js
-workers/
-  outbound-gateway/     egress for JS actions
-frontend/               static site, no build
-  js/ css/ docs/ sdk/
-docs/                   operator and developer guides; docs/business/ for pricing and risk
+  platform.js           deployed entry: re-exports index.js plus the OutboundGateway entrypoint for JS
+  api/                  definitions, jobs, reporting, prose, payments, config, mcp, dba link and events
+  auth/                 Clerk, API keys, scopes, trigger tokens, local auth, devicebasedauth.org
+  durable-objects/      AccountDO (money, definitions, keys), JobDO (alarm, runs), SafetyDO, DBA link/revocations
+  executor/             queue consumer, HTTP and JS actions, templates, destinations, redaction, secrets
+  services/             cron, reporting/projection, llm client, OpenAPI, cost monitor, config
+  utils/                cost-policy.js, pricing.js, llm-policy.js, errors, rpc
+  vendor/devicebasedauth/  DBA verifier, vendored unmodified
+frontend/               static site, no build: js/ css/ docs/ sdk/ vendor/
+tests/                  Playwright browser specs
+test-utils/             in-memory DO storage, fake DBA issuer
+docs/                   ops guides, pricing, acceptance records, operator profile, DBA reference
 todo/ done/             plans
-scripts/                operator CLIs, doc generators, API tests
+scripts/                deploy, verification, secret rotation, eval, doc and legal generators, file-size check
 ```
 
 ## 10. Build order

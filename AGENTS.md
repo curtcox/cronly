@@ -22,7 +22,7 @@ rather than rewriting it.
 | Why something finished was built the way it was | `done/<plan>.md` |
 | Evidence that a row was accepted (dated records) | [`docs/acceptance/`](docs/acceptance/README.md) |
 
-## Conventions (planned; enforce them from L1)
+## Conventions
 
 - **JavaScript:** ES modules, async/await, JSDoc on exported functions. Files kebab-case,
   classes PascalCase. Comments explain *why*.
