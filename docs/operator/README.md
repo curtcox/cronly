@@ -1,12 +1,11 @@
 # Operator profile snapshot (D7, L13)
 
-The owner approved placeholders on 2026-11-16. `profile.json` is the offline snapshot
-for cronly's marked legal-page fields. Unknown facts and the shared repository's
-location/revision remain `null`; the generated pages display bracketed placeholders.
-Do not substitute example businesses, suggested jurisdictions or guessed mailboxes.
-The owner-confirmed `support@cronly.org` address was provisioned on 2026-11-17;
-its [routing configuration](../ops/support-email.md) is tracked separately. The
-privacy contact and common operator facts remain unknown.
+`profile.json` is the offline snapshot for cronly's marked legal-page fields. The owner
+approved placeholders until the facts are known: unknown facts and the shared repository's
+location/revision are `null`, and the generated pages show bracketed placeholders. Do not
+substitute example businesses, suggested jurisdictions or guessed mailboxes. Today only
+`support@cronly.org` is filled in ([routing](../ops/support-email.md)); the privacy contact and
+the common operator facts are unknown.
 
 `profile.schema_version` is 1. `profile.operator` contains the common legal name,
 postal address, governing jurisdiction and dispute venue with no per-app overrides.

@@ -2,17 +2,15 @@
 
 ## Intent
 
-The owner said on 2026-11-16 to reuse hashbin.org's legal entity and jurisdiction for
-cronly, with separate email contacts, and suggested a shared home for this information
-as more apps are added. Prefer a small dedicated repository containing public business
-facts. The repository location and outstanding facts are pending owner input.
-The owner approved using placeholders for now on 2026-11-16.
+The owner wants cronly to reuse hashbin.org's legal entity and jurisdiction, with separate
+email contacts, and a shared home for these facts as more apps are added: preferably a small
+dedicated repository of public business facts. Its location and the facts themselves await the
+owner; placeholders are approved until then.
 
-## What has been verified
+## What hashbin has (last checked 2026-11-16)
 
-Checked both the sibling checkout and current GitHub `main` on 2026-11-16. The local
-checkout is behind its remote-tracking branch, so use current remote sources when
-resolving the remaining details:
+Re-check current hashbin `main` on GitHub (not a local checkout, which may be behind) before
+relying on this:
 
 - [Hashbin STATUS L21](https://github.com/curtcox/hashbin.org/blob/main/STATUS.md)
   still marks entity formation as not started. Its recommendation is a Missouri
