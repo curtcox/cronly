@@ -67,8 +67,8 @@ first and online (with the resource) only when nothing cheaper allowed the route
 
 ### Prices
 
-DBA bills cronly.org 14 µ$ per online decision and per OIDC sign-in, and verifying a credential
-costs cronly 3.64 µ$. Owner decisions 2026-11-22: pass decisions on (`dbaDecision`, 56 µ$, held
+DBA bills cronly.org 15 µ$ per online decision and per OIDC sign-in, and verifying a credential
+costs cronly 3.64 µ$. Owner decisions 2026-11-22: pass decisions on (`dbaDecision`, 58 µ$, held
 first) and charge a change when a link starts. D5/D6 cover the `dbaRequest` surcharge (7 µ$)
 that keeps DBA reads and runs above the floor. Details: `docs/business/pricing.md`.
 

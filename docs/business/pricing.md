@@ -15,8 +15,8 @@ plan defer to this file.
 | Change: action, variable, secret (including key rotation), job, key, trigger | 100 µ$ | 20 µ$ |
 | API-key read | 21 µ$ base + 2 µ$ per job scanned for aggregate history | ceil(12 µ$ base + 1.2 µ$/job) |
 | devicebasedauth.org credential: read or first-attempt run | API-key price + 7 µ$ (reads 28 µ$ base, HTTP runs 86 µ$) | API-key bound + 3.64 µ$ verification |
-| devicebasedauth.org online decision | 56 µ$ per decision, allowed or not | 34 µ$ (14 µ$ DBA charge + change-sized hold) |
-| devicebasedauth.org link start | 100 µ$ (a change); finish and unlink free | 34 µ$ (14 µ$ DBA sign-in charge + change) |
+| devicebasedauth.org online decision | 58 µ$ per decision, allowed or not | 35 µ$ (15 µ$ DBA charge + change-sized hold) |
+| devicebasedauth.org link start | 100 µ$ (a change); finish and unlink free | 35 µ$ (15 µ$ DBA sign-in charge + change) |
 | Web session reads, cron explain, quotes, mutation dry runs | Free, rate-limited | Bounded fixed operating cost |
 | JavaScript run | 79 µ$ + ceil(0.05 × CPU-ms limit) + 5 µ$ × allowed subrequests | base + configured CPU + counted gateway |
 | JS daily activation | 3,300 µ$ on first invocation of each action version per UTC day | 2,000 µ$ provider activation |
@@ -63,8 +63,8 @@ read after one challenge is 35 µ$ (bound 1.5 × 20 / 0.92 = 32.6) and passes th
 count; changes (100 µ$ vs. 41.84 µ$ at six verifications) and prose absorb it. Challenges a device
 abandons are unpaid, like any refused request.
 
-DBA bills cronly.org 14 µ$ for each online decision (including denials) and each OIDC
-sign-in. The owner chose to pass both on (2026-11-22): `dba_decision` (56 µ$) is held under the
+DBA bills cronly.org 15 µ$ for each online decision (including denials) and each OIDC
+sign-in. The owner chose to pass both on (2026-11-22): `dba_decision` (58 µ$) is held under the
 credential's monthly cap before DBA is asked, charged once DBA answers and released when it
 cannot (5xx, unfunded, unreachable). Starting a link charges a change before cronly asks DBA.
 

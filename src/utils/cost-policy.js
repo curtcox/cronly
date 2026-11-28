@@ -10,7 +10,7 @@ export const COST_POLICY = Object.freeze({
   runRowWrites: 33, runDoRequests: 27, runWorkerRequests: 5,
   // devicebasedauth.org (its docs/business/pricing.md): online decisions and OIDC sign-ins are
   // billed to cronly as the cronly.org audience owner, including denials.
-  dbaDecision: 14, dbaLogin: 14,
+  dbaDecision: 15, dbaLogin: 15,
   // Verifying one DBA-authenticated request beyond an API key's cost: the DbaLinkDO lookup, the
   // shared DPoP replay claim (DO request, row write and its later delete), the account's
   // credential row (a write when it changes), the pushed-revocations read and ECDSA CPU.
