@@ -149,7 +149,7 @@ account's own sign-in only.
 See [`docs/business/pricing.md`](business/pricing.md): reads and first-attempt runs by a DBA
 caller add `dbaRequest` (7 µ$) for verifying the credential, once more per timed challenge
 answered (at most 5); an online decision is `dbaDecision`
-(56 µ$); starting a link is a change (100 µ$).
+(58 µ$); starting a link is a change (100 µ$).
 
 ## Operating it
 
